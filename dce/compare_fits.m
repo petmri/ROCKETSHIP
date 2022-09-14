@@ -99,7 +99,7 @@ set(get(gca,'Children'),'ButtonDownFcn', @mouseClick);
                 plot_data.show_ci = show_ci;
                 plot_data.title = [fit_data.model_name ' at Voxel Location (' num2str(image_x) ',' num2str(image_y) ',' num2str(image_z) ')'];
 
-                if strfind(fit_data.model_name,'t1_fa')
+                if (contains(fit_data.model_name,'t1_fa') || contains(fit_data.model_name,'t1_b1_fa'))
                     plot_data.tr = xdata{1}.tr;
                 end
                 

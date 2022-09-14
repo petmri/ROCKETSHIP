@@ -43,6 +43,10 @@ elseif(strcmp(plot_data.model_name,'t2_exponential_plus_c'))
     fit_curve = exp(-xdata_curve./fit_parameters(1)).*fit_parameters(2)+fit_parameters(7);
     fit_curve_low = exp(-xdata_curve./fit_parameters(4)).*fit_parameters(2)+fit_parameters(8);
     fit_curve_high = exp(-xdata_curve./fit_parameters(5)).*fit_parameters(2)+fit_parameters(9);
+elseif(strcmp(plot_data.model_name,'t1_b1_fa_fit'))
+    fit_curve = fit_parameters(2).*( (1-exp(-plot_data.tr/fit_parameters(1))).*sind(fit_parameters(7)*xdata_curve) )./( 1-exp(-plot_data.tr/fit_parameters(1)).*cosd(fit_parameters(7)*xdata_curve) );
+    fit_curve_low = fit_parameters(2).*( (1-exp(-plot_data.tr/fit_parameters(4))).*sind(fit_parameters(8)*xdata_curve) )./( 1-exp(-plot_data.tr/fit_parameters(4)).*cosd(fit_parameters(8)*xdata_curve) );
+    fit_curve_high = fit_parameters(2).*( (1-exp(-plot_data.tr/fit_parameters(5))).*sind(fit_parameters(9)*xdata_curve) )./( 1-exp(-plot_data.tr/fit_parameters(5)).*cosd(fit_parameters(9)*xdata_curve) );
 elseif(strcmp(plot_data.model_name, 'user_input'))
 %     [PATHSTR,NAME,~] = fileparts(userfile);
 %     userFN = str2func(NAME);
@@ -93,14 +97,22 @@ elseif(strcmp(plot_data.model_name,'t1_tr_fit') ||...
     plot_str(1) = {[' T_1 = ' num2str(fit_parameters(1),4) '±' num2str(parameter1_error,2)]};
     plot_str(2) = {[' r^2 = ' num2str(fit_parameters(3),2)]};
     plot_str(3) = {[' residual = ' num2str(fit_parameters(6))]};
+elseif( strcmp(plot_data.model_name,'t1_b1_fa_fit') )
+    plot_str(1) = {[' T_1 = ' num2str(fit_parameters(1),4) '±' num2str(parameter1_error,2)]};
+    plot_str(2) = {[' B_1 = ' num2str(fit_parameters(7),3)]};
+    plot_str(3) = {[' r^2 = ' num2str(fit_parameters(3),2)]};
+    plot_str(4) = {[' residual = ' num2str(fit_parameters(6))]};
 elseif(strcmp(plot_data.model_name,'t2_exponential_plus_c'))
     plot_str(1) = {[' T_2 = ' num2str(fit_parameters(1),3) '±' num2str(parameter1_error,2)]};
     plot_str(2) = {[' r^2 = ' num2str(fit_parameters(3),4)]};
     plot_str(3) = {[' residual = ' num2str(fit_parameters(6),3)]};
     plot_str(4) = {[' C = ' num2str(fit_parameters(7),3)]};
 elseif(strcmp(plot_data.model_name, 'user_input'))
+    plot_str(1) = {[' ']};
 elseif(strcmp(plot_data.model_name,'none'))
+    plot_str(1) = {[' ']};
 else
+    plot_str(1) = {[' ']};
 end
 text(plot_limits(1),plot_limits(3),plot_str,...
     'Color', 'black',...

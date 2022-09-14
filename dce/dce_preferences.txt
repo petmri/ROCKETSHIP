@@ -1,7 +1,7 @@
 % GPU options
 %%%%%%%%%%%%%%%%%%%%%%
 % Requires NVIDIA GPU, and GPUFit library
-gpu_use = 1
+gpu_use = 0
 gpu_tolerance = 1e-6
 gpu_max_n_iterations = 50
 
@@ -34,8 +34,8 @@ aif_Robust = off
 
 % Voxel fitting options
 %%%%%%%%%%%%%%%%%%%%%%%
-voxel_lower_limit_ktrans = 10^-7
-voxel_upper_limit_ktrans = 2
+voxel_lower_limit_ktrans = -Inf
+voxel_upper_limit_ktrans = Inf
 voxel_initial_value_ktrans = 0.0002
 
 voxel_lower_limit_ve = 0.02
