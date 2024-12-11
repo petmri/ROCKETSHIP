@@ -299,7 +299,7 @@ elseif strcmp(model, 'tissue_uptake')
         Ct_single = single(Ct_data);
         
         % Execute GPU fit
-        [parameters, states, chi_squares, n_iterations, time] = gpufit_constraints(Ct_single,constraints_single,[],model_id,init_param_single,tolerance, max_n_iterations,[],estimator_id,indie_vars);
+        [parameters, states, chi_squares, n_iterations, time] = gpufit_constrained(Ct_single,[],model_id,init_param_single,constraints_single,constraint_type,tolerance, max_n_iterations,[],estimator_id,indie_vars);
         %[parameters, states, chi_squares, n_iterations, time] = gpufit(Ct_single,[],model_id,init_param_single,tolerance, max_n_iterations,[],estimator_id,indie_vars);
         state_0 = numel(states(states==0));
         state_1 = numel(states(states==1));
@@ -429,7 +429,7 @@ elseif strcmp(model, 'tofts')
         Ct_single = single(Ct_data);
         
         % Execute GPU fit
-        [parameters, states, chi_squares, n_iterations, time] = gpufit_constraints(Ct_single,constraints_single,[],model_id,init_param_single,tolerance, max_n_iterations,[],estimator_id,indie_vars);
+        [parameters, states, chi_squares, n_iterations, time] = gpufit_constrained(Ct_single,[],model_id,init_param_single,constraints_single,constraint_type,tolerance, max_n_iterations,[],estimator_id,indie_vars);
         
         % If did not converge discard values
         one_parameter = parameters(1,:);
@@ -954,7 +954,7 @@ elseif strcmp(model, '2cxm')
         Ct_single = single(Ct_data);
         
         % Execute GPU fit
-        [parameters, states, chi_squares, n_iterations, time] = gpufit_constraints(Ct_single,constraints_single,[],model_id,init_param_single,tolerance, max_n_iterations,[],estimator_id,indie_vars);
+        [parameters, states, chi_squares, n_iterations, time] = gpufit_constrained(Ct_single,[],model_id,init_param_single,constraints_single,constraint_type,tolerance, max_n_iterations,[],estimator_id,indie_vars);
         
         % If did not converge discard values
         one_parameter = parameters(1,:);
