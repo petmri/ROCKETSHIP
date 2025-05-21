@@ -25,8 +25,8 @@ function run_dce_cli(subject_source_path, subject_tp_path)
     LUT = 1;
 
     % type casts
-    noise_pathpick = str2num(script_prefs.noise_pathpick);
-    noise_pixsize = str2num(script_prefs.noise_pixsize);
+    noise_pathpick = str2double(script_prefs.noise_pathpick);
+    noise_pixsize = str2double(script_prefs.noise_pixsize);
     
     % gather filenames
     tmp = dir(strcat(subject_tp_path, script_prefs.dynamic_files));
@@ -55,9 +55,9 @@ function run_dce_cli(subject_source_path, subject_tp_path)
         drift_files = '';
     end
 
-    quant = str2num(script_prefs.quant);
-    roimaskroi = str2num(script_prefs.roimaskroi);
-    aifmaskroi = str2num(script_prefs.aifmaskroi);
+    quant = str2double(script_prefs.quant);
+    roimaskroi = str2double(script_prefs.roimaskroi);
+    aifmaskroi = str2double(script_prefs.aifmaskroi);
     time_resolution = str2double(script_prefs.time_resolution);
     relaxivity = str2double(script_prefs.relaxivity);
     force_use_default_relaxivity = str2double(script_prefs.force_use_default_relaxivity);
@@ -90,19 +90,24 @@ function run_dce_cli(subject_source_path, subject_tp_path)
         if isfield(json, 'NumberOfAverages')
             time_resolution = time_resolution * json.NumberOfAverages;
         end
-
-        if isfield(json, 'AcquisitionDateTime') && ~force_use_default_relaxivity
-            date = json.AcquisitionDateTime;
-            inputDateTime = datetime(date, 'InputFormat', 'yyyy-MM-dd''T''HH:mm:ss.SSSSSS');
-            inputDate = dateshift(inputDateTime, 'start', 'day');
-            contrastChangeDate = datetime('2017-10-01');
-            if inputDate < contrastChangeDate
-                % assume magnevist
-                relaxivity = 3.8;
-            elseif inputDate >= contrastChangeDate
-                % assume dotarem
-                relaxivity = 3.4;
+        site = json.InstitutionName;
+        if contains(site, 'USC')
+            if isfield(json, 'AcquisitionDateTime') && ~force_use_default_relaxivity
+                date = json.AcquisitionDateTime;
+                inputDateTime = datetime(date, 'InputFormat', 'yyyy-MM-dd''T''HH:mm:ss.SSSSSS');
+                inputDate = dateshift(inputDateTime, 'start', 'day');
+                contrastChangeDate = datetime('2017-10-01');
+                if inputDate < contrastChangeDate
+                    % assume MultiHance
+                    relaxivity = 5.7;
+                elseif inputDate >= contrastChangeDate
+                    % assume Dotarem
+                    relaxivity = 3.4;
+                end
             end
+        else
+            % assume Dotarem
+            relaxivity = 3.4;
         end
         fa = json.FlipAngle;
     else
@@ -110,13 +115,13 @@ function run_dce_cli(subject_source_path, subject_tp_path)
         fa = str2double(script_prefs.fa); 
     end
     hematocrit = str2double(script_prefs.hematocrit);
-    snr_filter = str2num(script_prefs.snr_filter);
-    injection_time = str2num(script_prefs.injection_time);
-    drift_global = str2num(script_prefs.drift_global);
-    blood_t1 = str2num(script_prefs.blood_t1);
-    injection_duration = str2num(script_prefs.injection_duration);
-    start_t = str2num(script_prefs.start_t);
-    end_t = str2num(script_prefs.end_t);
+    snr_filter = str2double(script_prefs.snr_filter);
+    injection_time = str2double(script_prefs.injection_time);
+    drift_global = str2double(script_prefs.drift_global);
+    blood_t1 = str2double(script_prefs.blood_t1);
+    injection_duration = str2double(script_prefs.injection_duration);
+    start_t = str2double(script_prefs.start_t);
+    end_t = str2double(script_prefs.end_t);
 
     % convert tr to ms
     tr = tr * 1000;
@@ -164,14 +169,14 @@ function run_dce_cli(subject_source_path, subject_tp_path)
         'fileorder', 'aif_rr_type'});
 
     % type casts
-    start_time = str2num(script_prefs.start_time);
-    end_time = str2num(script_prefs.end_time);
-    auto_find_injection = str2num(script_prefs.auto_find_injection);
-    start_injection = str2num(script_prefs.start_injection);
-    end_injection = str2num(script_prefs.end_injection);
-    aif_type = str2num(script_prefs.aif_type);
+    start_time = str2double(script_prefs.start_time);
+    end_time = str2double(script_prefs.end_time);
+    auto_find_injection = str2double(script_prefs.auto_find_injection);
+    start_injection = str2double(script_prefs.start_injection);
+    end_injection = str2double(script_prefs.end_injection);
+    aif_type = str2double(script_prefs.aif_type);
     import_aif_path = script_prefs.import_aif_path;
-    timevectyn = str2num(script_prefs.timevectyn);
+    timevectyn = str2double(script_prefs.timevectyn);
     timevectpath = script_prefs.timevectpath;
 
     % convert time resolution into minutes
@@ -195,8 +200,15 @@ function run_dce_cli(subject_source_path, subject_tp_path)
         catch L
             disp("RUNB failed. Repeating in case of bad read...")
             disp(L.message)
-            if strcmp(L.message, "Index exceeds the number of array elements. Index must not exceed 0.")
-                start_t = start_t - 1;
+            if strcmp(L.message, "Index exceeds the number of array elements. Index must not exceed 0.") ...
+                    || strcmp(L.identifier,'AIFbiexpcon:No_Baseline') ...
+                    || strcmp(L.identifier, 'curvefit:fittype:invalidExpression')
+                if start_t > 2
+                    start_t = start_t - 1;
+                else
+                    disp('Not enough baseline acquisitions.')
+                    return;
+                end
                 [A_results, A_vars, errormsg] = A_make_R1maps_func(filevolume, noise_pathpick, ...
                 noise_pixsize, LUT, dynamic_files, aif_files, ...
                 roi_files, t1map_files, noise_files, drift_files, ...
@@ -220,22 +232,22 @@ function run_dce_cli(subject_source_path, subject_tp_path)
         'fit_voxels', 'outputft'});
 
     % type casts
-    dce_model.tofts = str2num(script_prefs.tofts);
-    dce_model.ex_tofts = str2num(script_prefs.ex_tofts);
-    dce_model.fxr = str2num(script_prefs.fxr);
-    dce_model.auc = str2num(script_prefs.auc);
-    dce_model.nested = str2num(script_prefs.nested);
-    dce_model.patlak = str2num(script_prefs.patlak);
-    dce_model.tissue_uptake = str2num(script_prefs.tissue_uptake);
-    dce_model.two_cxm = str2num(script_prefs.two_cxm);
-    dce_model.FXL_rr = str2num(script_prefs.FXL_rr);
+    dce_model.tofts = str2double(script_prefs.tofts);
+    dce_model.ex_tofts = str2double(script_prefs.ex_tofts);
+    dce_model.fxr = str2double(script_prefs.fxr);
+    dce_model.auc = str2double(script_prefs.auc);
+    dce_model.nested = str2double(script_prefs.nested);
+    dce_model.patlak = str2double(script_prefs.patlak);
+    dce_model.tissue_uptake = str2double(script_prefs.tissue_uptake);
+    dce_model.two_cxm = str2double(script_prefs.two_cxm);
+    dce_model.FXL_rr = str2double(script_prefs.FXL_rr);
     dce_model.fractal = 0;
 
-    time_smoothing_window = str2num(script_prefs.time_smoothing_window);
-    xy_smooth_size = str2num(script_prefs.xy_smooth_size);
-    number_cpus = str2num(script_prefs.number_cpus);
-    fit_voxels = str2num(script_prefs.fit_voxels);
-    outputft = str2num(script_prefs.outputft);
+    time_smoothing_window = str2double(script_prefs.time_smoothing_window);
+    xy_smooth_size = str2double(script_prefs.xy_smooth_size);
+    number_cpus = str2double(script_prefs.number_cpus);
+    fit_voxels = str2double(script_prefs.fit_voxels);
+    outputft = str2double(script_prefs.outputft);
 
     if (~isempty(script_prefs.roi_list))
         roi_list = split(script_prefs.roi_list);

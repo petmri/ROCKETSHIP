@@ -75,16 +75,21 @@ injection_time = -2
 
 % r1 relaxivity (in mM^-1*sec^-1) of contrast agent
 % if AcquisitionDateTime field exists in json, CLI auto determines for this study:
-% pre-Oct 2017 assumes magnevist
+% pre-Oct 2017 assumes MultiHance
 % post-Oct 2017 assumes dotarem
 % Shen 2015: https://journals.lww.com/investigativeradiology/fulltext/2015/05000/t1_relaxivities_of_gadolinium_based_magnetic.4.aspx
-% dotarem 3T, human blood = 3.43 +- 0.29, 3.19 +- 0.4 [3.4 +- 0.4]
-% magnevist 3T, human blood = 3.76 +- 0.17, 3.34 +- 0.19 [3.8 +- 0.2]
+% dotarem 3T, human blood = 3.43 ± 0.29, 3.19 ± 0.4 [3.4 ± 0.4]
+% magnevist 3T, human blood = 3.76 ± 0.17, 3.34 ± 0.19 [3.8 ± 0.2]
+% MH 3T - https://journals.lww.com/investigativeradiology/fulltext/2015/05000/t1_relaxivities_of_gadolinium_based_magnetic.4.aspx
+% https://www.bracco.com/sites/default/files/2022-10/kr-en-2016-04-30-brochure-the-strenght-of-relaxivity-multihance.pdf
+% https://journals.lww.com/investigativeradiology/fulltext/2006/03000/relaxivity_of_gadopentetate_dimeglumine.3.aspx
+% https://appliedradiology.com/articles/mri-contrast-selection-greater-stability-or-higher-relaxivity
+% MultiHance 3T, human blood = 5.4 ± 0.3 (2015; appliedradiology.com), 5.9 ± 0.4, <6ish (bracco), 6.3 ± 0.4 (2006, <1 mM), 6.3 (mriquestions.com)
 % Szomolanyi 2019: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6738537/
-% dotarem 3T, human blood - 2.72 +- 0.17
-% magnevist 3T, human blood - 3.3 +- 0.2
+% dotarem 3T, human blood - 2.72 ± 0.17
+% magnevist 3T, human blood - 3.3 ± 0.2
 relaxivity = 2.8
-% set below to 1 if you wish to use your own with the CLI command.
+% set below to 1 if you wish to use the value above with the CLI command.
 force_use_default_relaxivity = 0
 
 % boolean value, perform drift correction globally,
