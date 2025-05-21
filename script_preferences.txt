@@ -127,7 +127,7 @@ time_resolution = 15.36
 
 % raw = 2, fitted = 1, import = 3, raw for reference region
 aif_type = 1
-    import_aif_path = 
+   import_aif_path =
 
 % bool to use manual time vector
 timevectyn = 0

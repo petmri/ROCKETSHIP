@@ -178,7 +178,7 @@ else
 end
 fprintf('************** End User Input **************\n\n\n');
 disp('Starting Part A Processing')
-disp(datestr(now))
+disp(datetime)
 disp(' ');
 tic
 
@@ -791,7 +791,7 @@ end
 
 AB = A./B;
 
-[AB T1TUM tumind BADspaceAB GOODspaceAB] = cleanAB(AB, T1TUM,tumind, 'Tumor', min(numel(T1TUM)), 0.7, quant);
+[AB, T1TUM, tumind, BADspaceAB, GOODspaceAB] = cleanAB(AB, T1TUM,tumind, 'Tumor', min(numel(T1TUM)), 0.7, quant);
 if numel(T1TUM)==0
     error('Error all voxels removed due to bad/negative values, check ROI, T1 values, and image quality');
 end
@@ -802,7 +802,7 @@ Sttum = Sttum(:,GOODspaceAB);
 Sstar = Sstar(GOODspaceAB);
 
 
-[R1tTOI T1TUM tumind BADspaceT GOODspaceT] = cleanR1t(R1tTOI, T1TUM,tumind, 'Tumor', min(numel(T1TUM)), 0.7, quant);
+[R1tTOI, T1TUM, tumind, BADspaceT, GOODspaceT,] = cleanR1t(R1tTOI, T1TUM,tumind, 'Tumor', min(numel(T1TUM)), 0.7, quant);
 if numel(T1TUM)==0
     error('Error all voxels removed due to bad/negative values, check ROI, T1 values, and image quality');
 end
@@ -919,10 +919,10 @@ Adata.Stlv   = Stlv;
 Adata.Sttum  = Sttum;
 Adata.T1 = T1;
 Adata.T1LV = T1LV;
-Adata.T1TUM=T1TUM;
+Adata.T1TUM= T1TUM;
 Adata.TUMOR= TUMOR;
 Adata.aif_rr_type = aif_rr_type;
-Adata.currentCT=currentCT;
+Adata.currentCT = currentCT;
 Adata.deltaR1LV = deltaR1LV;
 Adata.deltaR1TOI= deltaR1TOI;
 Adata.dynam_name= dynam_name;
@@ -973,6 +973,6 @@ end
     
 disp(' ');
 disp('Finished A');
-disp(datestr(now))
+disp(datetime)
 toc
 diary off;
