@@ -90,7 +90,18 @@ function run_dce_cli(subject_source_path, subject_tp_path)
         if isfield(json, 'NumberOfAverages')
             time_resolution = time_resolution * json.NumberOfAverages;
         end
-        site = json.InstitutionName;
+        if isfield(json, 'InstitutionName')
+            site = json.InstitutionName;
+        else
+            if isfield(json, 'ManufacturersModelName')
+                machine = json.ManufacturersModelName;
+                if contains(machine, 'Signa')
+                    site = 'USC';
+                else
+                    site = 'other';
+                end
+            end
+        end
         if contains(site, 'USC')
             if isfield(json, 'AcquisitionDateTime') && ~force_use_default_relaxivity
                 date = json.AcquisitionDateTime;
