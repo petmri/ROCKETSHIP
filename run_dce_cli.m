@@ -100,6 +100,8 @@ function run_dce_cli(subject_source_path, subject_tp_path)
                 else
                     site = 'other';
                 end
+            else
+                site = 'unknown';
             end
         end
         if contains(site, 'USC')
