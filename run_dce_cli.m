@@ -133,8 +133,16 @@ function run_dce_cli(subject_source_path, subject_tp_path)
     drift_global = str2double(script_prefs.drift_global);
     blood_t1 = str2double(script_prefs.blood_t1);
     injection_duration = str2double(script_prefs.injection_duration);
-    start_t = str2double(script_prefs.start_t);
-    end_t = str2double(script_prefs.end_t);
+    if isempty(script_prefs.start_t)
+        start_t = [];
+    else
+        start_t = str2double(script_prefs.start_t);
+    end
+    if isempty(script_prefs.end_t)
+        end_t = [];
+    else
+        end_t = str2double(script_prefs.end_t);
+    end
 
     % convert tr to ms
     tr = tr * 1000;
