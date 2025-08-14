@@ -1,0 +1,35 @@
+# Core scientific computing
+numpy>=1.21.0
+scipy>=1.7.0
+matplotlib>=3.5.0
+
+# Medical imaging
+nibabel>=3.2.0
+pydicom>=2.3.0
+
+# Data handling
+pandas>=1.3.0
+h5py>=3.6.0
+
+# Optimization and fitting
+scikit-learn>=1.0.0
+lmfit>=1.0.3
+
+# Parallel processing
+joblib>=1.1.0
+
+# Configuration and CLI
+configparser>=5.2.0
+click>=8.0.0
+
+# Progress bars and utilities
+tqdm>=4.62.0
+
+# Testing (optional)
+pytest>=6.2.0
+pytest-cov>=3.0.0
+
+# GUI (optional - for future phases)
+# tkinter is built-in
+# PyQt5>=5.15.0
+# flask>=2.0.0

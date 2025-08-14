@@ -1,6 +1,6 @@
-# ROCKETSHIP v1.2,  2016
+# ROCKETSHIP v2.0 - Python Edition, 2024
 ---
-_Copyright (c) 2016, Thomas Ng, Samuel Barnes_
+_Copyright (c) 2016-2024, Thomas Ng, Samuel Barnes_
 
 All rights reserved.
 
@@ -14,7 +14,52 @@ but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 
-Contains program and associated files to process and analyze parametric MRI and DCE-MRI files. Developed at the Biological Imaging Center at the California Institute of Technology. 
+## Python Conversion
+
+**NEW in v2.0**: ROCKETSHIP has been converted from MATLAB to Python! This modernizes the codebase and makes it more accessible to researchers who prefer Python.
+
+### What's New in Python Version:
+- **Pure Python Implementation**: No MATLAB license required
+- **Modern Scientific Stack**: Uses NumPy, SciPy, nibabel, pydicom
+- **Command Line Interface**: Easy-to-use CLI tools
+- **Better Package Management**: pip-installable with automatic dependency handling
+- **Parallel Processing**: Built-in multiprocessing support
+- **Cross-Platform**: Works on Windows, macOS, and Linux
+- **Extensible Design**: Modular architecture for easy customization
+
+### Quick Start (Python Version)
+
+```bash
+# Install ROCKETSHIP
+pip install -e .
+
+# Run parametric T2 mapping
+rocketship-parametric -i file1.nii file2.nii -p 10 20 30 40 -t T2 -o results/
+
+# Run DCE-MRI analysis
+rocketship-dce -i dce_series/ -o dce_results/
+
+# Analyze results
+rocketship-analysis -i results/ -o analysis/
+```
+
+### Python API Usage
+
+```python
+import rocketship
+
+# Parametric fitting
+from rocketship.parametric import T2Model
+model = T2Model()
+results = model.fit(echo_times, signal_values)
+
+# DCE analysis
+from rocketship.dce import DCEAnalyzer
+analyzer = DCEAnalyzer()
+dce_results = analyzer.analyze_dce_data(input_files, output_dir)
+```
+
+Contains program and associated files to process and analyze parametric MRI and DCE-MRI files. Originally developed at the Biological Imaging Center at the California Institute of Technology, now converted to Python for broader accessibility. 
 
 ### [SEE GITHUB WIKI FOR HELP](https://github.com/petmri/ROCKETSHIP/wiki)
 
@@ -70,7 +115,72 @@ Other Publications using ROCKETSHIP for a more complete list see [google scholar
 
 ROCKETSHIP prefers all images to be input in the NIFTI format. DCE fitting does have some limited support for directly processing DICOM images, but it is recommended to convert from DICOM to NIFTI first, then use the NIFTI images for all processing. Additionally the parametric fitting (T1, T2, ADC) requires NIFTI files. To convert from DICOM to NIFTI we recommend using the dcm2nii tool that comes with MRIcron, it is available for Windows, Linux, and Mac and is easy to use (although any converter can be used). For dcm2nii select the FSL 4D NIFTI format. Compressed NIFTI images (.nii.gz) can be read by ROCKETSHIP, but not written.
 
-## Quick Start
+## Quick Start (Python v2.0)
+
+### Installation
+```bash
+# Clone repository
+git clone --recursive https://github.com/petmri/ROCKETSHIP.git
+cd ROCKETSHIP
+
+# Install Python package
+pip install -e .
+
+# Or install from PyPI (when available)
+pip install rocketship
+```
+
+### Command Line Usage
+```bash
+# Calculate T2 maps
+rocketship-parametric -i echo1.nii echo2.nii echo3.nii echo4.nii \
+                      -p 10 20 30 40 \
+                      -t T2 \
+                      -o t2_results/
+
+# Calculate T1 maps with inversion recovery
+rocketship-parametric -i ti1.nii ti2.nii ti3.nii ti4.nii \
+                      -p 50 100 500 1000 \
+                      -t T1_inversion_recovery \
+                      -o t1_results/
+
+# Run DCE-MRI analysis
+rocketship-dce -i dce_series/ -o dce_results/ -v
+
+# Analyze and visualize results
+rocketship-analysis -i t2_results/ -o analysis_output/
+```
+
+### Python API
+```python
+# Parametric mapping example
+from rocketship.parametric import run_parametric_fitting
+
+results = run_parametric_fitting(
+    input_files=['echo1.nii', 'echo2.nii', 'echo3.nii', 'echo4.nii'],
+    parameters=[10, 20, 30, 40],  # Echo times in ms
+    fit_type='T2',
+    output_dir='results/',
+    verbose=True
+)
+
+# DCE analysis example
+from rocketship.dce import run_dce_analysis
+
+dce_results = run_dce_analysis(
+    input_dir='dce_data/',
+    output_dir='dce_results/',
+    verbose=True
+)
+```
+
+### Demo
+```bash
+# Run included demo
+python demo.py
+```
+
+## Legacy Quick Start (MATLAB v1.2)
 
 1. Clone ROCKETSHIP git clone --recursive https://github.com/petmri/ROCKETSHIP.git
 2. Add ROCKETSHIP folder to Matlab path

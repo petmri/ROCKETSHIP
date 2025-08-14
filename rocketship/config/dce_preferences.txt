@@ -1,0 +1,83 @@
+% GPU options
+%%%%%%%%%%%%%%%%%%%%%%
+% Requires NVIDIA GPU, and GPUFit library
+force_cpu = 0
+gpu_tolerance = 1e-12
+gpu_max_n_iterations = 200
+gpu_initial_value_ktrans = 0.0002
+gpu_initial_value_ve = 0.2
+gpu_initial_value_vp = 0.02
+gpu_initial_value_fp = 0.2
+
+% Matlab Options
+%%%%%%%%%%%%%%%%%%%%%%
+% True for version R2013a and older
+use_matlabpool = 0
+
+% Auto AIF finding options
+%%%%%%%%%%%%%%%%%%%%%%
+autoaif_r_square_threshold = 0.8
+autoaif_end_signal_threshold = 0.45
+autoaif_sobel_threshold = 0.005
+
+% AIF fitting options
+%%%%%%%%%%%%%%%%%%%%%%
+% aif function = A*exp(-c*t)+B*exp(-d*t)
+% Initial Upper limits and initial values for A and B are auto-set
+% values order = A B c d
+aif_lower_limits = 0 0 0 0
+aif_upper_limits = 5 5 50 50
+aif_initial_values = 1 1 1 0.01
+
+% Advanced Options
+aif_TolFun = 10^(-20)
+aif_TolX = 10^(-23)
+aif_MaxIter = 1000
+aif_MaxFunEvals = 1000
+%robust options no quotes: "off" "LAR" "Bisquare"
+aif_Robust = off
+
+% Voxel fitting options
+%%%%%%%%%%%%%%%%%%%%%%%
+voxel_lower_limit_ktrans = 10^-7
+voxel_upper_limit_ktrans = 2
+voxel_initial_value_ktrans = 0.0002
+
+voxel_lower_limit_ve = 0.02
+voxel_upper_limit_ve = 1
+voxel_initial_value_ve = 0.2
+
+voxel_lower_limit_fp = 0.001
+voxel_upper_limit_fp = 100
+voxel_initial_value_fp = 0.2
+
+voxel_lower_limit_tp = 0
+voxel_upper_limit_tp = 10^6
+voxel_initial_value_tp = 0.05
+
+voxel_lower_limit_vp = 0.001
+voxel_upper_limit_vp = 1
+voxel_initial_value_vp = 0.02
+
+voxel_lower_limit_tau = 0
+voxel_upper_limit_tau = 100
+voxel_initial_value_tau = 0.01
+
+% Reference Model Options
+voxel_lower_limit_ktrans_RR = 10^-7
+voxel_upper_limit_ktrans_RR = 2
+voxel_initial_value_ktrans_RR = 0.1
+
+voxel_value_ve_RR = 0.08
+
+% Advanced Options
+voxel_TolFun = 10^(-12)
+voxel_TolX = 10^(-6)
+voxel_MaxIter = 50
+voxel_MaxFunEvals = 50
+%robust options no quotes: "off" "LAR" "Bisquare"
+voxel_Robust = off
+
+% FXR options
+%%%%%%%%%%%%%%%%%%%%%%%
+fxr_fw = 0.8
