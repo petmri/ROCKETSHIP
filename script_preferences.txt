@@ -122,6 +122,9 @@ auto_find_injection = 1
     % end of contrast injection (in minutes)
     end_injection = 0.2167
 
+% fit AIF (same as aif_type for compatibility)
+fit_aif = 1
+
 % time resolution of dynamic scan (in seconds)
 time_resolution = 15.36
 
