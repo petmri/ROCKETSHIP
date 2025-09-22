@@ -782,11 +782,57 @@ elseif strcmp(model, 'patlak')
         constraint_types = int32([3,3]);
         
         % Load measured data
-        indie_vars = single([timer_data' Cp_data]);
+        % Ensure timer_data is a row vector and not the same size as Cp_data
+        if size(timer_data, 1) == size(Cp_data, 1) && size(timer_data, 2) == size(Cp_data, 2)
+            timer_data = timer_data';
+        end
+        if size(timer_data, 1) > 1 && size(timer_data, 2) == 1
+            timer_data = timer_data';
+        end
+        indie_vars = single([timer_data Cp_data]);
         Ct_single = single(Ct_data);
+        weights = [];
+        % start_i = input("Start:");
+        % end_i = input("End:");
+        weights = single(ones(size(Ct_single)));
+        % weights(start_i:end_i, :) = 0;
+        weights = weights(1:size(Ct_single, 1), 1:size(Ct_single,2));
+        % Read weights from ODS file
+        [~, ~, raw] = xlsread('/media/network_mriphysics/USC-animal/BIDS/code/brain_avg_scores.xlsx');
+        ids = raw(2:end,1); % skip header
+        weight_starts = cell2mat(raw(2:end,7));
+        weight_ends = cell2mat(raw(2:end,8));
+
+        % Find matching ID for current subject/session
+        if isfield(xdata{1}, 'ID')
+            current_id = xdata{1}.ID;
+        else
+            error('xdata{1} must contain an ''ID'' field matching the ODS file first column.');
+        end
+
+        row_idx = find(strcmp(ids, current_id), 1);
+        if isempty(row_idx)
+            error(['ID ' current_id ' not found in ODS file.']);
+        end
+
+        % Handle NaN or empty cells for start/end indices
+        %TODO - automate with start_t choppage
+        start_i = max(1, weight_starts(row_idx)-10);
+        end_i = max(1, weight_ends(row_idx)-10);
+
+        if isempty(start_i) || isnan(start_i) || isempty(end_i) || isnan(end_i)
+            % If missing, do not mask any weights
+            warning(['Missing or NaN weight range for ID ' current_id '. No weights will be masked.']);
+            weights = single(ones(size(Ct_single)));
+        else
+            % Set weights to zero in the specified range
+            weights = single(ones(size(Ct_single)));
+            weights(start_i:end_i, :) = 0;
+            weights = weights(1:size(Ct_single, 1), 1:size(Ct_single,2));
+        end
         
         % Execute GPU fit
-        [parameters, states, chi_squares, n_iterations, time] = gpufit_constrained(Ct_single,[],model_id,init_param_single,constraints_single, constraint_types, tolerance, max_n_iterations,[],estimator_id,indie_vars);
+        [parameters, states, chi_squares, n_iterations, time] = gpufit_constrained(Ct_single,weights,model_id,init_param_single,constraints_single, constraint_types, tolerance, max_n_iterations,[],estimator_id,indie_vars);
 
         % If did not converge discard values
         one_parameter = parameters(1,:);

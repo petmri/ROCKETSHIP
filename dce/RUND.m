@@ -320,7 +320,9 @@ fit_voxels = get(handles.fit_voxels,'Value');
 % batch  = handles.batch;
 outputft = get(handles.outputft, 'Value');
 
-saved_results = D_fit_voxels_func(results_b_path,dce_model,time_smoothing,time_smoothing_window,xy_smooth_size,number_cpus,roi_list,fit_voxels,neuroecon, outputft);
+Bdata = load(results_b_path);
+Bdata = Bdata.Bdata;
+saved_results = D_fit_voxels_func(results_b_path, Bdata, dce_model,time_smoothing,time_smoothing_window,xy_smooth_size,number_cpus,roi_list,fit_voxels,neuroecon, outputft);
 
 handles.saved_results = saved_results{1};
 handles.batch = 0;
