@@ -57,7 +57,6 @@ end
 
 %% 1. Load the data array from previous script
 
-% load(results_a_path);
 Adata=RUNA_struct;
 
 % unload the variables from previous data array
@@ -231,12 +230,12 @@ aif_name = '';
 if isempty(import_aif_path)
     if(fit_aif==1)
         xdata{1}.fittingAU = false;
-        [Cp_fitted xAIF xdataAIF] = AIFbiexpfithelp(xdata, 1);
+        [Cp_fitted, xAIF, xdataAIF] = AIFbiexpfithelp(xdata, 1);
         Cp_use = Cp_fitted;
- 
+
         M{2} = 'Fitted Curve';
         aif_name = 'fitted';
-        
+
         %Fit raw data curve
         Cptemp = xdata{1}.Cp;
         xdata{1}.Cp = xdata{1}.Stlv;
@@ -244,12 +243,21 @@ if isempty(import_aif_path)
         [Stlv_fitted, ~, ~] = AIFbiexpfithelp(xdata, 1);
         xdata{1}.Cp = Cptemp;
         Stlv_use = Stlv_fitted;
-    elseif(fit_aif==2)
+    elseif(fit_aif==2) || (fit_aif==0)
         Cp_use = CpROI;
         M{2} = 'Using Raw Curve';
         aif_name = 'raw';
-        
+
         Stlv_use = StlvROI;
+    elseif(fit_aif==5)
+        % Smooth the AIF using rlowess and display both pre- and post-smoothing curves
+        Cp_smooth = smooth(CpROI, 7, 'rlowess'); % window size 7, can be parameterized
+        Cp_use = Cp_smooth;
+        M{2} = 'Smoothed Curve (rlowess)';
+        aif_name = 'smooth';
+
+        Stlv_smooth = smooth(StlvROI, 7, 'rlowess');
+        Stlv_use = Stlv_smooth;
     end
 else
     external = load(import_aif_path);
@@ -322,35 +330,38 @@ else
 end
 
 % 5.5 Plot the results
+
 b = figure;
 subplot(1,2,1)
-plot(timer,CpROI,'r.');
+plot(timer, CpROI, 'r.');
 hold on;
-plot(timer, Cp_use,'b');
+plot(timer, Cp_use, 'b');
+if (fit_aif==5)
+    legend({'Original Plasma Curve', 'Smoothed Curve (rlowess)'});
+else
+    legend(M);
+end
 disp('AIF mmol:')
 perLine = 14;
 fmt = [repmat('%8.4f ', 1, perLine), '\n'];
 fprintf(fmt, CpROI);
-if mod( length(CpROI), perLine) ~= 0; fprintf('\n'); end
-
-M{1} = 'Original Plasma Curve';
-% M{2} = 'Selected Curve';
-
-legend(M);
+if mod(length(CpROI), perLine) ~= 0; fprintf('\n'); end
 root_modified = rootname;
-root_modified(end)='';
+root_modified(end) = '';
 hold off;
 title([root_modified ' - AIF Bi-Exponential, Linear Upslope'], 'Interpreter', 'none');
 ylabel('Concentration (mM)');
 xlabel('Time (min)');
 
 subplot(1,2,2)
-plot(timer,StlvROI,'r.');
+plot(timer, StlvROI, 'r.');
 hold on;
-plot(timer, Stlv_use,'b');
-
-M{1} = 'Original Plasma Curve: Raw data';
-legend(M);
+plot(timer, Stlv_use, 'b');
+if (fit_aif==5)
+    legend({'Original Plasma Curve: Raw data', 'Smoothed Curve (rlowess)'});
+else
+    legend(M);
+end
 hold off;
 title([root_modified ' - AIF Bi-Exponential, Linear Upslope'], 'Interpreter', 'none');
 ylabel('Signal (a.u)');
@@ -418,9 +429,8 @@ if save_output==true
     disp('MAT results saved to: ')
     disp(results)
 % disp(['File MD5 hash: ' mat_md5])
-else
-    B_vars = Bdata;
 end
+B_vars = Bdata;
 
 disp(' ');
 disp('Finished B');

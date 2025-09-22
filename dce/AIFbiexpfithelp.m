@@ -170,18 +170,31 @@ end
 %     initial_values, xdata, ...
 %     Cp',lower_limits,upper_limits,options);
 
-ft = fittype('AIFbiexpcon(A, B, c, d, T1, step, fittingAU, baseline)', ...
-    'independent', {'T1', 'step'}, 'coefficients', {'A', 'B', 'c', 'd'}, 'problem', {'fittingAU', 'baseline'});
-[f, gof, output] = fit([timer, step], Cp, ft, options, 'problem', {xdata{1}.fittingAU, xdata{1}.baseline});
+
+
+% Add t_base_end and t0_exp as fit parameters
+t_base_end_init = timer(start_index+1); % initial guess: just after start
+t_base_end_lower = timer(start_index); % must be after or at start
+t_base_end_upper = timer(end_index-1); % must be before t0_exp
+
+t0_exp_init = timer(end_index); % initial guess: end of injection
+t0_exp_lower = t_base_end_init + eps; % must be after t_base_end
+t0_exp_upper = timer(end_index+round(0.2*numel(timer))); % allow some range after end_index
+
+options.Lower = [lower_limits t_base_end_lower t0_exp_lower];
+options.Upper = [upper_limits t_base_end_upper t0_exp_upper];
+options.StartPoint = [initial_values t_base_end_init t0_exp_init];
+
+ft = fittype('AIFbiexpcon(A, B, c, d, t_base_end, t0_exp, T1, fittingAU, baseline)', ...
+    'independent', {'T1'}, 'coefficients', {'A', 'B', 'c', 'd', 't_base_end', 't0_exp'}, 'problem', {'fittingAU', 'baseline'});
+
+[f, gof, output] = fit(timer, Cp, ft, options, 'problem', {xdata{1}.fittingAU, xdata{1}.baseline});
 
 xdata{1}.timer = oldt;
-% rsquare = 1 - resnorm / norm(Cp-mean(Cp))^2;
 if verbose>0
     disp(['Adjusted R^2 of AIF fit = ' num2str(gof.adjrsquare)]);
-    % disp(['Adjusted R^2 of AIF fit = ' num2str(rsquare)]);
 end
 
-% out = AIFbiexpcon(x, xdata);
-out = AIFbiexpcon(f.A, f.B, f.c, f.d, timer, step, xdata{1}.fittingAU, xdata{1}.baseline)';
-x = [f.A, f.B, f.c, f.d];
+out = AIFbiexpcon(f.A, f.B, f.c, f.d, f.t_base_end, f.t0_exp, timer, xdata{1}.fittingAU, xdata{1}.baseline)';
+x = [f.A, f.B, f.c, f.d, f.t_base_end, f.t0_exp];
 rsquare = gof.adjrsquare;

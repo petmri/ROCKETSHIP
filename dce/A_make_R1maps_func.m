@@ -1,4 +1,3 @@
-% function saved_results = A_make_R1maps_func(DYNAMIC, LV, TUMOR, NOISE, DRIFT, hdr, res,quant, rootname, dynampath, dynam_name, aif_rr_type, ... 
 function [saved_results, RUNA_vars, errormsg] = A_make_R1maps_func(filevolume, noise_pathpick, ...
     noise_pixsize, LUT, filelist, t1aiffiles, t1roifiles, t1mapfiles, noisefiles, ...
     driftfiles, rootname, fileorder, quant, mask_roi, mask_aif, ...
@@ -644,11 +643,12 @@ elseif (steady_state_time == -2)
         dimx = size(DYNAMIC,1);
         dimy = size(DYNAMIC,2);
         dimz = dimz;
-        end_ss = dce_auto_aif(DYNAMLV,lvind,dimx,dimy,dimz,injection_duration);
+        % end_ss = dce_auto_aif(DYNAMLV,lvind,dimx,dimy,dimz,injection_duration);
+        [end_ss, end_injection] = find_end_ss(DYNAMLV);
     end
     start_injection = end_ss;
-    [~, end_injection] = max(DYNAMLV);
-    end_injection = mean(end_injection);
+    % [~, end_injection] = max(DYNAMLV);
+    % end_injection = mean(end_injection);
     steady_state_time(2) = end_ss;
     steady_state_time(1) = 1; 
 else

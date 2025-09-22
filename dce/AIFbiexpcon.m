@@ -4,8 +4,7 @@
 %% rectangular function to model the injection
 
 % function Cp = AIFbiexpcon(x, xdata)
-function Cp = AIFbiexpcon(A, B, c, d, T1, step, fittingAU, baseline)
-
+function Cp = AIFbiexpcon(A, B, c, d, t_base_end, t0_exp, T1, fittingAU, baseline)
 % A = x(1);
 % B = x(2);
 % c = x(3);
@@ -15,7 +14,7 @@ function Cp = AIFbiexpcon(A, B, c, d, T1, step, fittingAU, baseline)
 % maxer=xdata{1}.maxer;
 
 T1 = T1(:);
-OUT = find(step > 0);
+% OUT = find(step > 0);
 
 %Set as model A, MacGrath, MRM 2009
 %B = maxer-A;
@@ -27,16 +26,18 @@ if ~fittingAU
     baseline = 0;
 end
 
+Cp = zeros(size(T1));
 for j = 1:numel(T1)
     % Baseline
-    if(j< OUT(1))
+    if T1(j) < t_base_end
         Cp(j) = baseline;
-    % Linear upslope to max
-    elseif(j<OUT(end))
-        Cp(j) = baseline + (A-baseline).*((T1(j)-T1(OUT(1)))./(T1(OUT(end))-T1(OUT(1)))) + (B-baseline).*((T1(j)-T1(OUT(1)))./(T1(OUT(end))-T1(OUT(1))));
+    % Linear upslope from t_base_end to t0_exp
+    elseif T1(j) < t0_exp
+        Cp(j) = baseline + (A-baseline) * ((T1(j)-t_base_end)/(t0_exp-t_base_end)) + (B-baseline) * ((T1(j)-t_base_end)/(t0_exp-t_base_end));
     % Bi-Exponential Decay    
     else
-        Cp(j) = A.*(exp(-c.*(T1(j) - T1(OUT(end))))) + B.*(exp(-d.*(T1(j) - T1(OUT(end)))));
+        Cp(j) = A * exp(-c * (T1(j) - t0_exp)) + B * exp(-d * (T1(j) - t0_exp));
     end
 end
-Cp = Cp';
+% Ensure output is the same shape and size as T1
+Cp = reshape(Cp, size(T1));

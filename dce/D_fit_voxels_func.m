@@ -1,4 +1,4 @@
-function results = D_fit_voxels_func(results_b_path, B_vars, dce_model, ...
+function [results, D_vars] = D_fit_voxels_func(results_b_path, B_vars, dce_model, ...
     time_smoothing,time_smoothing_window,xy_smooth_size,number_cpus, ...
     roi_list,fit_voxels,neuroecon, outputft, save_output)
 
@@ -326,11 +326,11 @@ for model_index=1:numel(dce_model_list)
             for r=number_rois:-1:1
                 single_file=cell2mat(roi_list(r));
                 
-                if strcmp(roi_ext(r),'.nii') || strcmp(roi_ext(r),'.hdr') || strcmp(roi_ext(r),'.img')
+                if endsWith(single_file, {'.nii', '.nii.gz', '.hdr', '.img'})
                     single_roi = load_untouch_nii(single_file);
                     single_roi = double(single_roi.img);
                     roi_index{r}= find(single_roi > 0);
-                elseif strcmp(roi_ext(r),'.roi')
+                elseif endsWith(single_file, '.roi')
                     single_roi = ReadImageJROI(single_file);
                     if strcmp(single_roi.strType,'Polygon') || strcmp(single_roi.strType,'Freehand')
                         roi_image = poly2mask(...
@@ -561,7 +561,21 @@ for model_index=1:numel(dce_model_list)
     else
         if number_rois~=0
             disp(['Starting fitting for ' num2str(number_rois) ' ROIs...']);
-            
+            % Add subject/session ID to roi_data
+            if isfield(Bdata, 'dynam_name')
+                % Extract all characters before the 2nd underscore in dynam_name
+                underscores = strfind(Bdata.dynam_name, '_');
+                if numel(underscores) >= 2
+                    roi_data{1}.ID = Bdata.dynam_name(1:underscores(2)-1);
+                else
+                    roi_data{1}.ID = Bdata.dynam_name;
+                end
+            elseif isfield(Bdata, 'rootname')
+                roi_data{1}.ID = Bdata.rootname;
+            else
+                roi_data{1}.ID = '';
+            end
+
             roi_data{1}.Cp = xdata{1}.Cp;
             roi_data{1}.timer = xdata{1}.timer;
             roi_data{1}.Ct = roi_series;
@@ -662,6 +676,41 @@ for model_index=1:numel(dce_model_list)
         disp('MAT results saved to: ')
         disp(results{model_index})
         % disp(['File MD5 hash: ' mat_md5])
+    end
+    D_vars = fit_data;
+    D_vars.fit_parameters = D_vars.roi_results;
+
+    % Add all data needed for plot_dce_curve function
+    D_vars.Cp = xdata{1}.Cp;
+    D_vars.timer = xdata{1}.timer;
+    if number_rois > 0
+        D_vars.Ct = roi_series;
+        D_vars.Ct_original = roi_series_original;
+    else
+        % If no ROIs, use empty arrays
+        D_vars.Ct = [];
+        D_vars.Ct_original = [];
+    end
+    D_vars.show_original = true;
+    D_vars.show_ci = true;
+    D_vars.title = ['DCE Curve Fit - ' cur_dce_model ' ' roi_data{1}.ID];
+    D_vars.x_units = 'Time (min)';
+    D_vars.y_units = 'Concentration (mM)';
+
+    % Add model-specific parameters for fxr
+    if strcmp(cur_dce_model, 'fxr')
+        % These would need to be calculated or passed from somewhere
+        % For now, set defaults or check if they exist
+        if exist('R1o', 'var')
+            D_vars.R1o = R1o;
+        end
+        if exist('R1i', 'var')
+            D_vars.R1i = R1i;
+        end
+        D_vars.r1 = relaxivity;
+        if exist('fw', 'var')
+            D_vars.fw = fw;
+        end
     end
     
     % d) Check if physiologically possible, if not, remove
