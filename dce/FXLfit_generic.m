@@ -151,13 +151,13 @@ if strcmp(model, 'ex_tofts')
         
         % If did not converge discard values
         one_parameter = parameters(1,:);
-        one_parameter(states~=0) = -0.000001;  %Ktrans
+        one_parameter(states~=0) = NaN;  %Ktrans
         parameters(1,:) = one_parameter;
         one_parameter = parameters(2,:);
-        one_parameter(states~=0) = -0.000001;  %ve
+        one_parameter(states~=0) = NaN;  %ve
         parameters(2,:) = one_parameter;
         one_parameter = parameters(3,:);
-        one_parameter(states~=0) = -0.000001;  %vp
+        one_parameter(states~=0) = NaN;  %vp
         parameters(3,:) = one_parameter;
         
         GG = [parameters' chi_squares'];
@@ -313,13 +313,13 @@ elseif strcmp(model, 'tissue_uptake')
         fprintf('ratio gpu not read = %s\n',num2str(state_4));
         % If did not converge discard values
 %         one_parameter = parameters(1,:);
-%         one_parameter(states~=0) = -0.000001;  %Ktrans
+%         one_parameter(states~=0) = NaN;  %Ktrans
 %         parameters(1,:) = one_parameter;
 %         one_parameter = parameters(2,:);
-%         one_parameter(states~=0) = -0.000001;  %vp
+%         one_parameter(states~=0) = NaN;  %vp
 %         parameters(2,:) = one_parameter;
 %         one_parameter = parameters(3,:);
-%         one_parameter(states~=0) = -0.000001;  %fp
+%         one_parameter(states~=0) = NaN;  %fp
 %         parameters(3,:) = one_parameter;
         
         GG = [parameters' chi_squares'];
@@ -433,10 +433,10 @@ elseif strcmp(model, 'tofts')
         
         % If did not converge discard values
         one_parameter = parameters(1,:);
-        one_parameter(states~=0) = -0.000001;  %Ktrans
+        one_parameter(states~=0) = NaN;  %Ktrans
         parameters(1,:) = one_parameter;
         one_parameter = parameters(2,:);
-        one_parameter(states~=0) = -0.000001;  %ve
+        one_parameter(states~=0) = NaN;  %ve
         parameters(2,:) = one_parameter;
         
         GG = [parameters' chi_squares'];
@@ -790,10 +790,10 @@ elseif strcmp(model, 'patlak')
 
         % If did not converge discard values
         one_parameter = parameters(1,:);
-        one_parameter(states~=0) = -0.000001;  %Ktrans
+        one_parameter(states~=0) = NaN;  %Ktrans
         parameters(1,:) = one_parameter;
         one_parameter = parameters(2,:);
-        one_parameter(states~=0) = -0.000001;  %vp
+        one_parameter(states~=0) = NaN;  %vp
         parameters(2,:) = one_parameter;
         
         GG = [parameters' chi_squares'];
@@ -958,16 +958,16 @@ elseif strcmp(model, '2cxm')
         
         % If did not converge discard values
         one_parameter = parameters(1,:);
-        one_parameter(states~=0) = -0.000001;  %Ktrans
+        one_parameter(states~=0) = NaN;  %Ktrans
         parameters(1,:) = one_parameter;
         one_parameter = parameters(2,:);
-        one_parameter(states~=0) = -0.000001;  %ve
+        one_parameter(states~=0) = NaN;  %ve
         parameters(2,:) = one_parameter;
         one_parameter = parameters(3,:);
-        one_parameter(states~=0) = -0.000001;  %vp
+        one_parameter(states~=0) = NaN;  %vp
         parameters(3,:) = one_parameter;
         one_parameter = parameters(3,:);
-        one_parameter(states~=0) = -0.000001;  %fp
+        one_parameter(states~=0) = NaN;  %fp
         parameters(3,:) = one_parameter;
         
         GG = [parameters' chi_squares'];
