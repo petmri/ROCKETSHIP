@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 import sys
 
@@ -32,7 +33,18 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parents[2]
     sys.path.insert(0, str(repo_root / "python"))
 
-    from rocketship import model_patlak_cfit, model_tofts_cfit  # pylint: disable=import-outside-toplevel
+    from rocketship import (  # pylint: disable=import-outside-toplevel
+        import_aif,
+        model_extended_tofts_cfit,
+        model_patlak_cfit,
+        model_patlak_linear,
+        model_tofts_cfit,
+        model_tofts_fit,
+        previous_aif,
+        t1_fa_linear_fit,
+        t2_linear_fast,
+    )
+    from rocketship.dsc_helpers import matlab_reshape_linspace  # pylint: disable=import-outside-toplevel
 
     baseline = json.loads(args.baseline.read_text())
 
@@ -43,19 +55,84 @@ def main() -> int:
     tofts_fit = baseline["dce"]["inverse"]["tofts_fit"]
     ktrans = float(tofts_fit[0])
     ve = float(tofts_fit[1])
+
+    ex_tofts_fit = baseline["dce"]["inverse"]["extended_tofts_fit"]
+    ex_ktrans = float(ex_tofts_fit[0])
+    ex_ve = float(ex_tofts_fit[1])
+    ex_vp = float(ex_tofts_fit[2])
+
     patlak_fit = baseline["dce"]["inverse"]["patlak_linear"]
     patlak_ktrans = float(patlak_fit[0])
     patlak_vp = float(patlak_fit[1])
+
+    patlak_forward = model_patlak_cfit(patlak_ktrans, patlak_vp, cp, timer)
+
+    # Match the synthetic DSC fixture used in MATLAB export_parity_baseline.m
+    mean_aif = [0.0 + (1.1 / 13.0) * i for i in range(14)]
+    bolus_time = 3  # MATLAB 1-based index semantics
+    time_vect = [0.0 + 0.1 * i for i in range(19)]
+    concentration_array = matlab_reshape_linspace(0.05, 0.6, 2 * 2 * len(time_vect), (2, 2, len(time_vect)))
+
+    import_aif_out = import_aif(mean_aif, bolus_time, time_vect, concentration_array, 3.4, 0.03)
+    previous_aif_out = previous_aif(
+        import_aif_out[0], import_aif_out[3], bolus_time, import_aif_out[1], import_aif_out[2]
+    )
+
+    # Match synthetic parametric fixture from MATLAB export_parity_baseline.m
+    te = [10.0, 20.0, 40.0, 60.0]
+    true_t2 = 85.0
+    rho = 900.0
+    si_t2 = [rho * math.exp(-t / true_t2) for t in te]
+
+    fa = [2.0, 5.0, 10.0, 15.0]
+    tr = 8.0
+    true_t1 = 1300.0
+    m0 = 1100.0
+    theta = [f * (math.pi / 180.0) for f in fa]
+    si_t1 = [
+        m0
+        * ((1.0 - math.exp(-tr / true_t1)) * math.sin(th))
+        / (1.0 - math.exp(-tr / true_t1) * math.cos(th))
+        for th in theta
+    ]
 
     results = {
         "meta": {
             "source": "generate_python_results.py",
             "baseline": str(args.baseline),
-            "models": ["model_tofts_cfit", "model_patlak_cfit"],
+            "models": [
+                "model_tofts_cfit",
+                "model_extended_tofts_cfit",
+                "model_patlak_cfit",
+                "model_patlak_linear",
+                "model_tofts_fit",
+                "t2_linear_fast",
+                "t1_fa_linear_fit",
+            ],
         },
         "results": {
             "tofts_forward": model_tofts_cfit(ktrans, ve, cp, timer),
-            "patlak_forward": model_patlak_cfit(patlak_ktrans, patlak_vp, cp, timer),
+            "extended_tofts_forward": model_extended_tofts_cfit(ex_ktrans, ex_ve, ex_vp, cp, timer),
+            "patlak_forward": patlak_forward,
+            "patlak_linear_inverse": model_patlak_linear(patlak_forward, cp, timer),
+            "tofts_fit_inverse": model_tofts_fit(
+                baseline["dce"]["forward"]["tofts"],
+                cp,
+                timer,
+            ),
+            "import_aif_truncation": {
+                "meanAIF_adjusted": import_aif_out[0],
+                "time_vect": import_aif_out[1],
+                "concentration_array": import_aif_out[2],
+                "meanSignal": import_aif_out[3],
+            },
+            "previous_aif_truncation": {
+                "meanAIF_adjusted": previous_aif_out[0],
+                "time_vect": previous_aif_out[1],
+                "concentration_array": previous_aif_out[2],
+            },
+            "t2_linear_fast": t2_linear_fast(te, si_t2),
+            "t1_fa_linear_fit": t1_fa_linear_fit(fa, si_t1, tr),
         },
     }
 

@@ -2,6 +2,17 @@
 
 This directory contains Python parity tooling and first model ports.
 
+## Environment setup (macOS)
+This project is now configured to use a local `venv` at
+`/Users/samuelbarnes/code/ROCKETSHIP/.venv`.
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip setuptools wheel
+.venv/bin/python -m pip install -r requirements.txt
+```
+
 ## Script
 - `compare_with_matlab_baseline.py`
 - `generate_python_results.py`
@@ -10,11 +21,20 @@ This directory contains Python parity tooling and first model ports.
 - Source: `python/rocketship/dce_models.py`
 - Function: `model_tofts_cfit`
 - Function: `model_patlak_cfit`
+- Function: `model_extended_tofts_cfit`
+- Function: `model_patlak_linear`
+- Function: `model_tofts_fit`
+- Source: `python/rocketship/dsc_helpers.py`
+- Function: `import_aif`
+- Function: `previous_aif`
+- Source: `python/rocketship/parametric_models.py`
+- Function: `t2_linear_fast`
+- Function: `t1_fa_linear_fit`
 
 Run Python unit tests:
 
 ```bash
-python3 -m unittest discover -s tests/python -p 'test_*.py'
+.venv/bin/python -m unittest discover -s tests/python -p 'test_*.py'
 ```
 
 ## What it does
@@ -26,7 +46,7 @@ python3 -m unittest discover -s tests/python -p 'test_*.py'
 ## Generate Python outputs from current ports
 
 ```bash
-python3 tests/python/generate_python_results.py \
+.venv/bin/python tests/python/generate_python_results.py \
   --output /tmp/python_results_tofts.json
 ```
 
@@ -41,7 +61,7 @@ python3 tests/python/compare_with_matlab_baseline.py \
 ## Compare Python results against MATLAB baseline
 
 ```bash
-python3 tests/python/compare_with_matlab_baseline.py \
+.venv/bin/python tests/python/compare_with_matlab_baseline.py \
   --python-results /tmp/python_results_tofts.json
 ```
 

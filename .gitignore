@@ -132,6 +132,8 @@ Desktop.ini
 #############
 
 *.py[co]
+__pycache__/
+.venv/
 
 # Packages
 *.egg
