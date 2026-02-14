@@ -33,6 +33,17 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python run_dce_python_cli.py --config tests/python/dce_cli_config.example.json
 ```
 
+Optional runtime overrides:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python run_dce_python_cli.py \
+  --config tests/python/dce_cli_config.example.json \
+  --dce-preferences /Users/samuelbarnes/code/ROCKETSHIP/dce/dce_preferences.txt \
+  --set voxel_MaxFunEvals=100 \
+  --set blood_t1_ms=1600
+```
+
 Typical outputs:
 - Stage summary JSON: `<output_dir>/dce_pipeline_run.json`
 - Stage checkpoints (optional): `<checkpoint_dir>/a_out.json`, `b_out.json`, `d_out.json`
@@ -49,8 +60,15 @@ Config fields are parsed by:
 Key expectations:
 - Dynamic image + ROI/AIF/T1/noise masks are provided (NIfTI path lists)
 - `stage_overrides` should provide TR/FA/timing parameters for parity-safe runs
+- MATLAB-style `dce_preferences.txt` defaults are loaded automatically from `/Users/samuelbarnes/code/ROCKETSHIP/dce/dce_preferences.txt` when present
 - Supported backend values: `auto`, `cpu`, `gpufit`
 - Supported AIF curve modes: `auto`, `fitted`, `raw`, `imported`
+- Static blood-T1 override for Stage A is available via `stage_overrides.blood_t1_ms` (or `blood_t1_sec`)
+
+Preference precedence:
+- explicit `stage_overrides` value
+- `dce_preferences.txt` value
+- Python built-in fallback default
 
 ## What is intentionally not supported in Python port scope
 
@@ -98,6 +116,14 @@ ROCKETSHIP_RUN_PIPELINE_PARITY=1 ROCKETSHIP_RUN_FULL_VOLUME_PARITY=1 .venv/bin/p
 
 Default downsample fixture used for parity:
 - `/Users/samuelbarnes/code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3`
+
+### Tiny settings matrix (fast)
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python tests/python/generate_tiny_dce_settings_fixture.py --clean
+.venv/bin/python -m unittest tests.python.test_dce_pipeline_settings_matrix -v
+```
 
 ## CI behavior (high level)
 

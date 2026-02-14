@@ -98,11 +98,23 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python run_dce_python_cli.py --config tests/python/dce_cli_config.example.json
 ```
 
+Optional CLI overrides (repeatable `--set KEY=VALUE`):
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python run_dce_python_cli.py \
+  --config tests/python/dce_cli_config.example.json \
+  --dce-preferences /Users/samuelbarnes/code/ROCKETSHIP/dce/dce_preferences.txt \
+  --set voxel_MaxFunEvals=100 \
+  --set blood_t1_ms=1600
+```
+
 Current scaffold behavior:
 - Runs A->B->D stage order in-memory with no `.mat` handoff files.
 - Stage A has a real implementation path (NIfTI + mask-driven Cp/Ct extraction).
 - Stage B has a real non-GUI implementation path (timer restriction, AIF `fitted|raw|imported`, and AIF QC figure output).
 - Stage D has a real non-GUI implementation path (model fitting, parameter maps, and `.xls` ROI table output).
+- Loads MATLAB-style `dce_preferences.txt` defaults (explicit `stage_overrides` values still take precedence).
 - Writes run summary to `<output_dir>/dce_pipeline_run.json`.
 - Optionally writes per-stage checkpoints (`a_out.json`, `b_out.json`, `d_out.json`) if `checkpoint_dir` is set.
 - Enforces scope decisions (for example, rejects ImageJ `.roi` inputs).
@@ -156,4 +168,19 @@ ROCKETSHIP_PARITY_FULL_KTRANS_CORR_MIN=0.99
 ROCKETSHIP_PARITY_FULL_KTRANS_MSE_MAX=0.001
 ROCKETSHIP_PARITY_FULL_VE_CORR_MIN=0.97
 ROCKETSHIP_PARITY_FULL_VE_MSE_MAX=0.002
+```
+
+## Tiny settings-matrix tests (very fast)
+Generate or refresh tiny fixture:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python tests/python/generate_tiny_dce_settings_fixture.py --clean
+```
+
+Run settings/feature coverage tests (constraints, initial guesses, blood T1 override):
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python -m unittest tests.python.test_dce_pipeline_settings_matrix -v
 ```

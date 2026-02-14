@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ast
 from dataclasses import asdict, dataclass, field
+from functools import lru_cache
 import json
 import math
 import re
@@ -193,6 +195,146 @@ MODEL_LAYOUTS: Dict[str, Dict[str, Any]] = {
 }
 
 SUPPORTED_STAGE_D_MODELS = {"tofts", "ex_tofts", "patlak", "tissue_uptake", "2cxm", "fxr", "auc"}
+PREFERENCE_NUMERIC_CHARS = set("0123456789eE.+-*/^() ")
+
+
+def _to_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, np.integer)):
+        return int(value) != 0
+    if isinstance(value, (float, np.floating)):
+        if not math.isfinite(float(value)):
+            return default
+        return float(value) != 0.0
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"1", "true", "yes", "on"}:
+            return True
+        if text in {"0", "false", "no", "off", ""}:
+            return False
+    return default
+
+
+def _eval_numeric_expr(expr: str) -> float:
+    text = expr.strip()
+    if not text:
+        raise ValueError("Empty expression")
+    if any(ch not in PREFERENCE_NUMERIC_CHARS for ch in text):
+        raise ValueError(f"Unsafe numeric expression: {expr}")
+
+    node = ast.parse(text.replace("^", "**"), mode="eval")
+
+    def _eval(node_in: ast.AST) -> float:
+        if isinstance(node_in, ast.Expression):
+            return _eval(node_in.body)
+        if isinstance(node_in, ast.Constant):
+            if isinstance(node_in.value, (int, float)):
+                return float(node_in.value)
+            raise ValueError(f"Unsupported constant: {node_in.value!r}")
+        if isinstance(node_in, ast.UnaryOp) and isinstance(node_in.op, (ast.UAdd, ast.USub)):
+            inner = _eval(node_in.operand)
+            return inner if isinstance(node_in.op, ast.UAdd) else -inner
+        if isinstance(node_in, ast.BinOp):
+            left = _eval(node_in.left)
+            right = _eval(node_in.right)
+            if isinstance(node_in.op, ast.Add):
+                return left + right
+            if isinstance(node_in.op, ast.Sub):
+                return left - right
+            if isinstance(node_in.op, ast.Mult):
+                return left * right
+            if isinstance(node_in.op, ast.Div):
+                return left / right
+            if isinstance(node_in.op, ast.Pow):
+                return left**right
+        raise ValueError(f"Unsupported expression syntax: {expr}")
+
+    out = float(_eval(node))
+    if not math.isfinite(out):
+        raise ValueError(f"Non-finite numeric expression: {expr}")
+    return out
+
+
+def _parse_numeric_token(value: Any) -> Optional[float]:
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        out = float(value)
+        if math.isfinite(out):
+            return out
+        return None
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return _eval_numeric_expr(text)
+    except Exception:
+        return None
+
+
+@lru_cache(maxsize=32)
+def _parse_preference_file(path_str: str, mtime_ns: int) -> Dict[str, str]:
+    del mtime_ns  # cache key only
+    path = Path(path_str)
+    if not path.exists():
+        return {}
+
+    prefs: Dict[str, str] = {}
+    for raw_line in path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("%"):
+            continue
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip().lower()
+        if not key:
+            continue
+        value = value.split("%", 1)[0].strip()
+        prefs[key] = value
+    return prefs
+
+
+def _resolve_dce_preferences_path(config: "DcePipelineConfig") -> Optional[Path]:
+    use_prefs = _to_bool(config.stage_overrides.get("use_dce_preferences", True), True)
+    if not use_prefs:
+        return None
+
+    explicit = config.stage_overrides.get("dce_preferences_path")
+    if explicit:
+        path = Path(str(explicit)).expanduser().resolve()
+        if not path.exists():
+            raise FileNotFoundError(f"dce_preferences file not found: {path}")
+        return path
+
+    repo_default = Path(__file__).resolve().parents[2] / "dce" / "dce_preferences.txt"
+    if repo_default.exists():
+        return repo_default
+
+    cwd_default = Path.cwd() / "dce_preferences.txt"
+    if cwd_default.exists():
+        return cwd_default
+    return None
+
+
+def _load_dce_preferences(config: "DcePipelineConfig") -> Dict[str, str]:
+    path = _resolve_dce_preferences_path(config)
+    if path is None:
+        return {}
+    stat = path.stat()
+    return _parse_preference_file(str(path), int(stat.st_mtime_ns))
+
+
+def _scipy_loss_from_robust(value: Any) -> str:
+    mode = str(value).strip().lower()
+    if mode in {"", "off", "none", "linear"}:
+        return "linear"
+    if mode == "lar":
+        return "soft_l1"
+    if mode == "bisquare":
+        return "cauchy"
+    return "linear"
 
 
 def _to_path_list(values: Optional[List[str]]) -> List[Path]:
@@ -238,6 +380,14 @@ def resolve_backend(requested_backend: str) -> str:
 
     # auto
     return "gpufit" if is_gpufit_available() else "cpu"
+
+
+def _resolve_stage_d_backend(config: "DcePipelineConfig") -> str:
+    requested_backend = str(config.backend).strip().lower()
+    force_cpu = _to_bool(_stage_override(config, "force_cpu", 0), False)
+    if requested_backend == "auto" and force_cpu:
+        requested_backend = "cpu"
+    return resolve_backend(requested_backend)
 
 
 @dataclass
@@ -345,7 +495,18 @@ class DceStageRunner(Protocol):
 
 
 def _stage_override(config: DcePipelineConfig, key: str, default: Any) -> Any:
-    return config.stage_overrides.get(key, default)
+    if key in config.stage_overrides:
+        return config.stage_overrides[key]
+
+    key_lc = key.lower()
+    for override_key, override_val in config.stage_overrides.items():
+        if str(override_key).lower() == key_lc:
+            return override_val
+
+    prefs = _load_dce_preferences(config)
+    if key_lc in prefs:
+        return prefs[key_lc]
+    return default
 
 
 def _load_json(path: Path) -> Dict[str, Any]:
@@ -672,6 +833,18 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     lvind = lvind[keep_snr]
     stlv = stlv[:, keep_snr]
     t1_lv = t1_flat[lvind].astype(np.float64)
+    blood_t1_override = _stage_override(config, "blood_t1_ms", None)
+    if blood_t1_override is None:
+        blood_t1_override = _stage_override(config, "blood_t1_sec", None)
+    blood_t1_override_sec: Optional[float] = None
+    if blood_t1_override is not None:
+        blood_t1_override_sec = float(blood_t1_override)
+        # Mirror MATLAB conventions where blood_t1 is often entered in ms.
+        if blood_t1_override_sec > 20.0:
+            blood_t1_override_sec /= 1000.0
+        if blood_t1_override_sec <= 0.0:
+            raise ValueError("blood_t1 override must be positive")
+        t1_lv = np.full_like(t1_lv, blood_t1_override_sec, dtype=np.float64)
 
     t1_tum = t1_flat[tumind].astype(np.float64)
 
@@ -769,6 +942,7 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
         "time_resolution_min": time_resolution_min,
         "relaxivity": relaxivity,
         "hematocrit": hematocrit,
+        "blood_t1_override_sec": blood_t1_override_sec,
         "steady_state_time": [ss_start + 1, ss_end],
         "start_injection": start_injection,
         "end_injection": end_injection,
@@ -1019,7 +1193,13 @@ def _parse_4float_override(config: DcePipelineConfig, key: str, default: List[fl
     value = _stage_override(config, key, default)
     if isinstance(value, str):
         parts = value.replace(",", " ").split()
-        arr = np.array([float(v) for v in parts], dtype=np.float64)
+        parsed: List[float] = []
+        for token in parts:
+            num = _parse_numeric_token(token)
+            if num is None:
+                raise ValueError(f"{key} contains non-numeric token '{token}'")
+            parsed.append(float(num))
+        arr = np.array(parsed, dtype=np.float64)
     else:
         arr = np.asarray(value, dtype=np.float64).reshape(-1)
     if arr.size != 4:
@@ -1094,7 +1274,11 @@ def _fit_aif_biexp(
     initial[1] = max(1e-12, maxer * 0.5)
     initial = np.minimum(np.maximum(initial, lower + 1e-12), upper - 1e-12)
 
-    maxfev = int(float(_stage_override(config, "aif_MaxFunEvals", 1000)))
+    aif_maxiter = int(_safe_float(_stage_override(config, "aif_MaxIter", 1000), 1000))
+    max_nfev = int(_safe_float(_stage_override(config, "aif_MaxFunEvals", aif_maxiter), aif_maxiter))
+    aif_tol_fun = max(_safe_float(_stage_override(config, "aif_TolFun", 1e-20), 1e-20), np.finfo(np.float64).eps)
+    aif_tol_x = max(_safe_float(_stage_override(config, "aif_TolX", 1e-23), 1e-23), np.finfo(np.float64).eps)
+    aif_loss = _scipy_loss_from_robust(_stage_override(config, "aif_Robust", "off"))
 
     def fit_fn(tvals: np.ndarray, a: float, b: float, c: float, d: float) -> np.ndarray:
         return _aif_biexp_con(tvals, fit_step, a, b, c, d, fitting_au=fitting_au, baseline=baseline)
@@ -1102,14 +1286,39 @@ def _fit_aif_biexp(
     fit_success = True
     params = initial.copy()
     try:
-        params, _ = curve_fit(
-            fit_fn,
-            timer,
-            curve,
-            p0=initial,
-            bounds=(lower, upper),
-            maxfev=maxfev,
-        )
+        fit_kwargs: Dict[str, Any] = {
+            "method": "trf",
+            "max_nfev": max_nfev,
+            "ftol": aif_tol_fun,
+            "xtol": aif_tol_x,
+        }
+        if aif_loss != "linear":
+            fit_kwargs["loss"] = aif_loss
+        try:
+            params, _ = curve_fit(
+                fit_fn,
+                timer,
+                curve,
+                p0=initial,
+                bounds=(lower, upper),
+                **fit_kwargs,
+            )
+        except TypeError:
+            # Compatibility fallback for older SciPy builds.
+            fallback_kwargs: Dict[str, Any] = {
+                "method": "trf",
+                "maxfev": max_nfev,
+                "ftol": aif_tol_fun,
+                "xtol": aif_tol_x,
+            }
+            params, _ = curve_fit(
+                fit_fn,
+                timer,
+                curve,
+                p0=initial,
+                bounds=(lower, upper),
+                **fallback_kwargs,
+            )
     except Exception:
         fit_success = False
 
@@ -1474,16 +1683,15 @@ def _sanitize_name(text: str) -> str:
 
 
 def _safe_float(value: Any, default: float) -> float:
-    try:
-        val = float(value)
-        if math.isfinite(val):
-            return val
-    except Exception:
-        pass
+    parsed = _parse_numeric_token(value)
+    if parsed is not None and math.isfinite(parsed):
+        return float(parsed)
     return float(default)
 
 
-def _stage_d_fit_prefs(config: DcePipelineConfig) -> Dict[str, float]:
+def _stage_d_fit_prefs(config: DcePipelineConfig) -> Dict[str, Any]:
+    voxel_max_iter = int(_safe_float(_stage_override(config, "voxel_MaxIter", 50), 50))
+    voxel_max_nfev = int(_safe_float(_stage_override(config, "voxel_MaxFunEvals", voxel_max_iter), voxel_max_iter))
     return {
         "lower_limit_ktrans": _safe_float(_stage_override(config, "voxel_lower_limit_ktrans", 1e-7), 1e-7),
         "upper_limit_ktrans": _safe_float(_stage_override(config, "voxel_upper_limit_ktrans", 2.0), 2.0),
@@ -1503,7 +1711,21 @@ def _stage_d_fit_prefs(config: DcePipelineConfig) -> Dict[str, float]:
         "lower_limit_tau": _safe_float(_stage_override(config, "voxel_lower_limit_tau", 0.0), 0.0),
         "upper_limit_tau": _safe_float(_stage_override(config, "voxel_upper_limit_tau", 100.0), 100.0),
         "initial_value_tau": _safe_float(_stage_override(config, "voxel_initial_value_tau", 0.01), 0.01),
-        "max_nfev": int(_safe_float(_stage_override(config, "voxel_MaxFunEvals", 2000), 2000)),
+        "lower_limit_ktrans_rr": _safe_float(_stage_override(config, "voxel_lower_limit_ktrans_RR", 1e-7), 1e-7),
+        "upper_limit_ktrans_rr": _safe_float(_stage_override(config, "voxel_upper_limit_ktrans_RR", 2.0), 2.0),
+        "initial_value_ktrans_rr": _safe_float(_stage_override(config, "voxel_initial_value_ktrans_RR", 0.1), 0.1),
+        "value_ve_rr": _safe_float(_stage_override(config, "voxel_value_ve_RR", 0.08), 0.08),
+        "tol_fun": _safe_float(_stage_override(config, "voxel_TolFun", 1e-12), 1e-12),
+        "tol_x": _safe_float(_stage_override(config, "voxel_TolX", 1e-6), 1e-6),
+        "max_iter": int(voxel_max_iter),
+        "max_nfev": int(voxel_max_nfev),
+        "robust": str(_stage_override(config, "voxel_Robust", "off")).strip(),
+        "gpu_tolerance": _safe_float(_stage_override(config, "gpu_tolerance", 1e-12), 1e-12),
+        "gpu_max_n_iterations": int(_safe_float(_stage_override(config, "gpu_max_n_iterations", 200), 200)),
+        "gpu_initial_value_ktrans": _safe_float(_stage_override(config, "gpu_initial_value_ktrans", 2e-4), 2e-4),
+        "gpu_initial_value_ve": _safe_float(_stage_override(config, "gpu_initial_value_ve", 0.2), 0.2),
+        "gpu_initial_value_vp": _safe_float(_stage_override(config, "gpu_initial_value_vp", 0.02), 0.02),
+        "gpu_initial_value_fp": _safe_float(_stage_override(config, "gpu_initial_value_fp", 0.2), 0.2),
         "fxr_fw": _safe_float(_stage_override(config, "fxr_fw", 0.8), 0.8),
     }
 
@@ -1625,7 +1847,7 @@ def _fit_model_curve(
     ct: np.ndarray,
     cp: np.ndarray,
     timer: np.ndarray,
-    prefs: Dict[str, float],
+    prefs: Dict[str, Any],
     r1o: Optional[float],
     relaxivity: float,
     fw: float,
@@ -1739,7 +1961,7 @@ def _fit_stage_d_model(
     ct: np.ndarray,
     cp_use: np.ndarray,
     timer: np.ndarray,
-    prefs: Dict[str, float],
+    prefs: Dict[str, Any],
     r1o: Optional[np.ndarray],
     relaxivity: float,
     fw: float,
@@ -1913,7 +2135,7 @@ def _run_stage_d_real(config: DcePipelineConfig, stage_a: Dict[str, Any], stage_
             "xls_path": xls_path,
         }
 
-    selected_backend = resolve_backend(config.backend)
+    selected_backend = _resolve_stage_d_backend(config)
     backend_used = "cpu" if selected_backend == "gpufit" else selected_backend
     return {
         "stage": "D",
@@ -1985,7 +2207,7 @@ class HybridStageRunner:
     def run_d(self, config: DcePipelineConfig, stage_a: Dict[str, Any], stage_b: Dict[str, Any]) -> Dict[str, Any]:
         mode = str(_stage_override(config, "stage_d_mode", "auto")).strip().lower()
         if mode == "scaffold":
-            selected_backend = resolve_backend(config.backend)
+            selected_backend = _resolve_stage_d_backend(config)
             return {
                 "stage": "D",
                 "status": "scaffold",
@@ -1997,7 +2219,7 @@ class HybridStageRunner:
 
         if mode == "auto":
             if not isinstance(stage_b.get("arrays"), dict):
-                selected_backend = resolve_backend(config.backend)
+                selected_backend = _resolve_stage_d_backend(config)
                 return {
                     "stage": "D",
                     "status": "scaffold",
@@ -2078,11 +2300,13 @@ def run_dce_pipeline(
     if config.checkpoint_dir:
         _write_stage_checkpoint(config.checkpoint_dir, "D", stage_d)
 
+    prefs_path = _resolve_dce_preferences_path(config)
     summary = {
         "meta": {
             "pipeline": "dce_cli_in_memory",
             "status": "ok",
             "single_process": True,
+            "dce_preferences_path": str(prefs_path) if prefs_path else None,
         },
         "config": config.to_dict(),
         "stages": {

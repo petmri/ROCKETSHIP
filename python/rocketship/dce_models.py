@@ -8,6 +8,45 @@ from typing import Dict, Iterable, List, Optional
 from scipy.optimize import least_squares
 
 
+def _safe_float_setting(settings: Dict[str, object], key: str, default: float) -> float:
+    raw = settings.get(key, default)
+    try:
+        out = float(raw)
+        if math.isfinite(out):
+            return out
+    except Exception:
+        pass
+    return float(default)
+
+
+def _loss_from_robust(value: object) -> str:
+    mode = str(value).strip().lower()
+    if mode in {"", "off", "none", "linear"}:
+        return "linear"
+    if mode == "lar":
+        return "soft_l1"
+    if mode == "bisquare":
+        return "cauchy"
+    return "linear"
+
+
+def _least_squares_kwargs(settings: Dict[str, object], default_max_nfev: int) -> Dict[str, object]:
+    max_nfev = int(_safe_float_setting(settings, "max_nfev", float(default_max_nfev)))
+    tol_floor = 1e-15
+    ftol = max(_safe_float_setting(settings, "tol_fun", 1e-12), tol_floor)
+    xtol = max(_safe_float_setting(settings, "tol_x", 1e-6), tol_floor)
+    kwargs: Dict[str, object] = {
+        "method": "trf",
+        "max_nfev": max_nfev,
+        "ftol": ftol,
+        "xtol": xtol,
+    }
+    loss = _loss_from_robust(settings.get("robust", "off"))
+    if loss != "linear":
+        kwargs["loss"] = loss
+    return kwargs
+
+
 def _trapz(x: List[float], y: List[float]) -> float:
     """Numerical integration matching MATLAB trapz behavior for vectors."""
     total = 0.0
@@ -409,6 +448,9 @@ def model_tofts_fit(
         "upper_limit_ve": 1.0,
         "initial_value_ve": 0.2,
         "max_nfev": 2000,
+        "tol_fun": 1e-12,
+        "tol_x": 1e-6,
+        "robust": "off",
     }
     if prefs:
         settings.update(prefs)
@@ -421,13 +463,13 @@ def model_tofts_fit(
     x0 = [float(settings["initial_value_ktrans"]), float(settings["initial_value_ve"])]
     lb = [float(settings["lower_limit_ktrans"]), float(settings["lower_limit_ve"])]
     ub = [float(settings["upper_limit_ktrans"]), float(settings["upper_limit_ve"])]
+    lsq_kwargs = _least_squares_kwargs(settings, default_max_nfev=2000)
 
     fit = least_squares(
         residual,
         x0=x0,
         bounds=(lb, ub),
-        method="trf",
-        max_nfev=int(settings["max_nfev"]),
+        **lsq_kwargs,
     )
 
     ktrans = float(fit.x[0])
@@ -467,6 +509,9 @@ def model_extended_tofts_fit(
         "upper_limit_vp": 1.0,
         "initial_value_vp": 0.02,
         "max_nfev": 2000,
+        "tol_fun": 1e-12,
+        "tol_x": 1e-6,
+        "robust": "off",
     }
     if prefs:
         settings.update(prefs)
@@ -504,7 +549,8 @@ def model_extended_tofts_fit(
         ],
     ]
 
-    fit, sse = _best_fit_over_starts(residual, starts, lb, ub, int(settings["max_nfev"]))
+    lsq_kwargs = _least_squares_kwargs(settings, default_max_nfev=2000)
+    fit, sse = _best_fit_over_starts(residual, starts, lb, ub, lsq_kwargs)
     ktrans = float(fit.x[0])
     ve = float(fit.x[1])
     vp = float(fit.x[2])
@@ -527,7 +573,7 @@ def _best_fit_over_starts(
     starts: List[List[float]],
     lb: List[float],
     ub: List[float],
-    max_nfev: int,
+    lsq_kwargs: Dict[str, object],
 ):
     best_fit = None
     best_sse = math.inf
@@ -537,8 +583,7 @@ def _best_fit_over_starts(
             residual_fn,
             x0=x0,
             bounds=(lb, ub),
-            method="trf",
-            max_nfev=max_nfev,
+            **lsq_kwargs,
         )
         sse = float(sum(v * v for v in fit.fun))
         if sse < best_sse:
@@ -570,6 +615,9 @@ def model_vp_fit(
         "upper_limit_vp": 1.0,
         "initial_value_vp": 0.02,
         "max_nfev": 2000,
+        "tol_fun": 1e-12,
+        "tol_x": 1e-6,
+        "robust": "off",
     }
     if prefs:
         settings.update(prefs)
@@ -583,7 +631,8 @@ def model_vp_fit(
     ub = [float(settings["upper_limit_vp"])]
     starts = [[float(settings["initial_value_vp"])]]
 
-    fit, sse = _best_fit_over_starts(residual, starts, lb, ub, int(settings["max_nfev"]))
+    lsq_kwargs = _least_squares_kwargs(settings, default_max_nfev=2000)
+    fit, sse = _best_fit_over_starts(residual, starts, lb, ub, lsq_kwargs)
     vp = float(fit.x[0])
 
     # Placeholder CI values: match MATLAB output shape.
@@ -619,6 +668,9 @@ def model_tissue_uptake_fit(
         "upper_limit_tp": 1e6,
         "initial_value_tp": 0.05,
         "max_nfev": 2000,
+        "tol_fun": 1e-12,
+        "tol_x": 1e-6,
+        "robust": "off",
     }
     if prefs:
         settings.update(prefs)
@@ -656,7 +708,8 @@ def model_tissue_uptake_fit(
         ],
     ]
 
-    fit, sse = _best_fit_over_starts(residual, starts, lb, ub, int(settings["max_nfev"]))
+    lsq_kwargs = _least_squares_kwargs(settings, default_max_nfev=2000)
+    fit, sse = _best_fit_over_starts(residual, starts, lb, ub, lsq_kwargs)
     ktrans = float(fit.x[0])
     fp = float(fit.x[1])
     tp = float(fit.x[2])
@@ -703,6 +756,9 @@ def model_2cxm_fit(
         "upper_limit_fp": 100.0,
         "initial_value_fp": 0.2,
         "max_nfev": 2000,
+        "tol_fun": 1e-12,
+        "tol_x": 1e-6,
+        "robust": "off",
     }
     if prefs:
         settings.update(prefs)
@@ -745,7 +801,8 @@ def model_2cxm_fit(
         ],
     ]
 
-    fit, sse = _best_fit_over_starts(residual, starts, lb, ub, int(settings["max_nfev"]))
+    lsq_kwargs = _least_squares_kwargs(settings, default_max_nfev=2000)
+    fit, sse = _best_fit_over_starts(residual, starts, lb, ub, lsq_kwargs)
     ktrans = float(fit.x[0])
     ve = float(fit.x[1])
     vp = float(fit.x[2])
@@ -788,6 +845,9 @@ def model_fxr_fit(
         "upper_limit_tau": 100.0,
         "initial_value_tau": 0.01,
         "max_nfev": 2000,
+        "tol_fun": 1e-12,
+        "tol_x": 1e-6,
+        "robust": "off",
     }
     if prefs:
         settings.update(prefs)
@@ -824,8 +884,7 @@ def model_fxr_fit(
         residual,
         x0=x0,
         bounds=(lb, ub),
-        method="trf",
-        max_nfev=int(settings["max_nfev"]),
+        **_least_squares_kwargs(settings, default_max_nfev=2000),
     )
 
     ktrans = float(fit.x[0])

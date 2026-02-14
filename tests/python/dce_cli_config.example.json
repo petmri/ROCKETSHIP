@@ -32,6 +32,7 @@
     "FXL_rr": 0
   },
   "stage_overrides": {
+    "dce_preferences_path": "/ABS/PATH/TO/ROCKETSHIP/dce/dce_preferences.txt",
     "stage_a_mode": "real",
     "stage_b_mode": "real",
     "stage_d_mode": "real",

@@ -66,6 +66,12 @@ Confirmed in-scope requirements to retain:
   - real in-memory implementation path is wired (voxel/ROI model fitting, parameter-map output, `.xls` ROI tables)
   - supported non-GUI models: `tofts`, `ex_tofts`, `patlak`, `tissue_uptake`, `2cxm`, `fxr`, `auc`
   - stage mode control: `stage_overrides.stage_d_mode = auto|real|scaffold`
+- MATLAB preference bridge status:
+  - Python now loads MATLAB-style `dce_preferences.txt` defaults (default path: `/Users/samuelbarnes/code/ROCKETSHIP/dce/dce_preferences.txt`)
+  - override path is supported via `stage_overrides.dce_preferences_path` or CLI `--dce-preferences`
+  - explicit `stage_overrides` values always win over file defaults
+  - preference parsing supports MATLAB numeric expressions (for example `10^-7`, `10^(-12)`)
+  - Stage D auto-backend now honors `force_cpu` when backend is `auto`
 - Recent parity fixes (MATLAB alignment):
   - Stage A now uses MATLAB-style column-major voxel indexing for `lvind/tumind/noiseind`.
   - Stage D map writeback now uses MATLAB-style linear index mapping.
@@ -83,6 +89,20 @@ Confirmed in-scope requirements to retain:
     - downsample `x3y3` `ve`: `corr=0.98584`, `mse=0.001059`, `mae=0.001531` (`n=2834`)
     - full-volume `BBB p19` `Ktrans`: `corr=0.99499`, `mse=0.0004671`, `mae=0.005261` (`n=25512`)
     - full-volume `BBB p19` `ve`: `corr=0.98822`, `mse=0.0008778`, `mae=0.001473` (`n=25512`)
+- Tiny settings-matrix tests:
+  - fixture generator: `tests/python/generate_tiny_dce_settings_fixture.py`
+  - fixture path: `test_data/ci_fixtures/dce/tiny_settings_case`
+  - test module: `tests/python/test_dce_pipeline_settings_matrix.py`
+  - current covered settings/features:
+    - Tofts fit bound enforcement (`voxel_lower/upper_limit_*`)
+    - Tofts initial guess robustness (`voxel_initial_value_*`)
+    - Stage-A static blood T1 override (`stage_overrides.blood_t1_ms|blood_t1_sec`)
+    - Stage-A blood T1 override guardrail (rejects non-positive values)
+- Preference bridge tests:
+  - `tests/python/test_dce_preferences_bridge.py`
+  - validates file loading, expression parsing, override precedence, Stage-B AIF fit option wiring, and `force_cpu` behavior
+  - `tests/python/test_dce_cli.py`
+  - validates `--dce-preferences` and repeatable `--set KEY=VALUE` merging into `stage_overrides`
 - Scope guards enforced by config validation:
   - rejects ImageJ `.roi` input
   - accepts backend `auto|cpu|gpufit`
@@ -131,10 +151,15 @@ Workflow: `/Users/samuelbarnes/code/ROCKETSHIP/.github/workflows/run_DCE.yml`
 - Push to `dev/master`: heavier MATLAB matrix (full validation path).
 
 ## Next recommended steps
-1. Expand dataset-backed DCE regression beyond current Tofts map checks (`Ktrans`, `ve`) into ROI table values and additional model maps.
-2. Decide whether to port `nested` and `FXL_rr` DCE model flows in the Python CLI or keep them explicitly unsupported.
-3. Expand DSC parity work (`DSC_convolution_oSVD`) once DCE dataset regression checks are stable.
-4. Performance pass (post-stability/parity lock):
+1. Expand tiny fixture variants for edge-case sweeps:
+   - low-SNR case
+   - non-uniform timer case (`stage_overrides.time_vector_path`)
+   - harsh bounds / low-iteration fit case
+2. Expand dataset-backed DCE regression beyond current Tofts map checks (`Ktrans`, `ve`) into ROI table values and additional model maps.
+3. Complete script-level option mapping audit from MATLAB `script_preferences.txt` into Python config schema (for full CLI option parity documentation).
+4. Decide whether to port `nested` and `FXL_rr` DCE model flows in the Python CLI or keep them explicitly unsupported.
+5. Expand DSC parity work (`DSC_convolution_oSVD`) once DCE dataset regression checks are stable.
+6. Performance pass (post-stability/parity lock):
    - Investigate DCE pipeline runtime gap where Python runs are currently about `2x-4x` slower than MATLAB on full runs.
    - Profile Python Stage D hot spots and optimize numerical paths/data layout.
    - Evaluate using GPUfit CPU backend options (in addition to GPU mode) as a fast fitting path.
