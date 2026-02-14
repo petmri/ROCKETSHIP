@@ -600,6 +600,15 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     if t1map_img.ndim == 4:
         t1map_img = t1map_img[..., 0]
 
+    # Accept 2D inputs for single-slice dynamics.
+    if dynamic.shape[2] == 1:
+        if aif_mask_img.ndim == 2:
+            aif_mask_img = aif_mask_img[..., np.newaxis]
+        if roi_mask_img.ndim == 2:
+            roi_mask_img = roi_mask_img[..., np.newaxis]
+        if t1map_img.ndim == 2:
+            t1map_img = t1map_img[..., np.newaxis]
+
     spatial = dynamic.shape[:3]
     if aif_mask_img.shape != spatial:
         raise ValueError(f"AIF mask shape {aif_mask_img.shape} does not match dynamic spatial shape {spatial}")
@@ -619,6 +628,8 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
         noise_mask_img = _load_nifti_data(config.noise_files[0])
         if noise_mask_img.ndim == 4:
             noise_mask_img = noise_mask_img[..., 0]
+        if dynamic.shape[2] == 1 and noise_mask_img.ndim == 2:
+            noise_mask_img = noise_mask_img[..., np.newaxis]
         if noise_mask_img.shape != spatial:
             raise ValueError(f"Noise mask shape {noise_mask_img.shape} does not match dynamic spatial shape {spatial}")
         noise_mask = noise_mask_img > 0
