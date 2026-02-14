@@ -12,6 +12,37 @@ on:
       - dev
 
 jobs:
+  python_checks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run Python unit tests
+        run: python -m unittest discover -s tests/python -p 'test_*.py'
+
+      - name: Run Python contract parity checks
+        run: |
+          python tests/python/generate_python_results.py --output /tmp/python_results.json
+          python tests/python/compare_with_matlab_baseline.py --python-results /tmp/python_results.json --require-all
+
+      - name: Run Python DCE pipeline parity (downsample fixture)
+        env:
+          ROCKETSHIP_RUN_PIPELINE_PARITY: "1"
+          ROCKETSHIP_BBB_DOWNSAMPLED_ROOT: test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3
+        run: |
+          python -m unittest tests.python.test_dce_pipeline_parity_metrics.TestDcePipelineParityMetrics.test_downsample_bbb_p19_tofts_ktrans
+
   build_push:
     if: github.event_name == 'push'
     strategy:
@@ -86,20 +117,15 @@ jobs:
         with:
           command: addpath .; addpath tests/matlab/; addpath tests/matlab/helpers/; results = run_all_tests('suite','integration'); assert(~any([results.Failed]), 'Integration tests failed.');
 
-      - name: Generate Synthetic DCE Smoke Dataset
-        uses: matlab-actions/run-command@v2
-        with:
-          command: addpath .; addpath tests/matlab/; addpath tests/matlab/helpers/; generate_synthetic_datasets('outputRoot','test_data/synthetic/generated','clean',true);
-
       - name: Run DCE (PR Smoke)
         uses: matlab-actions/run-command@v2
         with:
-          command: run_dce_cli('test_data/synthetic/generated/downsample_x2/rawdata/sub-01/ses-01/', 'test_data/synthetic/generated/downsample_x2/derivatives/sub-01/ses-01/')
+          command: run_dce_cli('test_data/ci_fixtures/dce/downsample_x2_bids/rawdata/sub-01/ses-01/', 'test_data/ci_fixtures/dce/downsample_x2_bids/derivatives/sub-01/ses-01/')
 
       - name: Upload Ktrans result (PR Smoke)
         uses: actions/upload-artifact@v4
         with:
           name: Ktrans_result_pr_ubuntu-latest-R2022a
-          path: test_data/synthetic/generated/downsample_x2/derivatives/sub-01/ses-01/dce/dce_patlak_fit_Ktrans.nii
+          path: test_data/ci_fixtures/dce/downsample_x2_bids/derivatives/sub-01/ses-01/dce/dce_patlak_fit_Ktrans.nii
           retention-days: 7
           if-no-files-found: error

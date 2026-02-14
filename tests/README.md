@@ -66,6 +66,10 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python tests/python/generate_bbb_p19_downsample.py --clean --factor-x 3 --factor-y 3
 ```
 
+CI uses committed lightweight fixtures (no per-run generation required):
+- `test_data/ci_fixtures/dce/downsample_x2_bids` (MATLAB PR smoke DCE run)
+- `test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3` (Python DCE pipeline parity)
+
 Generate MATLAB Tofts Ktrans parity baselines (`processed/results_matlab`) for both
 downsampled and full-volume BBB datasets:
 

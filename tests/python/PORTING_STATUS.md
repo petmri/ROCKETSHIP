@@ -78,6 +78,9 @@ Confirmed in-scope requirements to retain:
   - full-volume `BBB data p19` path is available behind env gating due runtime.
   - both tests require MATLAB baseline map `processed/results_matlab/Dyn-1_tofts_fit_Ktrans.nii` (not legacy `processed/results`).
   - MATLAB baseline generator: `tests/matlab/generate_dce_tofts_parity_map.m`
+  - latest measured parity (MATLAB `results_matlab` baseline):
+    - downsample `x3y3`: `corr=0.99816`, `mse=0.0001815`, `mae=0.004171` (`n=2834`)
+    - full-volume `BBB p19`: `corr=0.99499`, `mse=0.0004671`, `mae=0.005261` (`n=25512`)
 - Scope guards enforced by config validation:
   - rejects ImageJ `.roi` input
   - accepts backend `auto|cpu|gpufit`
@@ -121,10 +124,15 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 ## CI behavior
 Workflow: `/Users/samuelbarnes/code/ROCKETSHIP/.github/workflows/run_DCE.yml`
 
-- PR: fast single-job checks + synthetic DCE smoke run.
-- Push to `dev/master`: heavier matrix (full validation path).
+- `python_checks` job (push + PR): Python unit tests, contract parity checks, and downsample DCE pipeline parity.
+- PR MATLAB job: unit/integration checks + DCE smoke run using committed fixture `test_data/ci_fixtures/dce/downsample_x2_bids`.
+- Push to `dev/master`: heavier MATLAB matrix (full validation path).
 
 ## Next recommended steps
-1. Add dataset-backed regression checks from `test_data` for Stage D map outputs (summary metrics and tolerant voxel comparisons).
+1. Expand dataset-backed DCE regression beyond Tofts Ktrans (for example `ve`, ROI table values, and additional model maps).
 2. Decide whether to port `nested` and `FXL_rr` DCE model flows in the Python CLI or keep them explicitly unsupported.
 3. Expand DSC parity work (`DSC_convolution_oSVD`) once DCE dataset regression checks are stable.
+4. Performance pass (post-stability/parity lock):
+   - Investigate DCE pipeline runtime gap where Python runs are currently about `2x-4x` slower than MATLAB on full runs.
+   - Profile Python Stage D hot spots and optimize numerical paths/data layout.
+   - Evaluate using GPUfit CPU backend options (in addition to GPU mode) as a fast fitting path.

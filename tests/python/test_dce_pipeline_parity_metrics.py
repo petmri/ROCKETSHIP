@@ -37,6 +37,13 @@ def _dataset_paths(root: Path) -> dict:
     }
 
 
+def _default_downsample_root() -> Path:
+    ci_fixture = REPO_ROOT / "test_data" / "ci_fixtures" / "dce" / "bbb_p19_downsample_x3y3"
+    if ci_fixture.exists():
+        return ci_fixture
+    return REPO_ROOT / "test_data" / "synthetic" / "generated" / "bbb_p19_downsample_x3y3"
+
+
 def _make_config(paths: dict, out_dir: Path) -> DcePipelineConfig:
     return DcePipelineConfig(
         subject_source_path=paths["root"],
@@ -120,7 +127,7 @@ class TestDcePipelineParityMetrics(unittest.TestCase):
         root = Path(
             os.environ.get(
                 "ROCKETSHIP_BBB_DOWNSAMPLED_ROOT",
-                str(REPO_ROOT / "test_data" / "synthetic" / "generated" / "bbb_p19_downsample_x3y3"),
+                str(_default_downsample_root()),
             )
         )
         paths = _dataset_paths(root)

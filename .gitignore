@@ -183,4 +183,15 @@ dce_last_state.mat
 dce/*info.log
 test_data/BIDS_test/derivatives
 test_data/synthetic/generated
+test_data/BBB data p19/Dyn-1_timecurves.fig
+test_data/BBB data p19/Dyn-1dynamicCt.nii.gz
+test_data/BBB data p19/processed/python_out/
+test_data/BBB data p19/processed/python_out_tofts_kmax100/
+test_data/BBB data p19/processed/results_matlab/
+test_data/ci_fixtures/dce/downsample_x2_bids/derivatives/sub-01/ses-01/dce/A_*
+test_data/ci_fixtures/dce/downsample_x2_bids/derivatives/sub-01/ses-01/dce/B_*
+test_data/ci_fixtures/dce/downsample_x2_bids/derivatives/sub-01/ses-01/dce/dceAIF_fitting.*
+test_data/ci_fixtures/dce/downsample_x2_bids/derivatives/sub-01/ses-01/dce/dce_timecurves.*
+test_data/ci_fixtures/dce/downsample_x2_bids/derivatives/sub-01/ses-01/dce/dcedynamicCt.nii.gz
+test_data/ci_fixtures/dce/downsample_x2_bids/derivatives/sub-01/ses-01/dce/dce_patlak_fit*
 

@@ -15,6 +15,11 @@
 - Added initial real Stage-A implementation path with QC figure generation in Python CLI pipeline.
 - Added initial real Stage-B implementation path with non-interactive AIF modes and QC figure generation.
 - Added initial real Stage-D implementation path with voxel/ROI model fitting, map outputs, and `.xls` ROI tables.
+- Added dataset-backed DCE parity fixture generator for downsampled `BBB data p19` (`x3,y3`).
+- Added MATLAB A->B->D parity baseline generator for Tofts Ktrans maps (`processed/results_matlab`).
+- Added Python dataset-backed parity tests for downsample and full-volume Tofts Ktrans with corr/MSE tolerances.
+- Added CI Python checks (unit + contract parity + downsample DCE pipeline parity).
+- Switched MATLAB PR smoke run to committed CI fixture (`test_data/ci_fixtures/dce/downsample_x2_bids`) to avoid per-run fixture generation.
 
 ## Scope guardrails for Python CLI port
 - Primary target: DCE parts `A`, `B`, and `D` as CLI workflow.
@@ -37,25 +42,23 @@
 - Add GPUfit as optional backend once installed; compare against CPU with backend-aware tolerances.
 
 ## Next expansion steps
-1. Add fixture generators for edge cases:
+1. Broaden DCE dataset-backed regression:
+   - add map checks beyond Tofts Ktrans (`ve`, ROI `.xls` outputs, additional model maps)
+   - add summary metrics (mean/median/p95) on `test_data/BBB data p19`
+2. Add fixture generators for edge cases:
    - low-SNR synthetic curves
    - non-uniform time vectors
    - boundary parameter values (near lower/upper fit limits)
-2. Add ROI/map regression tests:
-   - compare summary metrics (mean/median/p95) on `test_data/BBB data p19`
-   - compare voxel-map hashes with robust tolerances
-3. Add pipeline integration tests:
-   - scripted A->B->D DCE checks with assertions on numerical outputs
-   - non-interactive DSC workflow checks for both sSVD and oSVD paths
-4. Add dataset-backed DCE regression:
-   - map summary/regression checks on `test_data`
-   - tighter expected tolerances for end-to-end A->B->D outputs
-5. Decide whether to port currently unsupported DCE model branches:
+3. Decide whether to port currently unsupported DCE model branches:
    - `nested`
    - `FXL_rr`
-6. Close next DSC parity gap:
+4. Close next DSC parity gap:
    - add baseline + contracts for `DSC_convolution_oSVD`
    - port `DSC_convolution_oSVD` and compare against baseline
-7. Grow real datasets as needed:
+5. Performance pass after parity lock:
+   - investigate current Python-vs-MATLAB runtime gap (`~2x-4x` on full DCE runs)
+   - profile and optimize Python Stage D hot spots
+   - evaluate GPUfit CPU backend options as an additional fast path
+6. Grow real datasets as needed:
    - include at least one additional acquisition profile (different TR/FA/time resolution)
    - include one dataset with known challenging AIF behavior

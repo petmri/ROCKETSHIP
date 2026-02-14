@@ -110,7 +110,10 @@ Current scaffold behavior:
 - Writes per-model DCE maps (NIfTI when possible; fallback `.npy`) for supported model parameters.
 
 ## Dataset-backed Ktrans parity checks
-Generate a fast real-data fixture (nearest-neighbor downsample of `BBB data p19`):
+Default downsample parity fixture is committed for CI/local use:
+- `test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3`
+
+Optional: regenerate a fast real-data fixture (nearest-neighbor downsample of `BBB data p19`):
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
@@ -118,7 +121,7 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 ```
 
 Generate MATLAB parity baselines (`processed/results_matlab/Dyn-1_tofts_fit_Ktrans.nii`).
-This is required for both downsample and full-volume parity tests:
+This is required for both downsample and full-volume parity tests if you are regenerating fixtures:
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
