@@ -3,6 +3,7 @@
 from .dce_models import model_patlak_cfit, model_tofts_cfit
 from .dce_models import model_extended_tofts_cfit, model_patlak_linear, model_tofts_fit
 from .dsc_helpers import import_aif, previous_aif
+from .dsc_models import dsc_convolution_ssvd
 from .parametric_models import t1_fa_linear_fit, t2_linear_fast
 
 __all__ = [
@@ -13,6 +14,7 @@ __all__ = [
     "model_tofts_fit",
     "import_aif",
     "previous_aif",
+    "dsc_convolution_ssvd",
     "t2_linear_fast",
     "t1_fa_linear_fit",
 ]

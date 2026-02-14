@@ -29,6 +29,8 @@ python3 -m venv .venv
 - Source: `python/rocketship/dsc_helpers.py`
 - Function: `import_aif`
 - Function: `previous_aif`
+- Source: `python/rocketship/dsc_models.py`
+- Function: `dsc_convolution_ssvd`
 - Source: `python/rocketship/parametric_models.py`
 - Function: `t2_linear_fast`
 - Function: `t1_fa_linear_fit`

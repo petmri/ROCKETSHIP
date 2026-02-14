@@ -34,6 +34,7 @@ def main() -> int:
     sys.path.insert(0, str(repo_root / "python"))
 
     from rocketship import (  # pylint: disable=import-outside-toplevel
+        dsc_convolution_ssvd,
         import_aif,
         model_extended_tofts_cfit,
         model_patlak_cfit,
@@ -78,6 +79,18 @@ def main() -> int:
         import_aif_out[0], import_aif_out[3], bolus_time, import_aif_out[1], import_aif_out[2]
     )
 
+    # Match synthetic DSC deconvolution fixture from MATLAB export_parity_baseline.m
+    time_index = list(range(10))
+    ssvd_concentration = []
+    for ix in range(2):
+        row = []
+        for iy in range(2):
+            trace = [math.exp(-(((t - (2 + (ix + 1) + (iy + 1) / 2.0)) ** 2) / 6.0)) for t in time_index]
+            row.append(trace)
+        ssvd_concentration.append(row)
+    ssvd_aif = [math.exp(-(((t - 2) ** 2) / 4.0)) for t in time_index]
+    ssvd_out = dsc_convolution_ssvd(ssvd_concentration, ssvd_aif, 0.1, 0.73, 1.04, 20, 1)
+
     # Match synthetic parametric fixture from MATLAB export_parity_baseline.m
     te = [10.0, 20.0, 40.0, 60.0]
     true_t2 = 85.0
@@ -106,6 +119,7 @@ def main() -> int:
                 "model_patlak_cfit",
                 "model_patlak_linear",
                 "model_tofts_fit",
+                "dsc_convolution_ssvd",
                 "t2_linear_fast",
                 "t1_fa_linear_fit",
             ],
@@ -130,6 +144,11 @@ def main() -> int:
                 "meanAIF_adjusted": previous_aif_out[0],
                 "time_vect": previous_aif_out[1],
                 "concentration_array": previous_aif_out[2],
+            },
+            "ssvd_deconvolution": {
+                "CBF": ssvd_out[0],
+                "CBV": ssvd_out[1],
+                "MTT": ssvd_out[2],
             },
             "t2_linear_fast": t2_linear_fast(te, si_t2),
             "t1_fa_linear_fit": t1_fa_linear_fit(fa, si_t1, tr),

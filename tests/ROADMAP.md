@@ -7,6 +7,7 @@
 - CI wiring for unit/integration plus PR synthetic smoke checks.
 - Python parity runner and baseline comparison tooling.
 - Initial Python ports for DCE/DSC helper/parametric core models.
+- MATLAB baseline + Python parity coverage for DSC `ssvd_deconvolution`.
 
 ## Next expansion steps
 1. Add fixture generators for edge cases:
@@ -19,9 +20,9 @@
 3. Add pipeline integration tests:
    - scripted A->B->D DCE checks with assertions on numerical outputs
    - non-interactive DSC workflow checks for both sSVD and oSVD paths
-4. Close remaining parity gap:
-   - export baseline for `ssvd_deconvolution`
-   - port DSC deconvolution implementation and compare against baseline
+4. Close next parity gap:
+   - add baseline + contracts for `DSC_convolution_oSVD`
+   - port `DSC_convolution_oSVD` and compare against baseline
 5. Grow real datasets as needed:
    - include at least one additional acquisition profile (different TR/FA/time resolution)
    - include one dataset with known challenging AIF behavior

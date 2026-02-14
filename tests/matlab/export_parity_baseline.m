@@ -47,6 +47,19 @@ baseline.dsc.import_aif = struct('meanAIF_adjusted', meanAIFAdjusted, 'time_vect
 baseline.dsc.previous_aif = struct('meanAIF_adjusted', meanAIFPrev, 'time_vect', timeVectPrev, ...
     'concentration_array', concentrationPrev);
 
+ssvdConc = zeros(2, 2, 10);
+timeIndex = 0:9;
+for ix = 1:2
+    for iy = 1:2
+        ssvdConc(ix, iy, :) = exp(-((timeIndex - (2 + ix + iy / 2)).^2) / 6);
+    end
+end
+ssvdAIF = exp(-((timeIndex - 2).^2) / 4)';
+ssvdOutDir = tempname;
+mkdir(ssvdOutDir);
+[ssvdCBF, ssvdCBV, ssvdMTT] = DSC_convolution_sSVD(ssvdConc, ssvdAIF, 0.1, 0.73, 1.04, 20, 1, [ssvdOutDir filesep]);
+baseline.dsc.ssvd_deconvolution = struct('CBF', ssvdCBF, 'CBV', ssvdCBV, 'MTT', ssvdMTT);
+
 te = [10; 20; 40; 60];
 trueT2 = 85;
 rho = 900;

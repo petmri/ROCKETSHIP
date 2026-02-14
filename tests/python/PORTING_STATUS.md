@@ -14,6 +14,8 @@ Python implementations currently exist in `/Users/samuelbarnes/code/ROCKETSHIP/p
 - `dsc_helpers.py`
   - `import_aif`
   - `previous_aif`
+- `dsc_models.py`
+  - `dsc_convolution_ssvd`
 - `parametric_models.py`
   - `t2_linear_fast`
   - `t1_fa_linear_fit`
@@ -27,13 +29,10 @@ From `.venv`:
 ```
 
 Expected summary right now:
-- `9 pass`
+- `10 pass`
 - `0 fail`
 - `0 missing`
-- `1 skipped`
-
-Skipped contract:
-- `ssvd_deconvolution` (baseline path `dsc.ssvd_deconvolution` is not present in `matlab_reference_v1.json`)
+- `0 skipped`
 
 ## Test commands to rerun quickly
 
@@ -59,7 +58,6 @@ Workflow: `/Users/samuelbarnes/code/ROCKETSHIP/.github/workflows/run_DCE.yml`
 - Push to `dev/master`: heavier matrix (full validation path).
 
 ## Next recommended steps
-1. Add MATLAB baseline export for `ssvd_deconvolution` and map it in parity runner.
-2. Port DSC sSVD/oSVD implementations (or at least sSVD first) and validate against that baseline.
-3. Decide whether to improve `model_tofts_fit` confidence intervals beyond placeholder estimate values (current parity passes under `fit_recovery` tolerances).
-4. Add a top-level Python package test runner target (e.g., Makefile or npm-style script equivalent) if desired.
+1. Port `DSC_convolution_oSVD` next and add it to parity contracts/baseline.
+2. Decide whether to improve `model_tofts_fit` confidence intervals beyond placeholder estimate values (current parity passes under `fit_recovery` tolerances).
+3. Add a top-level Python package test runner target (e.g., Makefile or npm-style script equivalent) if desired.
