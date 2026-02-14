@@ -58,3 +58,18 @@ You can also generate into a temp directory:
 ```matlab
 manifest = generate_synthetic_datasets('outputRoot', fullfile(tempdir, 'rocketship_synth'));
 ```
+
+## MATLAB-vs-Python parity runner
+Use the lightweight Python comparator in `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/`:
+
+```bash
+python3 tests/python/compare_with_matlab_baseline.py \
+  --write-template tests/python/python_results_template.json
+```
+
+Then compare Python outputs by contract:
+
+```bash
+python3 tests/python/compare_with_matlab_baseline.py \
+  --python-results tests/python/python_results_template.json
+```
