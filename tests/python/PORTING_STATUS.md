@@ -72,6 +72,12 @@ Confirmed in-scope requirements to retain:
   - Stage A TR handling now converts `tr_ms -> tr_sec` before R1 calculations.
   - Stage A now auto-converts T1 maps from ms to seconds when magnitudes indicate ms units.
   - Stage A cleanup behavior (`cleanAB`, `cleanR1t`) now mirrors MATLAB logic more closely.
+- Dataset parity tests:
+  - `tests/python/test_dce_pipeline_parity_metrics.py` adds full-pipeline Tofts Ktrans checks against MATLAB maps using correlation and MSE tolerances.
+  - fast path uses `test_data/synthetic/generated/bbb_p19_downsample_x3y3`.
+  - full-volume `BBB data p19` path is available behind env gating due runtime.
+  - both tests require MATLAB baseline map `processed/results_matlab/Dyn-1_tofts_fit_Ktrans.nii` (not legacy `processed/results`).
+  - MATLAB baseline generator: `tests/matlab/generate_dce_tofts_parity_map.m`
 - Scope guards enforced by config validation:
   - rejects ImageJ `.roi` input
   - accepts backend `auto|cpu|gpufit`

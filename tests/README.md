@@ -59,6 +59,22 @@ You can also generate into a temp directory:
 manifest = generate_synthetic_datasets('outputRoot', fullfile(tempdir, 'rocketship_synth'));
 ```
 
+Generate a fast, nearest-neighbor downsampled `BBB data p19` fixture (`x3,y3`) for Python-vs-MATLAB Ktrans parity checks:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python tests/python/generate_bbb_p19_downsample.py --clean --factor-x 3 --factor-y 3
+```
+
+Generate MATLAB Tofts Ktrans parity baselines (`processed/results_matlab`) for both
+downsampled and full-volume BBB datasets:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+matlab -batch "cd('/Users/samuelbarnes/code/ROCKETSHIP'); addpath('tests/matlab'); generate_dce_tofts_parity_map('subjectRoot','/Users/samuelbarnes/code/ROCKETSHIP/test_data/synthetic/generated/bbb_p19_downsample_x3y3')"
+matlab -batch "cd('/Users/samuelbarnes/code/ROCKETSHIP'); addpath('tests/matlab'); generate_dce_tofts_parity_map('subjectRoot','/Users/samuelbarnes/code/ROCKETSHIP/test_data/BBB data p19')"
+```
+
 ## MATLAB-vs-Python parity runner
 Use the lightweight Python comparator in `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/`:
 
