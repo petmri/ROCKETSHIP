@@ -109,7 +109,7 @@ Current scaffold behavior:
 - Saves QC figures during Stage A and Stage B real runs (for example `dce_timecurves.png`, `dce_roi_overview.png`, `dce_aif_fitting.png`).
 - Writes per-model DCE maps (NIfTI when possible; fallback `.npy`) for supported model parameters.
 
-## Dataset-backed Ktrans parity checks
+## Dataset-backed DCE parity checks
 Default downsample parity fixture is committed for CI/local use:
 - `test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3`
 
@@ -120,7 +120,7 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python tests/python/generate_bbb_p19_downsample.py --clean --factor-x 3 --factor-y 3
 ```
 
-Generate MATLAB parity baselines (`processed/results_matlab/Dyn-1_tofts_fit_Ktrans.nii`).
+Generate MATLAB parity baselines (`processed/results_matlab/Dyn-1_tofts_fit_Ktrans.nii` and `Dyn-1_tofts_fit_ve.nii`).
 This is required for both downsample and full-volume parity tests if you are regenerating fixtures:
 
 ```bash
@@ -129,7 +129,7 @@ matlab -batch "cd('/Users/samuelbarnes/code/ROCKETSHIP'); addpath('tests/matlab'
 matlab -batch "cd('/Users/samuelbarnes/code/ROCKETSHIP'); addpath('tests/matlab'); generate_dce_tofts_parity_map('subjectRoot','/Users/samuelbarnes/code/ROCKETSHIP/test_data/BBB data p19')"
 ```
 
-Run downsampled full-pipeline Tofts Ktrans parity test (Python vs MATLAB map, with corr/MSE tolerances):
+Run downsampled full-pipeline Tofts parity test (Python vs MATLAB maps for `Ktrans` and `ve`, with corr/MSE tolerances):
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
@@ -137,7 +137,7 @@ ROCKETSHIP_RUN_PIPELINE_PARITY=1 .venv/bin/python -m unittest \
   tests.python.test_dce_pipeline_parity_metrics.TestDcePipelineParityMetrics.test_downsample_bbb_p19_tofts_ktrans
 ```
 
-Optional full-volume parity test (slower):
+Optional full-volume parity test (slower; reserve for occasional thorough checks):
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
@@ -148,8 +148,12 @@ ROCKETSHIP_RUN_PIPELINE_PARITY=1 ROCKETSHIP_RUN_FULL_VOLUME_PARITY=1 .venv/bin/p
 Tune parity thresholds via environment variables:
 
 ```bash
-ROCKETSHIP_PARITY_DOWNSAMPLED_CORR_MIN=0.99
-ROCKETSHIP_PARITY_DOWNSAMPLED_MSE_MAX=0.001
-ROCKETSHIP_PARITY_FULL_CORR_MIN=0.99
-ROCKETSHIP_PARITY_FULL_MSE_MAX=0.001
+ROCKETSHIP_PARITY_DOWNSAMPLED_KTRANS_CORR_MIN=0.99
+ROCKETSHIP_PARITY_DOWNSAMPLED_KTRANS_MSE_MAX=0.001
+ROCKETSHIP_PARITY_DOWNSAMPLED_VE_CORR_MIN=0.97
+ROCKETSHIP_PARITY_DOWNSAMPLED_VE_MSE_MAX=0.002
+ROCKETSHIP_PARITY_FULL_KTRANS_CORR_MIN=0.99
+ROCKETSHIP_PARITY_FULL_KTRANS_MSE_MAX=0.001
+ROCKETSHIP_PARITY_FULL_VE_CORR_MIN=0.97
+ROCKETSHIP_PARITY_FULL_VE_MSE_MAX=0.002
 ```

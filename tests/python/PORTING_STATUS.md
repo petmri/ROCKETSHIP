@@ -73,14 +73,16 @@ Confirmed in-scope requirements to retain:
   - Stage A now auto-converts T1 maps from ms to seconds when magnitudes indicate ms units.
   - Stage A cleanup behavior (`cleanAB`, `cleanR1t`) now mirrors MATLAB logic more closely.
 - Dataset parity tests:
-  - `tests/python/test_dce_pipeline_parity_metrics.py` adds full-pipeline Tofts Ktrans checks against MATLAB maps using correlation and MSE tolerances.
-  - fast path uses `test_data/synthetic/generated/bbb_p19_downsample_x3y3`.
-  - full-volume `BBB data p19` path is available behind env gating due runtime.
+  - `tests/python/test_dce_pipeline_parity_metrics.py` adds full-pipeline Tofts map checks (`Ktrans`, `ve`) against MATLAB maps using correlation and MSE tolerances.
+  - fast path uses committed fixture `test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3` (with fallback to synthetic-generated path if needed).
+  - full-volume `BBB data p19` path is available behind env gating and intended for occasional thorough checks due runtime.
   - both tests require MATLAB baseline map `processed/results_matlab/Dyn-1_tofts_fit_Ktrans.nii` (not legacy `processed/results`).
   - MATLAB baseline generator: `tests/matlab/generate_dce_tofts_parity_map.m`
   - latest measured parity (MATLAB `results_matlab` baseline):
-    - downsample `x3y3`: `corr=0.99816`, `mse=0.0001815`, `mae=0.004171` (`n=2834`)
-    - full-volume `BBB p19`: `corr=0.99499`, `mse=0.0004671`, `mae=0.005261` (`n=25512`)
+    - downsample `x3y3` `Ktrans`: `corr=0.99816`, `mse=0.0001815`, `mae=0.004171` (`n=2834`)
+    - downsample `x3y3` `ve`: `corr=0.98584`, `mse=0.001059`, `mae=0.001531` (`n=2834`)
+    - full-volume `BBB p19` `Ktrans`: `corr=0.99499`, `mse=0.0004671`, `mae=0.005261` (`n=25512`)
+    - full-volume `BBB p19` `ve`: `corr=0.98822`, `mse=0.0008778`, `mae=0.001473` (`n=25512`)
 - Scope guards enforced by config validation:
   - rejects ImageJ `.roi` input
   - accepts backend `auto|cpu|gpufit`
@@ -129,7 +131,7 @@ Workflow: `/Users/samuelbarnes/code/ROCKETSHIP/.github/workflows/run_DCE.yml`
 - Push to `dev/master`: heavier MATLAB matrix (full validation path).
 
 ## Next recommended steps
-1. Expand dataset-backed DCE regression beyond Tofts Ktrans (for example `ve`, ROI table values, and additional model maps).
+1. Expand dataset-backed DCE regression beyond current Tofts map checks (`Ktrans`, `ve`) into ROI table values and additional model maps.
 2. Decide whether to port `nested` and `FXL_rr` DCE model flows in the Python CLI or keep them explicitly unsupported.
 3. Expand DSC parity work (`DSC_convolution_oSVD`) once DCE dataset regression checks are stable.
 4. Performance pass (post-stability/parity lock):

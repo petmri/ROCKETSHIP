@@ -24,7 +24,8 @@ RUN_FULL = os.environ.get("ROCKETSHIP_RUN_FULL_VOLUME_PARITY", "0") == "1"
 
 def _dataset_paths(root: Path) -> dict:
     processed = root / "processed"
-    matlab_map = processed / "results_matlab" / "Dyn-1_tofts_fit_Ktrans.nii"
+    matlab_ktrans = processed / "results_matlab" / "Dyn-1_tofts_fit_Ktrans.nii"
+    matlab_ve = processed / "results_matlab" / "Dyn-1_tofts_fit_ve.nii"
     return {
         "root": root,
         "processed": processed,
@@ -33,7 +34,8 @@ def _dataset_paths(root: Path) -> dict:
         "roi": processed / "T1_brain_roi.nii",
         "t1map": processed / "T1_map_t1_fa_fit_fa10.nii",
         "noise": processed / "T1_noise_roi.nii",
-        "matlab_tofts_ktrans": matlab_map,
+        "matlab_tofts_ktrans": matlab_ktrans,
+        "matlab_tofts_ve": matlab_ve,
     }
 
 
@@ -113,12 +115,33 @@ def _metrics(py_map: np.ndarray, matlab_map: np.ndarray, roi_mask: np.ndarray) -
 
 def _parity_error_hint(paths: dict) -> str:
     return (
-        "Missing MATLAB baseline map. Generate it first with:\n"
+        "Missing MATLAB baseline map(s). Generate them first with:\n"
         "  matlab -batch \"cd('/Users/samuelbarnes/code/ROCKETSHIP'); "
         "addpath('tests/matlab'); "
         "generate_dce_tofts_parity_map('subjectRoot', '%s');\"\n"
-        "Expected map: %s"
-    ) % (paths["root"], paths["matlab_tofts_ktrans"])
+        "Expected maps:\n"
+        "  %s\n"
+        "  %s"
+    ) % (paths["root"], paths["matlab_tofts_ktrans"], paths["matlab_tofts_ve"])
+
+
+def _assert_map_parity(
+    testcase: unittest.TestCase,
+    py_map: np.ndarray,
+    matlab_map: np.ndarray,
+    roi_mask: np.ndarray,
+    *,
+    label: str,
+    corr_min: float,
+    mse_max: float,
+) -> None:
+    m = _metrics(py_map, matlab_map, roi_mask)
+    summary = (
+        f"{label}: n={m['n']}, corr={m['corr']:.6f}, mse={m['mse']:.6f}, "
+        f"mae={m['mae']:.6f}, p95_abs_err={m['p95_abs_err']:.6f}"
+    )
+    testcase.assertGreaterEqual(m["corr"], corr_min, f"{summary} (corr_min={corr_min})")
+    testcase.assertLessEqual(m["mse"], mse_max, f"{summary} (mse_max={mse_max})")
 
 
 class TestDcePipelineParityMetrics(unittest.TestCase):
@@ -132,25 +155,37 @@ class TestDcePipelineParityMetrics(unittest.TestCase):
         )
         paths = _dataset_paths(root)
         self.assertTrue(paths["matlab_tofts_ktrans"].exists(), _parity_error_hint(paths))
+        self.assertTrue(paths["matlab_tofts_ve"].exists(), _parity_error_hint(paths))
 
         with tempfile.TemporaryDirectory() as tmp:
             out_dir = Path(tmp) / "python_out"
             result = run_dce_pipeline(_make_config(paths, out_dir))
             self.assertEqual(result["meta"]["status"], "ok")
 
-            py_map = _load_nifti(out_dir / "Dyn-1_tofts_fit_Ktrans.nii.gz")
-            matlab_map = _load_nifti(paths["matlab_tofts_ktrans"])
+            py_ktrans = _load_nifti(out_dir / "Dyn-1_tofts_fit_Ktrans.nii.gz")
+            matlab_ktrans = _load_nifti(paths["matlab_tofts_ktrans"])
+            py_ve = _load_nifti(out_dir / "Dyn-1_tofts_fit_ve.nii.gz")
+            matlab_ve = _load_nifti(paths["matlab_tofts_ve"])
             roi_mask = _load_nifti(paths["roi"])
-            m = _metrics(py_map, matlab_map, roi_mask)
 
-        corr_min = float(os.environ.get("ROCKETSHIP_PARITY_DOWNSAMPLED_CORR_MIN", "0.99"))
-        mse_max = float(os.environ.get("ROCKETSHIP_PARITY_DOWNSAMPLED_MSE_MAX", "0.001"))
-        summary = (
-            f"n={m['n']}, corr={m['corr']:.6f}, mse={m['mse']:.6f}, "
-            f"mae={m['mae']:.6f}, p95_abs_err={m['p95_abs_err']:.6f}"
+        _assert_map_parity(
+            self,
+            py_ktrans,
+            matlab_ktrans,
+            roi_mask,
+            label="tofts_ktrans_downsample",
+            corr_min=float(os.environ.get("ROCKETSHIP_PARITY_DOWNSAMPLED_KTRANS_CORR_MIN", "0.99")),
+            mse_max=float(os.environ.get("ROCKETSHIP_PARITY_DOWNSAMPLED_KTRANS_MSE_MAX", "0.001")),
         )
-        self.assertGreaterEqual(m["corr"], corr_min, f"{summary} (corr_min={corr_min})")
-        self.assertLessEqual(m["mse"], mse_max, f"{summary} (mse_max={mse_max})")
+        _assert_map_parity(
+            self,
+            py_ve,
+            matlab_ve,
+            roi_mask,
+            label="tofts_ve_downsample",
+            corr_min=float(os.environ.get("ROCKETSHIP_PARITY_DOWNSAMPLED_VE_CORR_MIN", "0.97")),
+            mse_max=float(os.environ.get("ROCKETSHIP_PARITY_DOWNSAMPLED_VE_MSE_MAX", "0.002")),
+        )
 
     @unittest.skipUnless(
         RUN_PARITY and RUN_FULL,
@@ -165,25 +200,37 @@ class TestDcePipelineParityMetrics(unittest.TestCase):
         )
         paths = _dataset_paths(root)
         self.assertTrue(paths["matlab_tofts_ktrans"].exists(), _parity_error_hint(paths))
+        self.assertTrue(paths["matlab_tofts_ve"].exists(), _parity_error_hint(paths))
 
         with tempfile.TemporaryDirectory() as tmp:
             out_dir = Path(tmp) / "python_out"
             result = run_dce_pipeline(_make_config(paths, out_dir))
             self.assertEqual(result["meta"]["status"], "ok")
 
-            py_map = _load_nifti(out_dir / "Dyn-1_tofts_fit_Ktrans.nii.gz")
-            matlab_map = _load_nifti(paths["matlab_tofts_ktrans"])
+            py_ktrans = _load_nifti(out_dir / "Dyn-1_tofts_fit_Ktrans.nii.gz")
+            matlab_ktrans = _load_nifti(paths["matlab_tofts_ktrans"])
+            py_ve = _load_nifti(out_dir / "Dyn-1_tofts_fit_ve.nii.gz")
+            matlab_ve = _load_nifti(paths["matlab_tofts_ve"])
             roi_mask = _load_nifti(paths["roi"])
-            m = _metrics(py_map, matlab_map, roi_mask)
 
-        corr_min = float(os.environ.get("ROCKETSHIP_PARITY_FULL_CORR_MIN", "0.99"))
-        mse_max = float(os.environ.get("ROCKETSHIP_PARITY_FULL_MSE_MAX", "0.001"))
-        summary = (
-            f"n={m['n']}, corr={m['corr']:.6f}, mse={m['mse']:.6f}, "
-            f"mae={m['mae']:.6f}, p95_abs_err={m['p95_abs_err']:.6f}"
+        _assert_map_parity(
+            self,
+            py_ktrans,
+            matlab_ktrans,
+            roi_mask,
+            label="tofts_ktrans_full",
+            corr_min=float(os.environ.get("ROCKETSHIP_PARITY_FULL_KTRANS_CORR_MIN", "0.99")),
+            mse_max=float(os.environ.get("ROCKETSHIP_PARITY_FULL_KTRANS_MSE_MAX", "0.001")),
         )
-        self.assertGreaterEqual(m["corr"], corr_min, f"{summary} (corr_min={corr_min})")
-        self.assertLessEqual(m["mse"], mse_max, f"{summary} (mse_max={mse_max})")
+        _assert_map_parity(
+            self,
+            py_ve,
+            matlab_ve,
+            roi_mask,
+            label="tofts_ve_full",
+            corr_min=float(os.environ.get("ROCKETSHIP_PARITY_FULL_VE_CORR_MIN", "0.97")),
+            mse_max=float(os.environ.get("ROCKETSHIP_PARITY_FULL_VE_MSE_MAX", "0.002")),
+        )
 
 
 if __name__ == "__main__":

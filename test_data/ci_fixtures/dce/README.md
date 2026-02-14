@@ -22,6 +22,7 @@ regenerating synthetic data on every run.
     - `processed/T1_map_t1_fa_fit_fa10.nii`
     - `processed/T1_noise_roi.nii`
     - `processed/results_matlab/Dyn-1_tofts_fit_Ktrans.nii`
+    - `processed/results_matlab/Dyn-1_tofts_fit_ve.nii`
 
 ## Regeneration notes
 

@@ -59,7 +59,7 @@ You can also generate into a temp directory:
 manifest = generate_synthetic_datasets('outputRoot', fullfile(tempdir, 'rocketship_synth'));
 ```
 
-Generate a fast, nearest-neighbor downsampled `BBB data p19` fixture (`x3,y3`) for Python-vs-MATLAB Ktrans parity checks:
+Generate a fast, nearest-neighbor downsampled `BBB data p19` fixture (`x3,y3`) for Python-vs-MATLAB DCE map parity checks:
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP

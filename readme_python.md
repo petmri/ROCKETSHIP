@@ -10,7 +10,7 @@ currently in this repository.
 - Current implemented workflow focus:
   - DCE parts `A -> B -> D` (non-GUI, single-process, in-memory handoff)
 - Current parity focus:
-  - MATLAB-vs-Python parity for model contracts and dataset-backed Tofts Ktrans
+  - MATLAB-vs-Python parity for model contracts and dataset-backed Tofts maps (`Ktrans`, `ve`)
 
 For detailed port status and todo items, see:
 - `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/PORTING_STATUS.md`
@@ -78,7 +78,7 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python tests/python/compare_with_matlab_baseline.py --python-results /tmp/python_results.json --require-all
 ```
 
-### Dataset-backed DCE pipeline parity (Tofts Ktrans)
+### Dataset-backed DCE pipeline parity (Tofts `Ktrans` + `ve`)
 
 Fast downsample parity:
 
@@ -88,7 +88,7 @@ ROCKETSHIP_RUN_PIPELINE_PARITY=1 .venv/bin/python -m unittest \
   tests.python.test_dce_pipeline_parity_metrics.TestDcePipelineParityMetrics.test_downsample_bbb_p19_tofts_ktrans
 ```
 
-Optional full-volume parity (slower):
+Optional full-volume parity (slower; reserve for occasional thorough checks):
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
