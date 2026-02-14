@@ -1,6 +1,8 @@
 # Python Parity Runner
 
 This directory contains Python parity tooling and first model ports.
+For a resume-later snapshot, see:
+- `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/PORTING_STATUS.md`
 
 ## Environment setup (macOS)
 This project is now configured to use a local `venv` at
