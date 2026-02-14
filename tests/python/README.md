@@ -25,6 +25,7 @@ python3 -m venv .venv
 ## Script
 - `compare_with_matlab_baseline.py`
 - `generate_python_results.py`
+- `run_dce_python_cli.py` (repo root wrapper for in-memory A->B->D scaffold)
 
 ## First model port
 - Source: `python/rocketship/dce_models.py`
@@ -85,3 +86,25 @@ python3 tests/python/compare_with_matlab_baseline.py \
 ```
 
 Add `--require-all` to fail if any mapped contract output is missing.
+
+## DCE CLI scaffold (single-process, in-memory)
+Example config:
+- `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/dce_cli_config.example.json`
+
+Run:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python run_dce_python_cli.py --config tests/python/dce_cli_config.example.json
+```
+
+Current scaffold behavior:
+- Runs A->B->D stage order in-memory with no `.mat` handoff files.
+- Stage A has a real implementation path (NIfTI + mask-driven Cp/Ct extraction).
+- Stage B has a real non-GUI implementation path (timer restriction, AIF `fitted|raw|imported`, and AIF QC figure output).
+- Stage D has a real non-GUI implementation path (model fitting, parameter maps, and `.xls` ROI table output).
+- Writes run summary to `<output_dir>/dce_pipeline_run.json`.
+- Optionally writes per-stage checkpoints (`a_out.json`, `b_out.json`, `d_out.json`) if `checkpoint_dir` is set.
+- Enforces scope decisions (for example, rejects ImageJ `.roi` inputs).
+- Saves QC figures during Stage A and Stage B real runs (for example `dce_timecurves.png`, `dce_roi_overview.png`, `dce_aif_fitting.png`).
+- Writes per-model DCE maps (NIfTI when possible; fallback `.npy`) for supported model parameters.

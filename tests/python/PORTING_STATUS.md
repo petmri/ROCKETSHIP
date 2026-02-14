@@ -51,6 +51,30 @@ Confirmed in-scope requirements to retain:
   - CPU path is required and treated as the parity baseline.
   - GPUfit is optional (`backend=auto|cpu|gpufit`) and can be enabled once installed.
 
+## DCE CLI scaffold status
+- In-memory pipeline scaffold implemented in:
+  - `/Users/samuelbarnes/code/ROCKETSHIP/python/rocketship/dce_pipeline.py`
+  - `/Users/samuelbarnes/code/ROCKETSHIP/python/rocketship/dce_cli.py`
+  - `/Users/samuelbarnes/code/ROCKETSHIP/run_dce_python_cli.py`
+- Stage A status:
+  - real implementation path is wired (NIfTI input, ROI/AIF extraction, R1/Cp/Ct generation, QC figure saving)
+- Stage B status:
+  - real non-GUI implementation path is wired (time restriction, non-interactive AIF selection/fitting, pass-through arrays, QC figure saving)
+  - supported AIF modes: `fitted`, `raw`, `imported`
+  - stage mode control: `stage_overrides.stage_b_mode = auto|real|scaffold`
+- Stage D status:
+  - real in-memory implementation path is wired (voxel/ROI model fitting, parameter-map output, `.xls` ROI tables)
+  - supported non-GUI models: `tofts`, `ex_tofts`, `patlak`, `tissue_uptake`, `2cxm`, `fxr`, `auc`
+  - stage mode control: `stage_overrides.stage_d_mode = auto|real|scaffold`
+- Scope guards enforced by config validation:
+  - rejects ImageJ `.roi` input
+  - accepts backend `auto|cpu|gpufit`
+  - accepts AIF mode `auto|fitted|raw|imported`
+- Checkpoint support:
+  - writes `a_out.json`, `b_out.json`, `d_out.json` when `checkpoint_dir` is configured
+- Example config:
+  - `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/dce_cli_config.example.json`
+
 ## Parity status against MATLAB baseline
 From `.venv`:
 
@@ -89,6 +113,6 @@ Workflow: `/Users/samuelbarnes/code/ROCKETSHIP/.github/workflows/run_DCE.yml`
 - Push to `dev/master`: heavier matrix (full validation path).
 
 ## Next recommended steps
-1. Decide if DCE scope should now include reference-region/auxiliary models (`model_FXL_reference_region*`, `model_0`) or move to DSC next.
-2. Decide whether to improve confidence interval estimation for Python inverse fits (`model_tofts_fit`, `model_vp_fit`, `model_tissue_uptake_fit`, `model_2cxm_fit`, `model_fxr_fit`) beyond placeholder CI values.
-3. Port `DSC_convolution_oSVD` when ready.
+1. Add dataset-backed regression checks from `test_data` for Stage D map outputs (summary metrics and tolerant voxel comparisons).
+2. Decide whether to port `nested` and `FXL_rr` DCE model flows in the Python CLI or keep them explicitly unsupported.
+3. Expand DSC parity work (`DSC_convolution_oSVD`) once DCE dataset regression checks are stable.

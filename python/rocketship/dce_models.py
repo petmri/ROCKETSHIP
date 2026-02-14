@@ -438,6 +438,81 @@ def model_tofts_fit(
     return [ktrans, ve, sse, ktrans, ktrans, ve, ve]
 
 
+def model_extended_tofts_fit(
+    ct: Iterable[float],
+    cp: Iterable[float],
+    timer: Iterable[float],
+    prefs: Optional[Dict[str, float]] = None,
+) -> List[float]:
+    """Python inverse-fit counterpart of `dce/model_extended_tofts.m`."""
+    ct_vec = [float(v) for v in ct]
+    cp_vec = [float(v) for v in cp]
+    t_vec = [float(v) for v in timer]
+
+    if not (len(ct_vec) == len(cp_vec) == len(t_vec)):
+        raise ValueError(
+            f"ct/cp/timer lengths differ: {len(ct_vec)} / {len(cp_vec)} / {len(t_vec)}"
+        )
+    if len(t_vec) == 0:
+        raise ValueError("ct/cp/timer must be non-empty")
+
+    settings = {
+        "lower_limit_ktrans": 1e-7,
+        "upper_limit_ktrans": 2.0,
+        "initial_value_ktrans": 2e-4,
+        "lower_limit_ve": 0.02,
+        "upper_limit_ve": 1.0,
+        "initial_value_ve": 0.2,
+        "lower_limit_vp": 1e-3,
+        "upper_limit_vp": 1.0,
+        "initial_value_vp": 0.02,
+        "max_nfev": 2000,
+    }
+    if prefs:
+        settings.update(prefs)
+
+    def residual(params: List[float]) -> List[float]:
+        ktrans, ve, vp = params
+        pred = model_extended_tofts_cfit(ktrans, ve, vp, cp_vec, t_vec)
+        return [pred[i] - ct_vec[i] for i in range(len(ct_vec))]
+
+    lb = [
+        float(settings["lower_limit_ktrans"]),
+        float(settings["lower_limit_ve"]),
+        float(settings["lower_limit_vp"]),
+    ]
+    ub = [
+        float(settings["upper_limit_ktrans"]),
+        float(settings["upper_limit_ve"]),
+        float(settings["upper_limit_vp"]),
+    ]
+    starts = [
+        [
+            float(settings["initial_value_ktrans"]),
+            float(settings["initial_value_ve"]),
+            float(settings["initial_value_vp"]),
+        ],
+        [
+            float(settings["initial_value_ktrans"]) * 10.0,
+            float(settings["initial_value_ve"]),
+            float(settings["initial_value_vp"]),
+        ],
+        [
+            float(settings["initial_value_ktrans"]) * 100.0,
+            float(settings["initial_value_ve"]),
+            float(settings["initial_value_vp"]),
+        ],
+    ]
+
+    fit, sse = _best_fit_over_starts(residual, starts, lb, ub, int(settings["max_nfev"]))
+    ktrans = float(fit.x[0])
+    ve = float(fit.x[1])
+    vp = float(fit.x[2])
+
+    # Placeholder CI values: match MATLAB output shape.
+    return [ktrans, ve, vp, sse, ktrans, ktrans, ve, ve, vp, vp]
+
+
 def _clip_start_to_bounds(start: List[float], lb: List[float], ub: List[float]) -> List[float]:
     out = []
     for i, val in enumerate(start):

@@ -11,6 +11,10 @@
 - Expanded DCE forward parity coverage (`model_vp_cfit`, `model_tissue_uptake_cfit`, `model_2cxm_cfit`).
 - Expanded DCE inverse parity coverage (`model_vp`, `model_tissue_uptake`, `model_2cxm`).
 - Expanded DCE FXR parity coverage (`model_fxr_cfit`, `model_fxr`).
+- Added Python in-memory DCE CLI scaffold (`A -> B -> D`) with optional stage checkpoints.
+- Added initial real Stage-A implementation path with QC figure generation in Python CLI pipeline.
+- Added initial real Stage-B implementation path with non-interactive AIF modes and QC figure generation.
+- Added initial real Stage-D implementation path with voxel/ROI model fitting, map outputs, and `.xls` ROI tables.
 
 ## Scope guardrails for Python CLI port
 - Primary target: DCE parts `A`, `B`, and `D` as CLI workflow.
@@ -43,9 +47,15 @@
 3. Add pipeline integration tests:
    - scripted A->B->D DCE checks with assertions on numerical outputs
    - non-interactive DSC workflow checks for both sSVD and oSVD paths
-4. Close next DSC parity gap:
+4. Add dataset-backed DCE regression:
+   - map summary/regression checks on `test_data`
+   - tighter expected tolerances for end-to-end A->B->D outputs
+5. Decide whether to port currently unsupported DCE model branches:
+   - `nested`
+   - `FXL_rr`
+6. Close next DSC parity gap:
    - add baseline + contracts for `DSC_convolution_oSVD`
    - port `DSC_convolution_oSVD` and compare against baseline
-5. Grow real datasets as needed:
+7. Grow real datasets as needed:
    - include at least one additional acquisition profile (different TR/FA/time resolution)
    - include one dataset with known challenging AIF behavior

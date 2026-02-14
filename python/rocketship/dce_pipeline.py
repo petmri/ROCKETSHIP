@@ -1,0 +1,2075 @@
+"""In-memory DCE A->B->D pipeline with non-GUI algorithm implementations."""
+
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field
+import json
+import math
+import re
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Protocol, Tuple
+
+import numpy as np
+
+from .dce_models import (
+    model_2cxm_fit,
+    model_extended_tofts_fit,
+    model_fxr_fit,
+    model_patlak_linear,
+    model_tissue_uptake_fit,
+    model_tofts_fit,
+)
+
+
+ALLOWED_BACKENDS = {"auto", "cpu", "gpufit"}
+ALLOWED_AIF_MODES = {"auto", "fitted", "raw", "imported"}
+ALLOWED_STAGE_A_MODES = {"real", "scaffold"}
+ALLOWED_STAGE_B_MODES = {"real", "scaffold", "auto"}
+ALLOWED_STAGE_D_MODES = {"real", "scaffold", "auto"}
+
+MODEL_SELECTION_ORDER = [
+    ("tofts", "tofts"),
+    ("ex_tofts", "ex_tofts"),
+    ("fxr", "fxr"),
+    ("nested", "nested"),
+    ("patlak", "patlak"),
+    ("tissue_uptake", "tissue_uptake"),
+    ("two_cxm", "2cxm"),
+    ("auc", "auc"),
+    ("FXL_rr", "FXL_rr"),
+]
+
+MODEL_LAYOUTS: Dict[str, Dict[str, Any]] = {
+    "tofts": {
+        "headings": [
+            "ROI path",
+            "ROI",
+            "Ktrans",
+            "Ve",
+            "SSE",
+            "Ktrans 95% low",
+            "Ktrans 95% high",
+            "Ve 95% low",
+            "Ve 95% high",
+        ],
+        "param_names": ["Ktrans", "ve", "sse", "ktrans_ci_low", "ktrans_ci_high", "ve_ci_low", "ve_ci_high"],
+    },
+    "ex_tofts": {
+        "headings": [
+            "ROI path",
+            "ROI",
+            "Ktrans",
+            "Ve",
+            "Vp",
+            "SSE",
+            "Ktrans 95% low",
+            "Ktrans 95% high",
+            "Ve 95% low",
+            "Ve 95% high",
+            "Vp 95% low",
+            "Vp 95% high",
+        ],
+        "param_names": [
+            "Ktrans",
+            "ve",
+            "vp",
+            "sse",
+            "ktrans_ci_low",
+            "ktrans_ci_high",
+            "ve_ci_low",
+            "ve_ci_high",
+            "vp_ci_low",
+            "vp_ci_high",
+        ],
+    },
+    "patlak": {
+        "headings": [
+            "ROI path",
+            "ROI",
+            "Ktrans",
+            "Vp",
+            "SSE",
+            "Ktrans 95% low",
+            "Ktrans 95% high",
+            "Vp 95% low",
+            "Vp 95% high",
+        ],
+        "param_names": ["Ktrans", "vp", "sse", "ktrans_ci_low", "ktrans_ci_high", "vp_ci_low", "vp_ci_high"],
+    },
+    "tissue_uptake": {
+        "headings": [
+            "ROI path",
+            "ROI",
+            "Ktrans",
+            "Fp",
+            "Vp",
+            "SSE",
+            "Ktrans 95% low",
+            "Ktrans 95% high",
+            "Fp 95% low",
+            "Fp 95% high",
+            "Vp 95% low",
+            "Vp 95% high",
+        ],
+        "param_names": [
+            "Ktrans",
+            "fp",
+            "vp",
+            "sse",
+            "ktrans_ci_low",
+            "ktrans_ci_high",
+            "fp_ci_low",
+            "fp_ci_high",
+            "vp_ci_low",
+            "vp_ci_high",
+        ],
+    },
+    "2cxm": {
+        "headings": [
+            "ROI path",
+            "ROI",
+            "Ktrans",
+            "Ve",
+            "Vp",
+            "Fp",
+            "SSE",
+            "Ktrans 95% low",
+            "Ktrans 95% high",
+            "Ve 95% low",
+            "Ve 95% high",
+            "Vp 95% low",
+            "Vp 95% high",
+            "Fp 95% low",
+            "Fp 95% high",
+        ],
+        "param_names": [
+            "Ktrans",
+            "ve",
+            "vp",
+            "fp",
+            "sse",
+            "ktrans_ci_low",
+            "ktrans_ci_high",
+            "ve_ci_low",
+            "ve_ci_high",
+            "vp_ci_low",
+            "vp_ci_high",
+            "fp_ci_low",
+            "fp_ci_high",
+        ],
+    },
+    "fxr": {
+        "headings": [
+            "ROI path",
+            "ROI",
+            "Ktrans",
+            "Ve",
+            "Tau",
+            "SSE",
+            "Ktrans 95% low",
+            "Ktrans 95% high",
+            "Ve 95% low",
+            "Ve 95% high",
+            "Tau 95% low",
+            "Tau 95% high",
+        ],
+        "param_names": [
+            "Ktrans",
+            "ve",
+            "tau",
+            "sse",
+            "ktrans_ci_low",
+            "ktrans_ci_high",
+            "ve_ci_low",
+            "ve_ci_high",
+            "tau_ci_low",
+            "tau_ci_high",
+        ],
+    },
+    "auc": {
+        "headings": ["ROI path", "ROI", "AUC conc", "AUC sig", "NAUC conc", "NAUC sig"],
+        "param_names": ["AUCc", "AUCs", "NAUCc", "NAUCs"],
+    },
+}
+
+SUPPORTED_STAGE_D_MODELS = {"tofts", "ex_tofts", "patlak", "tissue_uptake", "2cxm", "fxr", "auc"}
+
+
+def _to_path_list(values: Optional[List[str]]) -> List[Path]:
+    if not values:
+        return []
+    return [Path(v).expanduser().resolve() for v in values]
+
+
+def _json_default(value: Any) -> Any:
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, (np.float32, np.float64, np.float16)):
+        return float(value)
+    if isinstance(value, (np.int32, np.int64, np.int16, np.int8)):
+        return int(value)
+    raise TypeError(f"Not JSON serializable: {type(value)}")
+
+
+def is_gpufit_available() -> bool:
+    """Return whether GPUfit appears available in the current environment."""
+    try:
+        import pygpufit.gpufit  # type: ignore # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
+def resolve_backend(requested_backend: str) -> str:
+    """Resolve backend choice with optional GPUfit auto-detection."""
+    backend = requested_backend.strip().lower()
+    if backend not in ALLOWED_BACKENDS:
+        raise ValueError(f"Unsupported backend '{requested_backend}'. Allowed: {sorted(ALLOWED_BACKENDS)}")
+
+    if backend == "cpu":
+        return "cpu"
+    if backend == "gpufit":
+        if is_gpufit_available():
+            return "gpufit"
+        raise RuntimeError("GPUfit backend requested but not available in current Python environment")
+
+    # auto
+    return "gpufit" if is_gpufit_available() else "cpu"
+
+
+@dataclass
+class DcePipelineConfig:
+    """Configuration for a single end-to-end DCE CLI run."""
+
+    subject_source_path: Path
+    subject_tp_path: Path
+    output_dir: Path
+    backend: str = "auto"
+    checkpoint_dir: Optional[Path] = None
+    write_xls: bool = True
+    aif_mode: str = "auto"
+    imported_aif_path: Optional[Path] = None
+    dynamic_files: List[Path] = field(default_factory=list)
+    aif_files: List[Path] = field(default_factory=list)
+    roi_files: List[Path] = field(default_factory=list)
+    t1map_files: List[Path] = field(default_factory=list)
+    noise_files: List[Path] = field(default_factory=list)
+    drift_files: List[Path] = field(default_factory=list)
+    model_flags: Dict[str, int] = field(default_factory=dict)
+    stage_overrides: Dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "DcePipelineConfig":
+        return cls(
+            subject_source_path=Path(data["subject_source_path"]).expanduser().resolve(),
+            subject_tp_path=Path(data["subject_tp_path"]).expanduser().resolve(),
+            output_dir=Path(data["output_dir"]).expanduser().resolve(),
+            backend=str(data.get("backend", "auto")),
+            checkpoint_dir=Path(data["checkpoint_dir"]).expanduser().resolve()
+            if data.get("checkpoint_dir")
+            else None,
+            write_xls=bool(data.get("write_xls", True)),
+            aif_mode=str(data.get("aif_mode", "auto")),
+            imported_aif_path=Path(data["imported_aif_path"]).expanduser().resolve()
+            if data.get("imported_aif_path")
+            else None,
+            dynamic_files=_to_path_list(data.get("dynamic_files")),
+            aif_files=_to_path_list(data.get("aif_files")),
+            roi_files=_to_path_list(data.get("roi_files")),
+            t1map_files=_to_path_list(data.get("t1map_files")),
+            noise_files=_to_path_list(data.get("noise_files")),
+            drift_files=_to_path_list(data.get("drift_files")),
+            model_flags=dict(data.get("model_flags", {})),
+            stage_overrides=dict(data.get("stage_overrides", {})),
+        )
+
+    def validate(self) -> None:
+        backend = self.backend.strip().lower()
+        if backend not in ALLOWED_BACKENDS:
+            raise ValueError(f"Unsupported backend '{self.backend}'. Allowed: {sorted(ALLOWED_BACKENDS)}")
+
+        mode = self.aif_mode.strip().lower()
+        if mode not in ALLOWED_AIF_MODES:
+            raise ValueError(f"Unsupported aif_mode '{self.aif_mode}'. Allowed: {sorted(ALLOWED_AIF_MODES)}")
+        if mode == "imported" and self.imported_aif_path is None:
+            raise ValueError("aif_mode=imported requires imported_aif_path")
+
+        stage_a_mode = str(self.stage_overrides.get("stage_a_mode", "real")).strip().lower()
+        if stage_a_mode not in ALLOWED_STAGE_A_MODES:
+            raise ValueError(f"Unsupported stage_a_mode '{stage_a_mode}'. Allowed: {sorted(ALLOWED_STAGE_A_MODES)}")
+        stage_b_mode = str(self.stage_overrides.get("stage_b_mode", "auto")).strip().lower()
+        if stage_b_mode not in ALLOWED_STAGE_B_MODES:
+            raise ValueError(f"Unsupported stage_b_mode '{stage_b_mode}'. Allowed: {sorted(ALLOWED_STAGE_B_MODES)}")
+        stage_d_mode = str(self.stage_overrides.get("stage_d_mode", "auto")).strip().lower()
+        if stage_d_mode not in ALLOWED_STAGE_D_MODES:
+            raise ValueError(f"Unsupported stage_d_mode '{stage_d_mode}'. Allowed: {sorted(ALLOWED_STAGE_D_MODES)}")
+        aif_curve_mode = str(self.stage_overrides.get("aif_curve_mode", "")).strip().lower()
+        if aif_curve_mode and aif_curve_mode not in ALLOWED_AIF_MODES:
+            raise ValueError(
+                f"Unsupported stage_overrides.aif_curve_mode '{aif_curve_mode}'. Allowed: {sorted(ALLOWED_AIF_MODES)}"
+            )
+        if aif_curve_mode == "imported" and self.imported_aif_path is None:
+            raise ValueError("stage_overrides.aif_curve_mode=imported requires imported_aif_path")
+
+        # Port scope decision: ImageJ ROI input is intentionally not supported.
+        for roi_path in self.roi_files:
+            if roi_path.suffix.lower() == ".roi":
+                raise ValueError("ImageJ ROI (.roi) input is out of scope for the Python DCE CLI port")
+
+        if not self.dynamic_files:
+            raise ValueError("dynamic_files is required (non-empty)")
+        if not self.aif_files:
+            raise ValueError("aif_files is required (non-empty)")
+        if not self.t1map_files:
+            raise ValueError("t1map_files is required (non-empty)")
+
+    def to_dict(self) -> Dict[str, Any]:
+        payload = asdict(self)
+        return json.loads(json.dumps(payload, default=_json_default))
+
+
+class DceStageRunner(Protocol):
+    """Execution contract for in-memory A/B/D stages."""
+
+    def run_a(self, config: DcePipelineConfig) -> Dict[str, Any]:
+        ...
+
+    def run_b(self, config: DcePipelineConfig, stage_a: Dict[str, Any]) -> Dict[str, Any]:
+        ...
+
+    def run_d(self, config: DcePipelineConfig, stage_a: Dict[str, Any], stage_b: Dict[str, Any]) -> Dict[str, Any]:
+        ...
+
+
+def _stage_override(config: DcePipelineConfig, key: str, default: Any) -> Any:
+    return config.stage_overrides.get(key, default)
+
+
+def _load_json(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        raise FileNotFoundError(path)
+    return json.loads(path.read_text())
+
+
+def _load_nifti_data(path: Path) -> np.ndarray:
+    try:
+        import nibabel as nib  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("nibabel is required for Stage-A NIfTI loading") from exc
+
+    image = nib.load(str(path))
+    return np.asarray(image.get_fdata(), dtype=np.float64)
+
+
+def _resolve_dynamic_metadata(config: DcePipelineConfig, n_timepoints: int) -> Dict[str, Any]:
+    metadata_path = _stage_override(config, "dce_metadata_path", None)
+    candidates: List[Path] = []
+    if metadata_path:
+        candidates.append(Path(metadata_path).expanduser().resolve())
+
+    for dynamic in config.dynamic_files:
+        dynamic_text = str(dynamic)
+        if dynamic_text.endswith(".nii.gz"):
+            candidates.append(Path(dynamic_text[:-7] + ".json"))
+        elif dynamic.suffix.lower() == ".nii":
+            candidates.append(dynamic.with_suffix(".json"))
+
+    candidates.extend(sorted((config.subject_source_path / "dce").glob("*DCE.json")))
+
+    payload: Dict[str, Any] = {}
+    for candidate in candidates:
+        if candidate.exists():
+            payload = _load_json(candidate)
+            break
+
+    tr_sec = _stage_override(config, "tr_sec", None)
+    tr_ms = _stage_override(config, "tr_ms", None)
+    time_resolution_sec = _stage_override(config, "time_resolution_sec", None)
+    fa_deg = _stage_override(config, "fa_deg", None)
+
+    if tr_ms is None and tr_sec is not None:
+        tr_ms = float(tr_sec) * 1000.0
+
+    if tr_ms is None:
+        if "RepetitionTimeExcitation" in payload:
+            tr_ms = float(payload["RepetitionTimeExcitation"]) * 1000.0
+            if time_resolution_sec is None and "RepetitionTime" in payload:
+                time_resolution_sec = float(payload["RepetitionTime"])
+        elif "RepetitionTime" in payload:
+            tr_ms = float(payload["RepetitionTime"]) * 1000.0
+            if time_resolution_sec is None:
+                time_resolution_sec = float(payload["RepetitionTime"])
+
+    if time_resolution_sec is None:
+        if "TriggerDelayTime" in payload and n_timepoints > 0:
+            time_resolution_sec = float(payload["TriggerDelayTime"]) / float(n_timepoints) / 1000.0
+        elif "AcquisitionDuration" in payload and n_timepoints > 0:
+            time_resolution_sec = float(payload["AcquisitionDuration"]) / float(n_timepoints)
+
+    if time_resolution_sec is None and tr_ms is not None:
+        time_resolution_sec = float(tr_ms) / 1000.0
+
+    if time_resolution_sec is not None and "NumberOfAverages" in payload:
+        time_resolution_sec = float(time_resolution_sec) * float(payload["NumberOfAverages"])
+
+    if fa_deg is None and "FlipAngle" in payload:
+        fa_deg = float(payload["FlipAngle"])
+
+    if tr_ms is None:
+        raise ValueError("Unable to determine TR; set stage_overrides.tr_ms or provide DCE metadata JSON")
+    if time_resolution_sec is None:
+        raise ValueError(
+            "Unable to determine time resolution; set stage_overrides.time_resolution_sec or provide DCE metadata JSON"
+        )
+    if fa_deg is None:
+        raise ValueError("Unable to determine flip angle; set stage_overrides.fa_deg or provide DCE metadata JSON")
+
+    return {
+        "tr_ms": float(tr_ms),
+        "time_resolution_sec": float(time_resolution_sec),
+        "time_resolution_min": float(time_resolution_sec) / 60.0,
+        "fa_deg": float(fa_deg),
+        "metadata_source_keys": sorted(payload.keys()),
+    }
+
+
+def _baseline_window(config: DcePipelineConfig, n_timepoints: int) -> Tuple[int, int]:
+    start_1b = int(_stage_override(config, "steady_state_start", 1))
+    end_1b = int(_stage_override(config, "steady_state_end", min(2, n_timepoints)))
+    start_1b = max(1, min(start_1b, n_timepoints))
+    end_1b = max(start_1b, min(end_1b, n_timepoints))
+    return start_1b - 1, end_1b
+
+
+def _interpolate_value(values: np.ndarray, bad_indices: np.ndarray, idx: int, buffer: int) -> Optional[float]:
+    n_time = values.shape[0]
+    start = max(0, idx - buffer)
+    end = min(n_time, idx + buffer + 1)
+    neighbors = np.arange(start, end)
+    neighbors = neighbors[neighbors != idx]
+    if bad_indices.size > 0:
+        neighbors = neighbors[~np.isin(neighbors, bad_indices)]
+    neighbors = neighbors[np.isfinite(values[neighbors])]
+
+    left = neighbors[neighbors < idx]
+    right = neighbors[neighbors > idx]
+    if left.size == 0 or right.size == 0:
+        return None
+    li = int(left[-1])
+    ri = int(right[0])
+    if li == ri:
+        return None
+
+    x = np.array([li, ri], dtype=np.float64)
+    y = np.array([values[li], values[ri]], dtype=np.float64)
+    return float(np.interp(float(idx), x, y))
+
+
+def _clean_ab(
+    ab: np.ndarray,
+    t1_values: np.ndarray,
+    roi_indices: np.ndarray,
+    threshold_fraction: float,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    n_time = ab.shape[0]
+    keep = np.ones(ab.shape[1], dtype=bool)
+    cleaned = ab.copy()
+
+    for col in range(ab.shape[1]):
+        vec = cleaned[:, col]
+        bad = np.where((~np.isfinite(vec)) | (vec < 1.0))[0]
+        if bad.size > threshold_fraction * n_time:
+            keep[col] = False
+            continue
+        for idx in bad:
+            replacement = _interpolate_value(vec, bad, int(idx), buffer=5)
+            if replacement is None:
+                keep[col] = False
+                break
+            vec[idx] = replacement
+        cleaned[:, col] = vec
+
+    return cleaned[:, keep], t1_values[keep], roi_indices[keep]
+
+
+def _clean_r1(
+    r1: np.ndarray,
+    t1_values: np.ndarray,
+    roi_indices: np.ndarray,
+    threshold_fraction: float,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    n_time = r1.shape[0]
+    keep = np.ones(r1.shape[1], dtype=bool)
+    cleaned = r1.copy()
+
+    for col in range(r1.shape[1]):
+        vec = cleaned[:, col]
+        bad = np.where((~np.isfinite(vec)) | (vec > 100.0))[0]
+        if bad.size > threshold_fraction * n_time:
+            keep[col] = False
+            continue
+        for idx in bad:
+            replacement = _interpolate_value(vec, bad, int(idx), buffer=3)
+            if replacement is None or not math.isfinite(replacement):
+                keep[col] = False
+                break
+            vec[idx] = replacement
+        cleaned[:, col] = vec
+
+    return cleaned[:, keep], t1_values[keep], roi_indices[keep]
+
+
+def _save_stage_a_qc_figures(
+    output_dir: Path,
+    dynamic: np.ndarray,
+    roi_mask: np.ndarray,
+    aif_mask: np.ndarray,
+    noise_mask: np.ndarray,
+    ct: np.ndarray,
+    cp: np.ndarray,
+    r1_toi: np.ndarray,
+    r1_lv: np.ndarray,
+) -> Dict[str, str]:
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("matplotlib is required for QC figure saving") from exc
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    figure_paths: Dict[str, str] = {}
+
+    timecurves_png = output_dir / "dce_timecurves.png"
+    fig = plt.figure(figsize=(10, 8))
+    ax1 = fig.add_subplot(2, 2, 1)
+    ax2 = fig.add_subplot(2, 2, 2)
+    ax3 = fig.add_subplot(2, 2, 3)
+    ax4 = fig.add_subplot(2, 2, 4)
+    ax1.plot(np.median(r1_toi, axis=1), "r")
+    ax1.set_title("R1 ROI")
+    ax2.plot(np.median(r1_lv, axis=1), "b")
+    ax2.set_title("R1 AIF")
+    ax3.plot(np.mean(ct, axis=1), "r")
+    ax3.set_title("Ct mean")
+    ax4.plot(np.mean(cp, axis=1), "b")
+    ax4.set_title("Cp mean")
+    fig.tight_layout()
+    fig.savefig(timecurves_png, dpi=150)
+    plt.close(fig)
+    figure_paths["timecurves_png"] = str(timecurves_png)
+
+    roi_png = output_dir / "dce_roi_overview.png"
+    z_mid = dynamic.shape[2] // 2
+    base = dynamic[:, :, z_mid, 0]
+    fig2 = plt.figure(figsize=(8, 8))
+    ax = fig2.add_subplot(1, 1, 1)
+    ax.imshow(base.T, cmap="gray", origin="lower")
+    ax.contour(roi_mask[:, :, z_mid].T.astype(float), levels=[0.5], colors=["red"], linewidths=0.8)
+    ax.contour(aif_mask[:, :, z_mid].T.astype(float), levels=[0.5], colors=["cyan"], linewidths=0.8)
+    ax.contour(noise_mask[:, :, z_mid].T.astype(float), levels=[0.5], colors=["yellow"], linewidths=0.8)
+    ax.set_title("ROI(red) AIF(cyan) Noise(yellow)")
+    fig2.tight_layout()
+    fig2.savefig(roi_png, dpi=150)
+    plt.close(fig2)
+    figure_paths["roi_overview_png"] = str(roi_png)
+
+    return figure_paths
+
+
+def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
+    dynamic = _load_nifti_data(config.dynamic_files[0])
+    if dynamic.ndim != 4:
+        raise ValueError(f"Expected 4D dynamic input, got shape {dynamic.shape}")
+
+    if not config.roi_files:
+        raise ValueError("Stage-A real mode requires at least one ROI mask file")
+
+    aif_mask_img = _load_nifti_data(config.aif_files[0])
+    roi_mask_img = _load_nifti_data(config.roi_files[0])
+    t1map_img = _load_nifti_data(config.t1map_files[0])
+
+    if aif_mask_img.ndim == 4:
+        aif_mask_img = aif_mask_img[..., 0]
+    if roi_mask_img.ndim == 4:
+        roi_mask_img = roi_mask_img[..., 0]
+    if t1map_img.ndim == 4:
+        t1map_img = t1map_img[..., 0]
+
+    spatial = dynamic.shape[:3]
+    if aif_mask_img.shape != spatial:
+        raise ValueError(f"AIF mask shape {aif_mask_img.shape} does not match dynamic spatial shape {spatial}")
+    if roi_mask_img.shape != spatial:
+        raise ValueError(f"ROI mask shape {roi_mask_img.shape} does not match dynamic spatial shape {spatial}")
+    if t1map_img.shape != spatial:
+        raise ValueError(f"T1 map shape {t1map_img.shape} does not match dynamic spatial shape {spatial}")
+
+    aif_mask = aif_mask_img > 0
+    roi_mask = roi_mask_img > 0
+    if not np.any(aif_mask):
+        raise ValueError("AIF mask has no positive voxels")
+    if not np.any(roi_mask):
+        raise ValueError("ROI mask has no positive voxels")
+
+    if config.noise_files:
+        noise_mask_img = _load_nifti_data(config.noise_files[0])
+        if noise_mask_img.ndim == 4:
+            noise_mask_img = noise_mask_img[..., 0]
+        if noise_mask_img.shape != spatial:
+            raise ValueError(f"Noise mask shape {noise_mask_img.shape} does not match dynamic spatial shape {spatial}")
+        noise_mask = noise_mask_img > 0
+    else:
+        noise_mask = np.zeros(spatial, dtype=bool)
+        noise_size = int(_stage_override(config, "noise_pixsize", 5))
+        noise_mask[:noise_size, :noise_size, :] = True
+
+    dyn_2d = dynamic.reshape(-1, dynamic.shape[3]).T
+    t1_flat = t1map_img.reshape(-1)
+
+    lvind = np.where(aif_mask.reshape(-1))[0]
+    tumind = np.where(roi_mask.reshape(-1))[0]
+    noiseind = np.where(noise_mask.reshape(-1))[0]
+    if noiseind.size == 0:
+        raise ValueError("Noise mask has no positive voxels")
+
+    stlv = dyn_2d[:, lvind]
+    sttum = dyn_2d[:, tumind]
+    dynam_noise = np.std(dyn_2d[:, noiseind], axis=1)
+    noise_mean = float(np.mean(dynam_noise))
+    if noise_mean <= 0:
+        raise ValueError("Noise estimate is non-positive")
+
+    snr_filter = float(_stage_override(config, "snr_filter", 0.0))
+    voxel_snr = np.mean(stlv, axis=0) / noise_mean
+    keep_snr = voxel_snr >= snr_filter
+    if not np.any(keep_snr):
+        raise ValueError("SNR filter removed all AIF voxels; lower snr_filter")
+    lvind = lvind[keep_snr]
+    stlv = stlv[:, keep_snr]
+    t1_lv = t1_flat[lvind].astype(np.float64)
+
+    t1_tum = t1_flat[tumind].astype(np.float64)
+
+    n_time = dynamic.shape[3]
+    timing = _resolve_dynamic_metadata(config, n_time)
+    tr_ms = float(timing["tr_ms"])
+    fa_deg = float(timing["fa_deg"])
+    time_resolution_min = float(timing["time_resolution_min"])
+
+    relaxivity = float(_stage_override(config, "relaxivity", 3.4))
+    hematocrit = float(_stage_override(config, "hematocrit", 0.45))
+
+    ss_start, ss_end = _baseline_window(config, n_time)
+    baseline_slice = slice(ss_start, ss_end)
+
+    # AIF path to R1
+    sss = np.mean(stlv[baseline_slice, :], axis=0)
+    sstar_lv = (1.0 - np.exp(-tr_ms / t1_lv)) / (1.0 - np.cos(np.deg2rad(fa_deg)) * np.exp(-tr_ms / t1_lv))
+    a = 1.0 - np.cos(np.deg2rad(fa_deg)) * sstar_lv[np.newaxis, :] * stlv / sss[np.newaxis, :]
+    b = 1.0 - sstar_lv[np.newaxis, :] * stlv / sss[np.newaxis, :]
+    ab_lv = a / b
+    ab_lv, t1_lv, lvind = _clean_ab(ab_lv, t1_lv, lvind, threshold_fraction=0.05)
+    if t1_lv.size == 0:
+        raise ValueError("All AIF voxels removed after AB cleaning")
+
+    r1_lv = (1.0 / tr_ms) * np.log(ab_lv)
+    r1_lv, t1_lv, lvind = _clean_r1(r1_lv, t1_lv, lvind, threshold_fraction=0.005)
+    if t1_lv.size == 0:
+        raise ValueError("All AIF voxels removed after R1 cleaning")
+
+    for j in range(t1_lv.size):
+        scale = (1.0 / t1_lv[j]) - np.mean(r1_lv[baseline_slice, j])
+        r1_lv[:, j] = r1_lv[:, j] + scale
+
+    # ROI path to R1
+    ss_tum = np.mean(sttum[baseline_slice, :], axis=0)
+    sstar_tum = (1.0 - np.exp(-tr_ms / t1_tum)) / (1.0 - np.cos(np.deg2rad(fa_deg)) * np.exp(-tr_ms / t1_tum))
+    a_tum = 1.0 - np.cos(np.deg2rad(fa_deg)) * sstar_tum[np.newaxis, :] * sttum / ss_tum[np.newaxis, :]
+    b_tum = 1.0 - sstar_tum[np.newaxis, :] * sttum / ss_tum[np.newaxis, :]
+    ab_tum = a_tum / b_tum
+    ab_tum, t1_tum, tumind = _clean_ab(ab_tum, t1_tum, tumind, threshold_fraction=0.7)
+    if t1_tum.size == 0:
+        raise ValueError("All ROI voxels removed after AB cleaning")
+
+    r1_toi = (1.0 / tr_ms) * np.log(ab_tum)
+    r1_toi, t1_tum, tumind = _clean_r1(r1_toi, t1_tum, tumind, threshold_fraction=0.7)
+    if t1_tum.size == 0:
+        raise ValueError("All ROI voxels removed after R1 cleaning")
+
+    for j in range(t1_tum.size):
+        scale = (1.0 / t1_tum[j]) - np.mean(r1_toi[baseline_slice, j])
+        r1_toi[:, j] = r1_toi[:, j] + scale
+
+    cp = (r1_lv - (1.0 / t1_lv)[np.newaxis, :]) / (relaxivity * (1.0 - hematocrit))
+    ct = (r1_toi - (1.0 / t1_tum)[np.newaxis, :]) / relaxivity
+
+    delta_r1_lv = r1_lv - np.mean(r1_lv[baseline_slice, :], axis=0)[np.newaxis, :]
+    delta_r1_toi = r1_toi - np.mean(r1_toi[baseline_slice, :], axis=0)[np.newaxis, :]
+
+    timer = np.arange(n_time, dtype=np.float64) * time_resolution_min
+    cp_mean = np.mean(cp, axis=1)
+    cp_delta = np.diff(cp_mean, prepend=cp_mean[0])
+    start_injection = int(np.argmax(cp_delta)) + 1  # 1-based to match MATLAB conventions
+    injection_duration_frames = int(
+        _stage_override(
+            config,
+            "injection_duration_frames",
+            max(1, int(round(float(_stage_override(config, "injection_duration", 1.0))))),
+        )
+    )
+    end_injection = min(n_time, start_injection + injection_duration_frames)
+
+    figures = _save_stage_a_qc_figures(
+        config.output_dir,
+        dynamic,
+        roi_mask,
+        aif_mask,
+        noise_mask,
+        ct,
+        cp,
+        r1_toi,
+        r1_lv,
+    )
+
+    return {
+        "stage": "A",
+        "status": "ok",
+        "impl": "real",
+        "rootname": str(_stage_override(config, "rootname", "python_dce")),
+        "image_shape": [int(v) for v in spatial],
+        "quant": True,
+        "tr_ms": tr_ms,
+        "fa_deg": fa_deg,
+        "time_resolution_min": time_resolution_min,
+        "relaxivity": relaxivity,
+        "hematocrit": hematocrit,
+        "steady_state_time": [ss_start + 1, ss_end],
+        "start_injection": start_injection,
+        "end_injection": end_injection,
+        "figure_paths": figures,
+        "arrays": {
+            "Cp": cp,
+            "Ct": ct,
+            "Stlv": stlv,
+            "Sttum": sttum,
+            "Sss": sss,
+            "Ssstum": ss_tum,
+            "R1tLV": r1_lv,
+            "R1tTOI": r1_toi,
+            "deltaR1LV": delta_r1_lv,
+            "deltaR1TOI": delta_r1_toi,
+            "T1LV": t1_lv,
+            "T1TUM": t1_tum,
+            "timer": timer,
+            "lvind": lvind.astype(np.int64),
+            "tumind": tumind.astype(np.int64),
+            "noiseind": noiseind.astype(np.int64),
+        },
+    }
+
+
+def _as_time_by_voxel(data: Any, name: str) -> np.ndarray:
+    arr = np.asarray(data, dtype=np.float64)
+    if arr.ndim == 1:
+        arr = arr[:, np.newaxis]
+    if arr.ndim != 2:
+        raise ValueError(f"{name} must be 1D/2D, got shape {arr.shape}")
+    return arr
+
+
+def _as_1d_float(data: Any, name: str) -> np.ndarray:
+    arr = np.asarray(data, dtype=np.float64).squeeze()
+    if arr.ndim != 1:
+        raise ValueError(f"{name} must be a vector, got shape {arr.shape}")
+    if arr.size == 0:
+        raise ValueError(f"{name} must be non-empty")
+    return arr
+
+
+def _nearest_index(timer: np.ndarray, value: float) -> int:
+    return int(np.argmin(np.abs(timer - float(value))))
+
+
+def _fill_nonfinite_1d(values: np.ndarray) -> np.ndarray:
+    out = np.asarray(values, dtype=np.float64).copy()
+    finite = np.isfinite(out)
+    if np.all(finite):
+        return out
+    if not np.any(finite):
+        return np.zeros_like(out)
+    idx = np.arange(out.size, dtype=np.float64)
+    out[~finite] = np.interp(idx[~finite], idx[finite], out[finite])
+    return out
+
+
+def _load_vector_from_path(path: Path, key: str = "timer") -> np.ndarray:
+    suffix = path.suffix.lower()
+    if path.name.lower().endswith(".nii.gz"):
+        suffix = ".nii.gz"
+
+    if suffix == ".json":
+        payload = _load_json(path)
+        if key in payload:
+            return _as_1d_float(payload[key], key)
+        raise ValueError(f"JSON file {path} missing key '{key}'")
+
+    if suffix in {".csv", ".txt", ".tsv"}:
+        delimiter = "," if suffix == ".csv" else None
+        data = np.loadtxt(path, delimiter=delimiter)
+        data = np.asarray(data, dtype=np.float64)
+        if data.ndim == 1:
+            return _as_1d_float(data, key)
+        return _as_1d_float(data[:, 0], key)
+
+    if suffix == ".npy":
+        return _as_1d_float(np.load(path), key)
+
+    if suffix == ".npz":
+        with np.load(path) as payload:
+            if key in payload:
+                return _as_1d_float(payload[key], key)
+            if len(payload.files) == 1:
+                return _as_1d_float(payload[payload.files[0]], key)
+            raise ValueError(f"NPZ file {path} missing key '{key}'")
+
+    if suffix == ".mat":
+        try:
+            from scipy.io import loadmat  # type: ignore
+        except Exception as exc:
+            raise RuntimeError("scipy is required to read MATLAB .mat files") from exc
+
+        payload = loadmat(str(path), squeeze_me=True, struct_as_record=False)
+        if key in payload:
+            return _as_1d_float(payload[key], key)
+        raise ValueError(f"MAT file {path} missing variable '{key}'")
+
+    raise ValueError(f"Unsupported vector file format for {path}")
+
+
+def _resolve_stage_b_timer(config: DcePipelineConfig, stage_a: Dict[str, Any], n_time: int) -> np.ndarray:
+    path_value = (
+        _stage_override(config, "time_vector_path", None)
+        or _stage_override(config, "timevectpath", None)
+        or _stage_override(config, "timer_path", None)
+    )
+
+    timer: Optional[np.ndarray] = None
+    if path_value:
+        timer = _load_vector_from_path(Path(path_value).expanduser().resolve(), key="timer")
+    elif isinstance(stage_a.get("arrays"), dict) and "timer" in stage_a["arrays"]:
+        timer = _as_1d_float(stage_a["arrays"]["timer"], "timer")
+
+    if timer is None:
+        time_resolution = _stage_override(config, "time_resolution_min", stage_a.get("time_resolution_min", None))
+        if time_resolution is None:
+            raise ValueError("Stage-B requires timer data; set stage_overrides.time_resolution_min")
+        timer = np.arange(n_time, dtype=np.float64) * float(time_resolution)
+
+    if timer.size > n_time:
+        timer = timer[:n_time]
+    elif timer.size < n_time:
+        if timer.size == 0:
+            raise ValueError("Resolved timer vector is empty")
+        if timer.size == 1:
+            step = float(_stage_override(config, "time_resolution_min", stage_a.get("time_resolution_min", 1.0)))
+        else:
+            step = float(timer[-1] - timer[-2])
+            if not math.isfinite(step) or step <= 0:
+                step = float(_stage_override(config, "time_resolution_min", stage_a.get("time_resolution_min", 1.0)))
+        extension = timer[-1] + step * np.arange(1, n_time - timer.size + 1, dtype=np.float64)
+        timer = np.concatenate([timer, extension])
+
+    if np.nanmax(timer) > 100.0:
+        timer = timer / 60.0
+    return _fill_nonfinite_1d(timer)
+
+
+def _resolve_stage_b_limits(config: DcePipelineConfig) -> Tuple[float, float]:
+    start_time = float(_stage_override(config, "start_time_min", _stage_override(config, "start_time", 0.0)))
+    end_time = float(_stage_override(config, "end_time_min", _stage_override(config, "end_time", 0.0)))
+    return start_time, end_time
+
+
+def _restrict_timer_window(timer: np.ndarray, start_time: float, end_time: float) -> Tuple[int, int]:
+    if timer.size < 2:
+        raise ValueError("Timer vector must have at least 2 elements for Stage-B")
+
+    start_idx = _nearest_index(timer, start_time) if start_time > 0 else 0
+    end_idx = _nearest_index(timer, end_time) + 1 if end_time > 0 else timer.size
+    start_idx = max(0, min(start_idx, timer.size - 1))
+    end_idx = max(start_idx + 1, min(end_idx, timer.size))
+    return start_idx, end_idx
+
+
+def _resolve_stage_b_aif_mode(config: DcePipelineConfig) -> str:
+    mode = str(_stage_override(config, "aif_curve_mode", config.aif_mode)).strip().lower()
+    if mode == "auto":
+        mode = "imported" if config.imported_aif_path else "fitted"
+    if mode not in {"fitted", "raw", "imported"}:
+        raise ValueError(f"Unsupported Stage-B AIF mode '{mode}'")
+    if mode == "imported" and config.imported_aif_path is None:
+        raise ValueError("Stage-B imported mode requires imported_aif_path")
+    return mode
+
+
+def _resolve_stage_b_injection_window(
+    config: DcePipelineConfig,
+    stage_a: Dict[str, Any],
+    timer_full: np.ndarray,
+) -> Tuple[float, float]:
+    start_override = _stage_override(config, "start_injection_min", None)
+    end_override = _stage_override(config, "end_injection_min", None)
+
+    if start_override is not None:
+        start_val = float(start_override)
+    else:
+        source = float(stage_a.get("start_injection", 1.0))
+        if abs(source - round(source)) < 1e-8 and 1 <= int(round(source)) <= timer_full.size:
+            start_val = float(timer_full[int(round(source)) - 1])
+        else:
+            start_val = source
+
+    if end_override is not None:
+        end_val = float(end_override)
+    else:
+        source = float(stage_a.get("end_injection", start_val))
+        if abs(source - round(source)) < 1e-8 and 1 <= int(round(source)) <= timer_full.size:
+            end_val = float(timer_full[int(round(source)) - 1])
+        else:
+            end_val = source
+
+    if end_val < start_val:
+        end_val = start_val
+    return start_val, end_val
+
+
+def _aif_biexp_con(
+    timer: np.ndarray,
+    step: np.ndarray,
+    a: float,
+    b: float,
+    c: float,
+    d: float,
+    fitting_au: bool,
+    baseline: float,
+) -> np.ndarray:
+    time = np.asarray(timer, dtype=np.float64).reshape(-1)
+    stepv = np.asarray(step, dtype=np.float64).reshape(-1)
+    if time.size != stepv.size:
+        raise ValueError("timer and step must have same length")
+
+    on = np.flatnonzero(stepv > 0)
+    out = np.zeros(time.size, dtype=np.float64)
+    base = float(baseline) if fitting_au else 0.0
+    if on.size == 0:
+        out.fill(base)
+        return out
+
+    start_idx = int(on[0])
+    end_idx = int(on[-1])
+
+    idx = np.arange(time.size)
+    pre = idx < start_idx
+    slope = (idx >= start_idx) & (idx < end_idx)
+    post = idx >= end_idx
+
+    out[pre] = base
+
+    if np.any(slope):
+        t_start = float(time[start_idx])
+        t_end = float(time[end_idx])
+        duration = max(1e-12, t_end - t_start)
+        frac = (time[slope] - t_start) / duration
+        out[slope] = base + ((a - base) + (b - base)) * frac
+
+    if np.any(post):
+        dt = np.maximum(0.0, time[post] - float(time[end_idx]))
+        out[post] = a * np.exp(-c * dt) + b * np.exp(-d * dt)
+
+    return out
+
+
+def _parse_4float_override(config: DcePipelineConfig, key: str, default: List[float]) -> np.ndarray:
+    value = _stage_override(config, key, default)
+    if isinstance(value, str):
+        parts = value.replace(",", " ").split()
+        arr = np.array([float(v) for v in parts], dtype=np.float64)
+    else:
+        arr = np.asarray(value, dtype=np.float64).reshape(-1)
+    if arr.size != 4:
+        raise ValueError(f"{key} must contain exactly 4 numeric values")
+    return arr
+
+
+def _adjusted_rsquare(y_true: np.ndarray, y_fit: np.ndarray, n_params: int) -> float:
+    y = np.asarray(y_true, dtype=np.float64)
+    yhat = np.asarray(y_fit, dtype=np.float64)
+    mask = np.isfinite(y) & np.isfinite(yhat)
+    if np.count_nonzero(mask) <= (n_params + 1):
+        return float("nan")
+
+    y = y[mask]
+    yhat = yhat[mask]
+    ss_res = float(np.sum((y - yhat) ** 2))
+    ss_tot = float(np.sum((y - np.mean(y)) ** 2))
+    if ss_tot <= 0:
+        return 1.0
+    r2 = 1.0 - (ss_res / ss_tot)
+    n = float(y.size)
+    p = float(n_params)
+    return 1.0 - (1.0 - r2) * ((n - 1.0) / max(1.0, (n - p - 1.0)))
+
+
+def _fit_aif_biexp(
+    config: DcePipelineConfig,
+    timer: np.ndarray,
+    curve: np.ndarray,
+    start_injection_min: float,
+    end_injection_min: float,
+    fitting_au: bool,
+) -> Dict[str, Any]:
+    try:
+        from scipy.optimize import curve_fit  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("scipy is required for Stage-B fitted AIF mode") from exc
+
+    timer = _as_1d_float(timer, "timer")
+    curve = _fill_nonfinite_1d(_as_1d_float(curve, "curve"))
+
+    start_idx = _nearest_index(timer, start_injection_min)
+    end_idx = _nearest_index(timer, end_injection_min)
+    if end_idx < start_idx:
+        end_idx = start_idx
+
+    step = np.zeros(timer.size, dtype=np.float64)
+    step[start_idx : end_idx + 1] = 1.0
+
+    weighted = curve * step
+    max_idx = int(np.argmax(weighted))
+    fit_step = step.copy()
+    fit_step[max_idx + 1 :] = 0.0
+    if np.count_nonzero(fit_step > 0) == 0:
+        fit_step = step.copy()
+
+    onset = np.flatnonzero(fit_step > 0)
+    baseline = float(np.mean(curve[: onset[0] + 1])) if onset.size > 0 else float(curve[0])
+    maxer = float(curve[max_idx])
+    if not math.isfinite(maxer) or maxer <= 0:
+        maxer = float(np.max(curve))
+        max_idx = int(np.argmax(curve))
+
+    lower = _parse_4float_override(config, "aif_lower_limits", [0.0, 0.0, 0.0, 0.0])
+    upper = _parse_4float_override(config, "aif_upper_limits", [5.0, 5.0, 50.0, 50.0])
+    initial = _parse_4float_override(config, "aif_initial_values", [1.0, 1.0, 1.0, 0.01])
+
+    upper[0] = max(1e-12, maxer * 2.0)
+    upper[1] = max(1e-12, maxer * 2.0)
+    initial[0] = max(1e-12, maxer * 0.5)
+    initial[1] = max(1e-12, maxer * 0.5)
+    initial = np.minimum(np.maximum(initial, lower + 1e-12), upper - 1e-12)
+
+    maxfev = int(float(_stage_override(config, "aif_MaxFunEvals", 1000)))
+
+    def fit_fn(tvals: np.ndarray, a: float, b: float, c: float, d: float) -> np.ndarray:
+        return _aif_biexp_con(tvals, fit_step, a, b, c, d, fitting_au=fitting_au, baseline=baseline)
+
+    fit_success = True
+    params = initial.copy()
+    try:
+        params, _ = curve_fit(
+            fit_fn,
+            timer,
+            curve,
+            p0=initial,
+            bounds=(lower, upper),
+            maxfev=maxfev,
+        )
+    except Exception:
+        fit_success = False
+
+    fitted = fit_fn(timer, float(params[0]), float(params[1]), float(params[2]), float(params[3]))
+    return {
+        "curve": fitted,
+        "params": np.asarray(params, dtype=np.float64),
+        "step": fit_step,
+        "baseline": baseline,
+        "max_index": max_idx,
+        "rsquare_adj": _adjusted_rsquare(curve, fitted, n_params=4),
+        "fit_success": fit_success,
+    }
+
+
+def _load_imported_aif(path: Path) -> Dict[str, Any]:
+    p = path.expanduser().resolve()
+    suffix = p.suffix.lower()
+
+    def _normalize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+        for key in ("Bdata", "bdata"):
+            nested = payload.get(key)
+            if isinstance(nested, dict):
+                payload = nested
+                break
+
+        cp_use = payload.get("Cp_use", payload.get("cp_use"))
+        stlv_use = payload.get("Stlv_use", payload.get("stlv_use"))
+        timer = payload.get("timer", payload.get("Timer"))
+        start_injection = payload.get("start_injection", payload.get("start_injection_min"))
+        return {
+            "Cp_use": _as_1d_float(cp_use, "Cp_use") if cp_use is not None else None,
+            "Stlv_use": _as_1d_float(stlv_use, "Stlv_use") if stlv_use is not None else None,
+            "timer": _as_1d_float(timer, "timer") if timer is not None else None,
+            "start_injection": float(start_injection) if start_injection is not None else None,
+        }
+
+    if suffix == ".json":
+        payload = _load_json(p)
+        out = _normalize_payload(payload)
+        if out["Cp_use"] is None:
+            raise ValueError(f"Imported AIF JSON {p} missing Cp_use")
+        return out
+
+    if suffix in {".csv", ".txt", ".tsv"}:
+        delimiter = "," if suffix == ".csv" else None
+        data = np.loadtxt(p, delimiter=delimiter)
+        data = np.asarray(data, dtype=np.float64)
+        if data.ndim == 1:
+            return {"Cp_use": _as_1d_float(data, "Cp_use"), "Stlv_use": None, "timer": None, "start_injection": None}
+        if data.shape[1] == 1:
+            return {
+                "Cp_use": _as_1d_float(data[:, 0], "Cp_use"),
+                "Stlv_use": None,
+                "timer": None,
+                "start_injection": None,
+            }
+        stlv_col = data[:, 2] if data.shape[1] > 2 else None
+        return {
+            "Cp_use": _as_1d_float(data[:, 1], "Cp_use"),
+            "Stlv_use": _as_1d_float(stlv_col, "Stlv_use") if stlv_col is not None else None,
+            "timer": _as_1d_float(data[:, 0], "timer"),
+            "start_injection": None,
+        }
+
+    if suffix == ".npy":
+        arr = np.asarray(np.load(p), dtype=np.float64)
+        if arr.ndim == 1:
+            return {"Cp_use": _as_1d_float(arr, "Cp_use"), "Stlv_use": None, "timer": None, "start_injection": None}
+        if arr.ndim == 2 and arr.shape[1] >= 2:
+            stlv_col = arr[:, 2] if arr.shape[1] > 2 else None
+            return {
+                "Cp_use": _as_1d_float(arr[:, 1], "Cp_use"),
+                "Stlv_use": _as_1d_float(stlv_col, "Stlv_use") if stlv_col is not None else None,
+                "timer": _as_1d_float(arr[:, 0], "timer"),
+                "start_injection": None,
+            }
+        raise ValueError(f"Unsupported NPY AIF array shape {arr.shape}")
+
+    if suffix == ".npz":
+        with np.load(p) as payload:
+            cp_key = next((k for k in ("Cp_use", "cp_use", "Cp", "cp") if k in payload), None)
+            if cp_key is None:
+                if len(payload.files) == 1:
+                    cp_key = payload.files[0]
+                else:
+                    raise ValueError(f"NPZ imported AIF {p} missing Cp_use")
+            timer_key = next((k for k in ("timer", "Timer", "time") if k in payload), None)
+            stlv_key = next((k for k in ("Stlv_use", "stlv_use", "Stlv", "stlv") if k in payload), None)
+            start_key = next((k for k in ("start_injection", "start_injection_min") if k in payload), None)
+            start_injection = float(payload[start_key]) if start_key is not None else None
+            return {
+                "Cp_use": _as_1d_float(payload[cp_key], "Cp_use"),
+                "Stlv_use": _as_1d_float(payload[stlv_key], "Stlv_use") if stlv_key is not None else None,
+                "timer": _as_1d_float(payload[timer_key], "timer") if timer_key is not None else None,
+                "start_injection": start_injection,
+            }
+
+    if suffix == ".mat":
+        try:
+            from scipy.io import loadmat  # type: ignore
+        except Exception as exc:
+            raise RuntimeError("scipy is required to read imported AIF .mat files") from exc
+
+        raw = loadmat(str(p), squeeze_me=True, struct_as_record=False)
+        payload: Dict[str, Any] = {}
+        for key, value in raw.items():
+            if key.startswith("__"):
+                continue
+            payload[key] = value
+        if "Bdata" in payload and not isinstance(payload["Bdata"], dict):
+            bdata = payload["Bdata"]
+            for key in ("Cp_use", "Stlv_use", "timer", "start_injection"):
+                if hasattr(bdata, key):
+                    payload[key] = getattr(bdata, key)
+        out = _normalize_payload(payload)
+        if out["Cp_use"] is None:
+            raise ValueError(f"Imported AIF MAT {p} missing Cp_use")
+        return out
+
+    raise ValueError(f"Unsupported imported AIF format: {p}")
+
+
+def _resample_or_pad_curve(curve: np.ndarray, dst_timer: np.ndarray, src_timer: Optional[np.ndarray]) -> np.ndarray:
+    target = np.asarray(dst_timer, dtype=np.float64)
+    source = _as_1d_float(curve, "curve")
+
+    if src_timer is not None:
+        src = _as_1d_float(src_timer, "src_timer")
+        if src.size == source.size:
+            order = np.argsort(src)
+            src_sorted = src[order]
+            source_sorted = source[order]
+            return np.interp(target, src_sorted, source_sorted, left=source_sorted[0], right=source_sorted[-1])
+
+    if source.size == target.size:
+        return source
+    if source.size > target.size:
+        return source[: target.size]
+
+    out = np.empty(target.size, dtype=np.float64)
+    out[: source.size] = source
+    out[source.size :] = source[-1]
+    return out
+
+
+def _align_imported_curve(
+    curve: np.ndarray,
+    import_timer: Optional[np.ndarray],
+    import_start: Optional[float],
+    timer: np.ndarray,
+    data_start: float,
+) -> Tuple[np.ndarray, int]:
+    out = _as_1d_float(curve, "curve").copy()
+    if import_timer is None or import_start is None or out.size != timer.size:
+        return out, 0
+
+    aif_start_idx = _nearest_index(import_timer, import_start)
+    data_start_idx = _nearest_index(timer, data_start)
+    shift = int(data_start_idx - aif_start_idx)
+    if shift == 0:
+        return out, 0
+
+    shifted = np.roll(out, shift)
+    n = shifted.size
+    if shift < 0:
+        pad = -shift
+        if pad >= n:
+            shifted[:] = shifted[0]
+        else:
+            fill = shifted[n - pad - 1]
+            shifted[n - pad :] = fill
+    else:
+        if shift >= n:
+            shifted[:] = 0.0
+        else:
+            shifted[:shift] = 0.0
+    return shifted, shift
+
+
+def _save_stage_b_qc_figure(
+    output_dir: Path,
+    timer: np.ndarray,
+    cp_roi: np.ndarray,
+    cp_use: np.ndarray,
+    stlv_roi: np.ndarray,
+    stlv_use: np.ndarray,
+) -> Dict[str, str]:
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("matplotlib is required for Stage-B QC figure saving") from exc
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    fig = plt.figure(figsize=(10, 4))
+    ax1 = fig.add_subplot(1, 2, 1)
+    ax2 = fig.add_subplot(1, 2, 2)
+
+    ax1.plot(timer, cp_roi, "r.", label="Original Plasma Curve")
+    ax1.plot(timer, cp_use, "b", label="Selected Curve")
+    ax1.set_xlabel("Time (min)")
+    ax1.set_ylabel("Concentration (mM)")
+    ax1.legend(loc="best")
+
+    ax2.plot(timer, stlv_roi, "r.", label="Original Plasma Curve: Raw data")
+    ax2.plot(timer, stlv_use, "b", label="Selected Curve")
+    ax2.set_xlabel("Time (min)")
+    ax2.set_ylabel("Signal (a.u)")
+    ax2.legend(loc="best")
+
+    fig.tight_layout()
+    out_path = output_dir / "dce_aif_fitting.png"
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+    return {"aif_fitting_png": str(out_path)}
+
+
+def _run_stage_b_real(config: DcePipelineConfig, stage_a: Dict[str, Any]) -> Dict[str, Any]:
+    arrays = stage_a.get("arrays")
+    if not isinstance(arrays, dict):
+        raise ValueError("Stage-B real mode requires Stage-A arrays")
+
+    cp_all = _as_time_by_voxel(arrays["Cp"], "Cp")
+    ct_all = _as_time_by_voxel(arrays["Ct"], "Ct")
+    stlv_all = _as_time_by_voxel(arrays["Stlv"], "Stlv")
+    sttum_all = _as_time_by_voxel(arrays["Sttum"], "Sttum")
+
+    n_time = cp_all.shape[0]
+    if ct_all.shape[0] != n_time or stlv_all.shape[0] != n_time or sttum_all.shape[0] != n_time:
+        raise ValueError("Stage-A arrays Cp/Ct/Stlv/Sttum must have matching time dimension")
+
+    timer_full = _resolve_stage_b_timer(config, stage_a, n_time)
+    start_time_min, end_time_min = _resolve_stage_b_limits(config)
+    start_idx, end_idx = _restrict_timer_window(timer_full, start_time_min, end_time_min)
+    timer = timer_full[start_idx:end_idx]
+
+    cp = cp_all[start_idx:end_idx, :]
+    ct = ct_all[start_idx:end_idx, :]
+    stlv = stlv_all[start_idx:end_idx, :]
+    sttum = sttum_all[start_idx:end_idx, :]
+    cp_roi = np.mean(cp, axis=1)
+    stlv_roi = np.mean(stlv, axis=1)
+
+    start_injection_min, end_injection_min = _resolve_stage_b_injection_window(config, stage_a, timer_full)
+    start_injection_min = float(np.clip(start_injection_min, timer[0], timer[-1]))
+    end_injection_min = float(np.clip(end_injection_min, start_injection_min, timer[-1]))
+
+    aif_mode = _resolve_stage_b_aif_mode(config)
+    fit_info: Dict[str, Any] = {}
+    import_shift = 0
+
+    if aif_mode == "fitted":
+        fit_cp = _fit_aif_biexp(
+            config,
+            timer=timer,
+            curve=cp_roi,
+            start_injection_min=start_injection_min,
+            end_injection_min=end_injection_min,
+            fitting_au=False,
+        )
+        fit_stlv = _fit_aif_biexp(
+            config,
+            timer=timer,
+            curve=stlv_roi,
+            start_injection_min=start_injection_min,
+            end_injection_min=end_injection_min,
+            fitting_au=True,
+        )
+        cp_use = fit_cp["curve"]
+        stlv_use = fit_stlv["curve"]
+        fit_info = {
+            "fit_success_cp": bool(fit_cp["fit_success"]),
+            "fit_success_stlv": bool(fit_stlv["fit_success"]),
+            "fit_rsquared_cp_adj": float(fit_cp["rsquare_adj"]),
+            "fit_rsquared_stlv_adj": float(fit_stlv["rsquare_adj"]),
+            "fit_params_cp": fit_cp["params"],
+            "fit_params_stlv": fit_stlv["params"],
+        }
+        aif_name = "fitted"
+    elif aif_mode == "raw":
+        cp_use = cp_roi.copy()
+        stlv_use = stlv_roi.copy()
+        aif_name = "raw"
+    else:
+        imported = _load_imported_aif(config.imported_aif_path if config.imported_aif_path else Path(""))
+        cp_use = _resample_or_pad_curve(imported["Cp_use"], timer, imported["timer"])
+        imported_stlv = imported["Stlv_use"] if imported["Stlv_use"] is not None else imported["Cp_use"]
+        stlv_use = _resample_or_pad_curve(imported_stlv, timer, imported["timer"])
+        cp_use, import_shift = _align_imported_curve(
+            cp_use,
+            import_timer=imported["timer"],
+            import_start=imported["start_injection"],
+            timer=timer,
+            data_start=start_injection_min,
+        )
+        stlv_use, _ = _align_imported_curve(
+            stlv_use,
+            import_timer=imported["timer"],
+            import_start=imported["start_injection"],
+            timer=timer,
+            data_start=start_injection_min,
+        )
+        aif_name = "imported"
+
+    figure_paths = _save_stage_b_qc_figure(
+        output_dir=config.output_dir,
+        timer=timer,
+        cp_roi=cp_roi,
+        cp_use=cp_use,
+        stlv_roi=stlv_roi,
+        stlv_use=stlv_use,
+    )
+
+    step = np.array([start_injection_min, end_injection_min], dtype=np.float64)
+    time_resolution_min = float(stage_a.get("time_resolution_min", np.median(np.diff(timer_full))))
+    result: Dict[str, Any] = {
+        "stage": "B",
+        "status": "ok",
+        "impl": "real",
+        "aif_mode": aif_mode,
+        "aif_name": aif_name,
+        "quant": bool(stage_a.get("quant", True)),
+        "start_time_index": int(start_idx + 1),  # 1-based for MATLAB compatibility
+        "end_time_index": int(end_idx),  # 1-based inclusive end
+        "start_injection_min": start_injection_min,
+        "end_injection_min": end_injection_min,
+        "time_resolution_min": time_resolution_min,
+        "numvoxels": int(ct.shape[1]),
+        "import_shift": int(import_shift),
+        "figure_paths": figure_paths,
+        "arrays": {
+            "CpROI": cp_roi,
+            "Cp_use": cp_use,
+            "StlvROI": stlv_roi,
+            "Stlv_use": stlv_use,
+            "timer": timer,
+            "Ct": ct,
+            "Sttum": sttum,
+            "step": step,
+        },
+    }
+
+    if fit_info:
+        result.update(fit_info)
+
+    for name in ("R1tTOI", "R1tLV", "deltaR1LV", "deltaR1TOI"):
+        if name in arrays:
+            result["arrays"][name] = _as_time_by_voxel(arrays[name], name)[start_idx:end_idx, :]
+    for name in ("T1TUM", "tumind", "Sss", "Ssstum"):
+        if name in arrays:
+            result["arrays"][name] = np.asarray(arrays[name])
+
+    return result
+
+
+def _sanitize_name(text: str) -> str:
+    out = re.sub(r"[^A-Za-z0-9._-]+", "_", text.strip())
+    return out.strip("_") or "roi"
+
+
+def _safe_float(value: Any, default: float) -> float:
+    try:
+        val = float(value)
+        if math.isfinite(val):
+            return val
+    except Exception:
+        pass
+    return float(default)
+
+
+def _stage_d_fit_prefs(config: DcePipelineConfig) -> Dict[str, float]:
+    return {
+        "lower_limit_ktrans": _safe_float(_stage_override(config, "voxel_lower_limit_ktrans", 1e-7), 1e-7),
+        "upper_limit_ktrans": _safe_float(_stage_override(config, "voxel_upper_limit_ktrans", 2.0), 2.0),
+        "initial_value_ktrans": _safe_float(_stage_override(config, "voxel_initial_value_ktrans", 2e-4), 2e-4),
+        "lower_limit_ve": _safe_float(_stage_override(config, "voxel_lower_limit_ve", 0.02), 0.02),
+        "upper_limit_ve": _safe_float(_stage_override(config, "voxel_upper_limit_ve", 1.0), 1.0),
+        "initial_value_ve": _safe_float(_stage_override(config, "voxel_initial_value_ve", 0.2), 0.2),
+        "lower_limit_vp": _safe_float(_stage_override(config, "voxel_lower_limit_vp", 1e-3), 1e-3),
+        "upper_limit_vp": _safe_float(_stage_override(config, "voxel_upper_limit_vp", 1.0), 1.0),
+        "initial_value_vp": _safe_float(_stage_override(config, "voxel_initial_value_vp", 0.02), 0.02),
+        "lower_limit_fp": _safe_float(_stage_override(config, "voxel_lower_limit_fp", 1e-3), 1e-3),
+        "upper_limit_fp": _safe_float(_stage_override(config, "voxel_upper_limit_fp", 100.0), 100.0),
+        "initial_value_fp": _safe_float(_stage_override(config, "voxel_initial_value_fp", 0.2), 0.2),
+        "lower_limit_tp": _safe_float(_stage_override(config, "voxel_lower_limit_tp", 0.0), 0.0),
+        "upper_limit_tp": _safe_float(_stage_override(config, "voxel_upper_limit_tp", 1e6), 1e6),
+        "initial_value_tp": _safe_float(_stage_override(config, "voxel_initial_value_tp", 0.05), 0.05),
+        "lower_limit_tau": _safe_float(_stage_override(config, "voxel_lower_limit_tau", 0.0), 0.0),
+        "upper_limit_tau": _safe_float(_stage_override(config, "voxel_upper_limit_tau", 100.0), 100.0),
+        "initial_value_tau": _safe_float(_stage_override(config, "voxel_initial_value_tau", 0.01), 0.01),
+        "max_nfev": int(_safe_float(_stage_override(config, "voxel_MaxFunEvals", 2000), 2000)),
+        "fxr_fw": _safe_float(_stage_override(config, "fxr_fw", 0.8), 0.8),
+    }
+
+
+def _stage_d_selected_models(config: DcePipelineConfig) -> Tuple[List[str], List[str]]:
+    selected: List[str] = []
+    for flag_key, model_name in MODEL_SELECTION_ORDER:
+        if int(config.model_flags.get(flag_key, 0)) == 1 and model_name not in selected:
+            selected.append(model_name)
+    if not selected:
+        selected = ["tofts"]
+
+    supported: List[str] = []
+    skipped: List[str] = []
+    for model in selected:
+        if model in SUPPORTED_STAGE_D_MODELS:
+            supported.append(model)
+        else:
+            skipped.append(model)
+    return supported, skipped
+
+
+def _moving_average_1d(values: np.ndarray, window: int) -> np.ndarray:
+    if window <= 1:
+        return values.copy()
+    kernel = np.ones(int(window), dtype=np.float64) / float(window)
+    return np.convolve(values, kernel, mode="same")
+
+
+def _smooth_time_matrix(data: np.ndarray, mode: str, window: int) -> np.ndarray:
+    if mode == "none" or window <= 1:
+        return np.asarray(data, dtype=np.float64)
+
+    source = np.asarray(data, dtype=np.float64)
+    smoothed = np.empty_like(source)
+    for col in range(source.shape[1]):
+        smoothed[:, col] = _moving_average_1d(source[:, col], window)
+    return smoothed
+
+
+def _try_load_reference_nifti(config: DcePipelineConfig) -> Optional[Dict[str, Any]]:
+    try:
+        import nibabel as nib  # type: ignore
+    except Exception:
+        return None
+
+    candidates = config.dynamic_files + config.t1map_files + config.aif_files
+    for path in candidates:
+        try:
+            image = nib.load(str(path))
+            shape = tuple(int(v) for v in image.shape[:3])
+            header = image.header.copy()
+            return {"shape": shape, "affine": image.affine, "header": header}
+        except Exception:
+            continue
+    return None
+
+
+def _write_tsv_xls(path: Path, rows: List[List[Any]]) -> None:
+    lines: List[str] = []
+    for row in rows:
+        cells: List[str] = []
+        for value in row:
+            if isinstance(value, (float, np.floating)):
+                cells.append(f"{float(value):.10g}")
+            else:
+                cells.append(str(value))
+        lines.append("\t".join(cells))
+    path.write_text("\n".join(lines) + "\n")
+
+
+def _write_param_maps(
+    config: DcePipelineConfig,
+    rootname: str,
+    model_name: str,
+    param_names: List[str],
+    fit_values: np.ndarray,
+    tumind: np.ndarray,
+    spatial_shape: Optional[Tuple[int, int, int]],
+) -> Dict[str, str]:
+    write_maps = bool(_stage_override(config, "write_param_maps", True))
+    if not write_maps or spatial_shape is None:
+        return {}
+
+    reference = _try_load_reference_nifti(config)
+    paths: Dict[str, str] = {}
+
+    for idx, param in enumerate(param_names):
+        if idx >= fit_values.shape[1]:
+            break
+        volume = np.zeros(spatial_shape, dtype=np.float32)
+        volume.reshape(-1)[tumind] = fit_values[:, idx].astype(np.float32)
+
+        out_base = f"{rootname}_{model_name}_fit_{param}"
+        if reference is not None:
+            try:
+                import nibabel as nib  # type: ignore
+
+                header = reference["header"].copy()
+                header.set_data_dtype(np.float32)
+                out_path = config.output_dir / f"{out_base}.nii.gz"
+                nii = nib.Nifti1Image(volume, reference["affine"], header)
+                nib.save(nii, str(out_path))
+                paths[param] = str(out_path)
+                continue
+            except Exception:
+                pass
+
+        out_path = config.output_dir / f"{out_base}.npy"
+        np.save(out_path, volume)
+        paths[param] = str(out_path)
+
+    return paths
+
+
+def _fit_model_curve(
+    model_name: str,
+    ct: np.ndarray,
+    cp: np.ndarray,
+    timer: np.ndarray,
+    prefs: Dict[str, float],
+    r1o: Optional[float],
+    relaxivity: float,
+    fw: float,
+) -> np.ndarray:
+    ct_list = [float(v) for v in ct]
+    cp_list = [float(v) for v in cp]
+    timer_list = [float(v) for v in timer]
+
+    if model_name == "tofts":
+        return np.asarray(model_tofts_fit(ct_list, cp_list, timer_list, prefs), dtype=np.float64)
+    if model_name == "ex_tofts":
+        return np.asarray(model_extended_tofts_fit(ct_list, cp_list, timer_list, prefs), dtype=np.float64)
+    if model_name == "patlak":
+        return np.asarray(model_patlak_linear(ct_list, cp_list, timer_list), dtype=np.float64)
+    if model_name == "tissue_uptake":
+        return np.asarray(model_tissue_uptake_fit(ct_list, cp_list, timer_list, prefs), dtype=np.float64)
+    if model_name == "2cxm":
+        return np.asarray(model_2cxm_fit(ct_list, cp_list, timer_list, prefs), dtype=np.float64)
+    if model_name == "fxr":
+        if r1o is None:
+            raise ValueError("FXR fitting requires R1 baseline values")
+        return np.asarray(
+            model_fxr_fit(
+                ct_list,
+                cp_list,
+                timer_list,
+                float(r1o),
+                float(r1o),
+                float(relaxivity),
+                float(fw),
+                prefs,
+            ),
+            dtype=np.float64,
+        )
+    raise ValueError(f"Unsupported model '{model_name}'")
+
+
+def _fit_auc_matrix(
+    timer: np.ndarray,
+    cp_use: np.ndarray,
+    ct: np.ndarray,
+    stlv_use: np.ndarray,
+    sttum: np.ndarray,
+    start_injection_min: float,
+    sss: Optional[np.ndarray],
+    ssstum: Optional[np.ndarray],
+) -> np.ndarray:
+    start_idx = _nearest_index(timer, start_injection_min)
+    t = timer[start_idx:]
+    cp = cp_use[start_idx:]
+    ct_use = ct[start_idx:, :]
+    sttum_use = sttum[start_idx:, :]
+    stlv = stlv_use[start_idx:]
+
+    if ssstum is not None and ssstum.size == sttum_use.shape[1]:
+        sttum_use = sttum_use - ssstum[np.newaxis, :]
+    if sss is not None and sss.size > 0:
+        stlv = stlv - float(np.mean(sss))
+
+    auc_cp = float(np.trapz(cp, t))
+    auc_sp = float(np.trapz(stlv, t))
+
+    out = np.zeros((ct_use.shape[1], 4), dtype=np.float64)
+    for i in range(ct_use.shape[1]):
+        auc_c = float(np.trapz(ct_use[:, i], t))
+        auc_s = float(np.trapz(sttum_use[:, i], t))
+        nauc_c = auc_c / auc_cp if abs(auc_cp) > 1e-12 else float("nan")
+        nauc_s = auc_s / auc_sp if abs(auc_sp) > 1e-12 else float("nan")
+        out[i, :] = [auc_c, auc_s, nauc_c, nauc_s]
+    return out
+
+
+def _load_roi_columns(
+    config: DcePipelineConfig,
+    tumind: np.ndarray,
+    spatial_shape: Optional[Tuple[int, int, int]],
+) -> Tuple[List[Path], List[str], List[np.ndarray]]:
+    if not config.roi_files or spatial_shape is None:
+        return [], [], []
+
+    roi_paths: List[Path] = []
+    roi_names: List[str] = []
+    roi_columns: List[np.ndarray] = []
+    tumind = np.asarray(tumind, dtype=np.int64).reshape(-1)
+
+    for roi_path in config.roi_files:
+        if roi_path.suffix.lower() == ".roi":
+            continue
+        roi_img = _load_nifti_data(roi_path)
+        if roi_img.ndim == 4:
+            roi_img = roi_img[..., 0]
+        if tuple(roi_img.shape) != tuple(spatial_shape):
+            continue
+
+        roi_idx = np.flatnonzero(roi_img.reshape(-1) > 0)
+        if roi_idx.size == 0:
+            continue
+        _, _, tum_pos = np.intersect1d(roi_idx, tumind, assume_unique=False, return_indices=True)
+        if tum_pos.size == 0:
+            continue
+
+        roi_paths.append(roi_path)
+        roi_names.append(_sanitize_name(roi_path.stem))
+        roi_columns.append(np.asarray(tum_pos, dtype=np.int64))
+
+    return roi_paths, roi_names, roi_columns
+
+
+def _fit_stage_d_model(
+    model_name: str,
+    ct: np.ndarray,
+    cp_use: np.ndarray,
+    timer: np.ndarray,
+    prefs: Dict[str, float],
+    r1o: Optional[np.ndarray],
+    relaxivity: float,
+    fw: float,
+    stlv_use: Optional[np.ndarray],
+    sttum: Optional[np.ndarray],
+    start_injection_min: float,
+    sss: Optional[np.ndarray],
+    ssstum: Optional[np.ndarray],
+) -> np.ndarray:
+    layout = MODEL_LAYOUTS[model_name]
+    row_len = len(layout["param_names"])
+
+    if model_name == "auc":
+        if stlv_use is None or sttum is None:
+            raise ValueError("AUC fitting requires Stlv_use and Sttum arrays")
+        return _fit_auc_matrix(timer, cp_use, ct, stlv_use, sttum, start_injection_min, sss, ssstum)
+
+    out = np.full((ct.shape[1], row_len), np.nan, dtype=np.float64)
+    for i in range(ct.shape[1]):
+        try:
+            r1o_val = float(r1o[i]) if r1o is not None and i < r1o.size else None
+            row = _fit_model_curve(model_name, ct[:, i], cp_use, timer, prefs, r1o_val, relaxivity, fw)
+            n_copy = min(row_len, row.shape[0])
+            out[i, :n_copy] = row[:n_copy]
+        except Exception:
+            continue
+    return out
+
+
+def _run_stage_d_real(config: DcePipelineConfig, stage_a: Dict[str, Any], stage_b: Dict[str, Any]) -> Dict[str, Any]:
+    arrays = stage_b.get("arrays")
+    if not isinstance(arrays, dict):
+        raise ValueError("Stage-D real mode requires Stage-B arrays")
+
+    cp_use = _as_1d_float(arrays["Cp_use"], "Cp_use")
+    timer = _as_1d_float(arrays["timer"], "timer")
+    ct_main = _as_time_by_voxel(arrays["Ct"], "Ct")
+    tumind = np.asarray(arrays.get("tumind", stage_a.get("arrays", {}).get("tumind", [])), dtype=np.int64).reshape(-1)
+    if tumind.size != ct_main.shape[1]:
+        if tumind.size == 0:
+            tumind = np.arange(ct_main.shape[1], dtype=np.int64)
+        else:
+            raise ValueError("tumind size does not match Ct voxel dimension")
+
+    if cp_use.size != timer.size or ct_main.shape[0] != timer.size:
+        raise ValueError("Stage-D expects Cp_use, Ct, timer to share time length")
+
+    time_smoothing = str(_stage_override(config, "time_smoothing", "none")).strip().lower()
+    time_smoothing_window = int(_safe_float(_stage_override(config, "time_smoothing_window", 0), 0))
+    ct_main = _smooth_time_matrix(ct_main, time_smoothing, time_smoothing_window)
+
+    sttum = _as_time_by_voxel(arrays["Sttum"], "Sttum") if "Sttum" in arrays else None
+    stlv_use = _as_1d_float(arrays["Stlv_use"], "Stlv_use") if "Stlv_use" in arrays else None
+    if sttum is not None:
+        sttum = _smooth_time_matrix(sttum, time_smoothing, time_smoothing_window)
+
+    relaxivity = float(stage_a.get("relaxivity", _stage_override(config, "relaxivity", 3.4)))
+    prefs = _stage_d_fit_prefs(config)
+    fw = float(prefs["fxr_fw"])
+
+    spatial_shape: Optional[Tuple[int, int, int]] = None
+    ref_meta = _try_load_reference_nifti(config)
+    if ref_meta is not None:
+        spatial_shape = tuple(ref_meta["shape"])
+    elif "image_shape" in stage_a:
+        shape = stage_a["image_shape"]
+        if isinstance(shape, list) and len(shape) == 3:
+            spatial_shape = (int(shape[0]), int(shape[1]), int(shape[2]))
+
+    roi_paths, roi_names, roi_columns = _load_roi_columns(config, tumind, spatial_shape)
+    selected_models, skipped_models = _stage_d_selected_models(config)
+
+    rootname = str(stage_a.get("rootname", _stage_override(config, "rootname", "python_dce")))
+    start_injection_min = float(stage_b.get("start_injection_min", timer[0]))
+    sss = np.asarray(arrays["Sss"], dtype=np.float64).reshape(-1) if "Sss" in arrays else None
+    ssstum = np.asarray(arrays["Ssstum"], dtype=np.float64).reshape(-1) if "Ssstum" in arrays else None
+
+    model_outputs: Dict[str, Any] = {}
+    stage_arrays: Dict[str, np.ndarray] = {}
+    for model_name in selected_models:
+        layout = MODEL_LAYOUTS[model_name]
+        param_names = list(layout["param_names"])
+
+        ct_source = ct_main
+        r1o = None
+        if model_name == "fxr":
+            if "R1tTOI" not in arrays or "T1TUM" not in arrays:
+                raise ValueError("FXR model requires R1tTOI and T1TUM arrays from Stage-B")
+            ct_source = _as_time_by_voxel(arrays["R1tTOI"], "R1tTOI")
+            if ct_source.shape[0] != timer.size:
+                raise ValueError("R1tTOI time dimension mismatch for FXR")
+            t1tum = np.asarray(arrays["T1TUM"], dtype=np.float64).reshape(-1)
+            if t1tum.size != ct_source.shape[1]:
+                raise ValueError("T1TUM size mismatch for FXR")
+            r1o = 1.0 / t1tum
+
+        voxel_results = _fit_stage_d_model(
+            model_name=model_name,
+            ct=ct_source,
+            cp_use=cp_use,
+            timer=timer,
+            prefs=prefs,
+            r1o=r1o,
+            relaxivity=relaxivity,
+            fw=fw,
+            stlv_use=stlv_use,
+            sttum=sttum,
+            start_injection_min=start_injection_min,
+            sss=sss,
+            ssstum=ssstum,
+        )
+
+        roi_results = np.empty((0, voxel_results.shape[1]), dtype=np.float64)
+        if roi_columns:
+            roi_curve = np.stack([np.mean(ct_source[:, cols], axis=1) for cols in roi_columns], axis=1)
+            roi_r1o = None
+            if model_name == "fxr" and r1o is not None:
+                roi_r1o = np.asarray([float(np.mean(r1o[cols])) for cols in roi_columns], dtype=np.float64)
+            roi_sttum = None
+            if sttum is not None:
+                roi_sttum = np.stack([np.mean(sttum[:, cols], axis=1) for cols in roi_columns], axis=1)
+            roi_results = _fit_stage_d_model(
+                model_name=model_name,
+                ct=roi_curve,
+                cp_use=cp_use,
+                timer=timer,
+                prefs=prefs,
+                r1o=roi_r1o,
+                relaxivity=relaxivity,
+                fw=fw,
+                stlv_use=stlv_use,
+                sttum=roi_sttum,
+                start_injection_min=start_injection_min,
+                sss=sss,
+                ssstum=np.asarray([float(np.mean(ssstum[cols])) for cols in roi_columns], dtype=np.float64)
+                if ssstum is not None and ssstum.size == ct_source.shape[1]
+                else None,
+            )
+
+        map_paths = _write_param_maps(
+            config=config,
+            rootname=rootname,
+            model_name=model_name,
+            param_names=param_names,
+            fit_values=voxel_results,
+            tumind=tumind,
+            spatial_shape=spatial_shape,
+        )
+
+        xls_path: Optional[str] = None
+        if config.write_xls and roi_results.shape[0] > 0:
+            results_base = config.output_dir / f"{rootname}_{model_name}_fit"
+            xls_target = Path(str(results_base) + "_rois.xls")
+            rows: List[List[Any]] = [list(layout["headings"])]
+            for i, roi_name in enumerate(roi_names):
+                row: List[Any] = [str(roi_paths[i]), roi_name]
+                row.extend(float(v) for v in roi_results[i, :])
+                rows.append(row)
+            _write_tsv_xls(xls_target, rows)
+            xls_path = str(xls_target)
+
+        stage_arrays[f"{model_name}_voxel_results"] = voxel_results
+        if roi_results.shape[0] > 0:
+            stage_arrays[f"{model_name}_roi_results"] = roi_results
+
+        model_outputs[model_name] = {
+            "param_names": param_names,
+            "voxel_result_shape": list(voxel_results.shape),
+            "roi_result_shape": list(roi_results.shape),
+            "map_paths": map_paths,
+            "xls_path": xls_path,
+        }
+
+    selected_backend = resolve_backend(config.backend)
+    backend_used = "cpu" if selected_backend == "gpufit" else selected_backend
+    return {
+        "stage": "D",
+        "status": "ok",
+        "impl": "real",
+        "selected_backend": selected_backend,
+        "backend_used": backend_used,
+        "write_xls": bool(config.write_xls),
+        "time_smoothing": time_smoothing,
+        "time_smoothing_window": int(time_smoothing_window),
+        "models_requested": selected_models + skipped_models,
+        "models_run": selected_models,
+        "models_skipped": skipped_models,
+        "model_outputs": model_outputs,
+        "arrays": stage_arrays,
+    }
+
+
+class HybridStageRunner:
+    """Runner with real Stage-A and Stage-B support plus scaffold fallbacks."""
+
+    def run_a(self, config: DcePipelineConfig) -> Dict[str, Any]:
+        mode = str(_stage_override(config, "stage_a_mode", "real")).strip().lower()
+        if mode == "scaffold":
+            return {
+                "stage": "A",
+                "status": "scaffold",
+                "impl": "scaffold",
+                "dynamic_file_count": len(config.dynamic_files),
+                "aif_file_count": len(config.aif_files),
+                "roi_file_count": len(config.roi_files),
+                "t1map_file_count": len(config.t1map_files),
+                "noise_file_count": len(config.noise_files),
+                "drift_file_count": len(config.drift_files),
+                "subject_tp_path": str(config.subject_tp_path),
+            }
+        return _run_stage_a_real(config)
+
+    def run_b(self, config: DcePipelineConfig, stage_a: Dict[str, Any]) -> Dict[str, Any]:
+        mode = str(_stage_override(config, "stage_b_mode", "auto")).strip().lower()
+        if mode == "scaffold":
+            return {
+                "stage": "B",
+                "status": "scaffold",
+                "impl": "scaffold",
+                "aif_mode": config.aif_mode.strip().lower(),
+                "imported_aif_path": str(config.imported_aif_path) if config.imported_aif_path else None,
+                "manual_click_aif_enabled": False,
+            }
+
+        if mode == "auto":
+            if not isinstance(stage_a.get("arrays"), dict):
+                return {
+                    "stage": "B",
+                    "status": "scaffold",
+                    "impl": "scaffold",
+                    "aif_mode": config.aif_mode.strip().lower(),
+                    "imported_aif_path": str(config.imported_aif_path) if config.imported_aif_path else None,
+                    "manual_click_aif_enabled": False,
+                    "reason": "stage_a_arrays_missing",
+                }
+            return _run_stage_b_real(config, stage_a)
+
+        if mode == "real":
+            return _run_stage_b_real(config, stage_a)
+
+        raise ValueError(f"Unsupported stage_b_mode '{mode}'")
+
+    def run_d(self, config: DcePipelineConfig, stage_a: Dict[str, Any], stage_b: Dict[str, Any]) -> Dict[str, Any]:
+        mode = str(_stage_override(config, "stage_d_mode", "auto")).strip().lower()
+        if mode == "scaffold":
+            selected_backend = resolve_backend(config.backend)
+            return {
+                "stage": "D",
+                "status": "scaffold",
+                "impl": "scaffold",
+                "selected_backend": selected_backend,
+                "write_xls": bool(config.write_xls),
+                "model_flags": dict(config.model_flags),
+            }
+
+        if mode == "auto":
+            if not isinstance(stage_b.get("arrays"), dict):
+                selected_backend = resolve_backend(config.backend)
+                return {
+                    "stage": "D",
+                    "status": "scaffold",
+                    "impl": "scaffold",
+                    "selected_backend": selected_backend,
+                    "write_xls": bool(config.write_xls),
+                    "model_flags": dict(config.model_flags),
+                    "reason": "stage_b_arrays_missing",
+                }
+            return _run_stage_d_real(config, stage_a, stage_b)
+
+        if mode == "real":
+            return _run_stage_d_real(config, stage_a, stage_b)
+
+        raise ValueError(f"Unsupported stage_d_mode '{mode}'")
+
+
+def _array_shapes(data: Dict[str, Any]) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    for key, value in data.items():
+        if isinstance(value, np.ndarray):
+            out[key] = list(value.shape)
+    return out
+
+
+def _stage_summary(stage_data: Dict[str, Any]) -> Dict[str, Any]:
+    summary = {}
+    for key, value in stage_data.items():
+        if key == "arrays" and isinstance(value, dict):
+            summary["array_shapes"] = _array_shapes(value)
+            continue
+        if isinstance(value, np.ndarray):
+            summary[key] = {"shape": list(value.shape)}
+            continue
+        summary[key] = value
+    return summary
+
+
+def _write_stage_checkpoint(checkpoint_dir: Path, stage_name: str, data: Dict[str, Any]) -> Path:
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    metadata = dict(data)
+    arrays = metadata.pop("arrays", None)
+    if isinstance(arrays, dict):
+        npz_path = checkpoint_dir / f"{stage_name.lower()}_out_arrays.npz"
+        serializable_arrays = {k: v for k, v in arrays.items() if isinstance(v, np.ndarray)}
+        if serializable_arrays:
+            np.savez_compressed(npz_path, **serializable_arrays)
+            metadata["array_npz"] = str(npz_path)
+            metadata["array_shapes"] = _array_shapes(serializable_arrays)
+
+    target = checkpoint_dir / f"{stage_name.lower()}_out.json"
+    target.write_text(json.dumps(metadata, indent=2, default=_json_default))
+    return target
+
+
+def run_dce_pipeline(
+    config: DcePipelineConfig,
+    runner: Optional[DceStageRunner] = None,
+) -> Dict[str, Any]:
+    """Run DCE stages A->B->D in memory with optional checkpoints."""
+    config.validate()
+    config.output_dir.mkdir(parents=True, exist_ok=True)
+    if config.checkpoint_dir:
+        config.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    active_runner = runner or HybridStageRunner()
+
+    stage_a = active_runner.run_a(config)
+    if config.checkpoint_dir:
+        _write_stage_checkpoint(config.checkpoint_dir, "A", stage_a)
+
+    stage_b = active_runner.run_b(config, stage_a)
+    if config.checkpoint_dir:
+        _write_stage_checkpoint(config.checkpoint_dir, "B", stage_b)
+
+    stage_d = active_runner.run_d(config, stage_a, stage_b)
+    if config.checkpoint_dir:
+        _write_stage_checkpoint(config.checkpoint_dir, "D", stage_d)
+
+    summary = {
+        "meta": {
+            "pipeline": "dce_cli_in_memory",
+            "status": "ok",
+            "single_process": True,
+        },
+        "config": config.to_dict(),
+        "stages": {
+            "A": _stage_summary(stage_a),
+            "B": _stage_summary(stage_b),
+            "D": _stage_summary(stage_d),
+        },
+    }
+
+    summary_path = config.output_dir / "dce_pipeline_run.json"
+    summary_path.write_text(json.dumps(summary, indent=2, default=_json_default))
+    summary["meta"]["summary_path"] = str(summary_path)
+    return summary
