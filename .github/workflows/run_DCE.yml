@@ -13,6 +13,7 @@ on:
 
 jobs:
   build:
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && matrix.os == 'ubuntu-latest' && matrix.release == 'R2022a')
     strategy:
       #fail-fast: false
       matrix:
@@ -50,12 +51,35 @@ jobs:
         with:
           command: addpath .; addpath tests/matlab/; addpath tests/matlab/helpers/; results = run_all_tests('suite','integration'); assert(~any([results.Failed]), 'Integration tests failed.');
 
-      - name: Run DCE
+      - name: Generate Synthetic DCE Smoke Dataset
+        if: github.event_name == 'pull_request'
+        uses: matlab-actions/run-command@v2
+        with:
+          command: addpath .; addpath tests/matlab/; addpath tests/matlab/helpers/; generate_synthetic_datasets('outputRoot','test_data/synthetic/generated','clean',true);
+
+      - name: Run DCE (PR Smoke)
+        if: github.event_name == 'pull_request'
+        uses: matlab-actions/run-command@v2
+        with:
+          command: run_dce_cli('test_data/synthetic/generated/downsample_x2/rawdata/sub-01/ses-01/', 'test_data/synthetic/generated/downsample_x2/derivatives/sub-01/ses-01/')
+
+      - name: Run DCE (Full)
+        if: github.event_name == 'push'
         uses: matlab-actions/run-command@v2
         with:
           command: run_dce_cli('test_data/BIDS_test/rawdata/sub-01/ses-01/', 'test_data/BIDS_test/derivatives/sub-01/ses-01/')
 
-      - name: Upload Ktrans result
+      - name: Upload Ktrans result (PR Smoke)
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ktrans_result_${{ matrix.os }}-${{ matrix.release }}_pr
+          path: test_data/synthetic/generated/downsample_x2/derivatives/sub-01/ses-01/dce/dce_patlak_fit_Ktrans.nii
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload Ktrans result (Full)
+        if: github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
           name: Ktrans_result_${{ matrix.os }}-${{ matrix.release }}
