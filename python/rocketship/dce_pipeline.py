@@ -444,30 +444,6 @@ def _baseline_window(config: DcePipelineConfig, n_timepoints: int) -> Tuple[int,
     return start_1b - 1, end_1b
 
 
-def _interpolate_value(values: np.ndarray, bad_indices: np.ndarray, idx: int, buffer: int) -> Optional[float]:
-    n_time = values.shape[0]
-    start = max(0, idx - buffer)
-    end = min(n_time, idx + buffer + 1)
-    neighbors = np.arange(start, end)
-    neighbors = neighbors[neighbors != idx]
-    if bad_indices.size > 0:
-        neighbors = neighbors[~np.isin(neighbors, bad_indices)]
-    neighbors = neighbors[np.isfinite(values[neighbors])]
-
-    left = neighbors[neighbors < idx]
-    right = neighbors[neighbors > idx]
-    if left.size == 0 or right.size == 0:
-        return None
-    li = int(left[-1])
-    ri = int(right[0])
-    if li == ri:
-        return None
-
-    x = np.array([li, ri], dtype=np.float64)
-    y = np.array([values[li], values[ri]], dtype=np.float64)
-    return float(np.interp(float(idx), x, y))
-
-
 def _clean_ab(
     ab: np.ndarray,
     t1_values: np.ndarray,
@@ -480,17 +456,29 @@ def _clean_ab(
 
     for col in range(ab.shape[1]):
         vec = cleaned[:, col]
-        bad = np.where((~np.isfinite(vec)) | (vec < 1.0))[0]
+        # MATLAB cleanAB.m uses TEST < 1 as the bad-point criterion.
+        bad = np.where(vec < 1.0)[0]
         if bad.size > threshold_fraction * n_time:
             keep[col] = False
             continue
+        if bad.size == 0:
+            continue
         for idx in bad:
-            replacement = _interpolate_value(vec, bad, int(idx), buffer=5)
-            if replacement is None:
+            start = max(0, int(idx) - 5)
+            end = min(n_time, int(idx) + 6)
+            neighbors = np.arange(start, end, dtype=np.int64)
+            neighbors = neighbors[neighbors != int(idx)]
+            neighbors = neighbors[~np.isin(neighbors, bad)]
+            if neighbors.size < 2:
                 keep[col] = False
                 break
-            vec[idx] = replacement
-        cleaned[:, col] = vec
+            rel = neighbors - int(idx)
+            if not np.any(rel > 0) or not np.any(rel < 0):
+                keep[col] = False
+                break
+            vec[int(idx)] = float(np.interp(float(idx), neighbors.astype(np.float64), vec[neighbors].astype(np.float64)))
+        if keep[col]:
+            cleaned[:, col] = vec
 
     return cleaned[:, keep], t1_values[keep], roi_indices[keep]
 
@@ -507,17 +495,32 @@ def _clean_r1(
 
     for col in range(r1.shape[1]):
         vec = cleaned[:, col]
+        imag_bad = np.where(np.imag(vec) > 0)[0]
+        if imag_bad.size > threshold_fraction * n_time:
+            keep[col] = False
+            continue
+        if imag_bad.size > 0:
+            vec = np.real(vec)
+
         bad = np.where((~np.isfinite(vec)) | (vec > 100.0))[0]
         if bad.size > threshold_fraction * n_time:
             keep[col] = False
             continue
         for idx in bad:
-            replacement = _interpolate_value(vec, bad, int(idx), buffer=3)
-            if replacement is None or not math.isfinite(replacement):
+            start = max(0, int(idx) - 3)
+            end = min(n_time, int(idx) + 4)
+            neighbors = np.arange(start, end, dtype=np.int64)
+            neighbors = neighbors[neighbors != int(idx)]
+            if neighbors.size < 2:
                 keep[col] = False
                 break
-            vec[idx] = replacement
-        cleaned[:, col] = vec
+            replacement = float(np.interp(float(idx), neighbors.astype(np.float64), np.asarray(vec[neighbors], dtype=np.float64)))
+            vec[int(idx)] = replacement
+            if not math.isfinite(replacement):
+                keep[col] = False
+                break
+        if keep[col]:
+            cleaned[:, col] = np.asarray(vec, dtype=np.float64)
 
     return cleaned[:, keep], t1_values[keep], roi_indices[keep]
 
@@ -617,6 +620,12 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     if t1map_img.shape != spatial:
         raise ValueError(f"T1 map shape {t1map_img.shape} does not match dynamic spatial shape {spatial}")
 
+    # MATLAB A_make_R1maps_func converts T1 maps from ms->s when values are large.
+    # Keep the same unit behavior to avoid 1000x concentration scaling errors.
+    t1_pos = t1map_img[np.isfinite(t1map_img) & (t1map_img > 0)]
+    if t1_pos.size > 0 and float(np.median(t1_pos)) > 20.0:
+        t1map_img = t1map_img / 1000.0
+
     aif_mask = aif_mask_img > 0
     roi_mask = roi_mask_img > 0
     if not np.any(aif_mask):
@@ -638,12 +647,13 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
         noise_size = int(_stage_override(config, "noise_pixsize", 5))
         noise_mask[:noise_size, :noise_size, :] = True
 
-    dyn_2d = dynamic.reshape(-1, dynamic.shape[3]).T
-    t1_flat = t1map_img.reshape(-1)
+    # Match MATLAB linear indexing (column-major) for voxel ordering.
+    dyn_2d = dynamic.reshape((-1, dynamic.shape[3]), order="F").T
+    t1_flat = t1map_img.reshape(-1, order="F")
 
-    lvind = np.where(aif_mask.reshape(-1))[0]
-    tumind = np.where(roi_mask.reshape(-1))[0]
-    noiseind = np.where(noise_mask.reshape(-1))[0]
+    lvind = np.where(aif_mask.reshape(-1, order="F"))[0]
+    tumind = np.where(roi_mask.reshape(-1, order="F"))[0]
+    noiseind = np.where(noise_mask.reshape(-1, order="F"))[0]
     if noiseind.size == 0:
         raise ValueError("Noise mask has no positive voxels")
 
@@ -668,6 +678,7 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     n_time = dynamic.shape[3]
     timing = _resolve_dynamic_metadata(config, n_time)
     tr_ms = float(timing["tr_ms"])
+    tr_sec = tr_ms / 1000.0
     fa_deg = float(timing["fa_deg"])
     time_resolution_min = float(timing["time_resolution_min"])
 
@@ -679,7 +690,7 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
 
     # AIF path to R1
     sss = np.mean(stlv[baseline_slice, :], axis=0)
-    sstar_lv = (1.0 - np.exp(-tr_ms / t1_lv)) / (1.0 - np.cos(np.deg2rad(fa_deg)) * np.exp(-tr_ms / t1_lv))
+    sstar_lv = (1.0 - np.exp(-tr_sec / t1_lv)) / (1.0 - np.cos(np.deg2rad(fa_deg)) * np.exp(-tr_sec / t1_lv))
     a = 1.0 - np.cos(np.deg2rad(fa_deg)) * sstar_lv[np.newaxis, :] * stlv / sss[np.newaxis, :]
     b = 1.0 - sstar_lv[np.newaxis, :] * stlv / sss[np.newaxis, :]
     ab_lv = a / b
@@ -687,7 +698,7 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     if t1_lv.size == 0:
         raise ValueError("All AIF voxels removed after AB cleaning")
 
-    r1_lv = (1.0 / tr_ms) * np.log(ab_lv)
+    r1_lv = (1.0 / tr_sec) * np.log(ab_lv)
     r1_lv, t1_lv, lvind = _clean_r1(r1_lv, t1_lv, lvind, threshold_fraction=0.005)
     if t1_lv.size == 0:
         raise ValueError("All AIF voxels removed after R1 cleaning")
@@ -698,7 +709,7 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
 
     # ROI path to R1
     ss_tum = np.mean(sttum[baseline_slice, :], axis=0)
-    sstar_tum = (1.0 - np.exp(-tr_ms / t1_tum)) / (1.0 - np.cos(np.deg2rad(fa_deg)) * np.exp(-tr_ms / t1_tum))
+    sstar_tum = (1.0 - np.exp(-tr_sec / t1_tum)) / (1.0 - np.cos(np.deg2rad(fa_deg)) * np.exp(-tr_sec / t1_tum))
     a_tum = 1.0 - np.cos(np.deg2rad(fa_deg)) * sstar_tum[np.newaxis, :] * sttum / ss_tum[np.newaxis, :]
     b_tum = 1.0 - sstar_tum[np.newaxis, :] * sttum / ss_tum[np.newaxis, :]
     ab_tum = a_tum / b_tum
@@ -706,7 +717,7 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     if t1_tum.size == 0:
         raise ValueError("All ROI voxels removed after AB cleaning")
 
-    r1_toi = (1.0 / tr_ms) * np.log(ab_tum)
+    r1_toi = (1.0 / tr_sec) * np.log(ab_tum)
     r1_toi, t1_tum, tumind = _clean_r1(r1_toi, t1_tum, tumind, threshold_fraction=0.7)
     if t1_tum.size == 0:
         raise ValueError("All ROI voxels removed after R1 cleaning")
@@ -1579,12 +1590,13 @@ def _write_param_maps(
 
     reference = _try_load_reference_nifti(config)
     paths: Dict[str, str] = {}
+    coords = np.unravel_index(tumind.astype(np.int64), spatial_shape, order="F")
 
     for idx, param in enumerate(param_names):
         if idx >= fit_values.shape[1]:
             break
         volume = np.zeros(spatial_shape, dtype=np.float32)
-        volume.reshape(-1)[tumind] = fit_values[:, idx].astype(np.float32)
+        volume[coords] = fit_values[:, idx].astype(np.float32)
 
         out_base = f"{rootname}_{model_name}_fit_{param}"
         if reference is not None:
@@ -1708,7 +1720,7 @@ def _load_roi_columns(
         if tuple(roi_img.shape) != tuple(spatial_shape):
             continue
 
-        roi_idx = np.flatnonzero(roi_img.reshape(-1) > 0)
+        roi_idx = np.flatnonzero(roi_img.reshape(-1, order="F") > 0)
         if roi_idx.size == 0:
             continue
         _, _, tum_pos = np.intersect1d(roi_idx, tumind, assume_unique=False, return_indices=True)

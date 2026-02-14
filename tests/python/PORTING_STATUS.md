@@ -66,6 +66,12 @@ Confirmed in-scope requirements to retain:
   - real in-memory implementation path is wired (voxel/ROI model fitting, parameter-map output, `.xls` ROI tables)
   - supported non-GUI models: `tofts`, `ex_tofts`, `patlak`, `tissue_uptake`, `2cxm`, `fxr`, `auc`
   - stage mode control: `stage_overrides.stage_d_mode = auto|real|scaffold`
+- Recent parity fixes (MATLAB alignment):
+  - Stage A now uses MATLAB-style column-major voxel indexing for `lvind/tumind/noiseind`.
+  - Stage D map writeback now uses MATLAB-style linear index mapping.
+  - Stage A TR handling now converts `tr_ms -> tr_sec` before R1 calculations.
+  - Stage A now auto-converts T1 maps from ms to seconds when magnitudes indicate ms units.
+  - Stage A cleanup behavior (`cleanAB`, `cleanR1t`) now mirrors MATLAB logic more closely.
 - Scope guards enforced by config validation:
   - rejects ImageJ `.roi` input
   - accepts backend `auto|cpu|gpufit`
