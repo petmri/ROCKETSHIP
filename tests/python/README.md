@@ -7,7 +7,8 @@ For a resume-later snapshot, see:
 Current focus:
 - End-to-end DCE CLI port for parts `A`, `B`, and `D`.
 - Default execution: single-process with in-memory stage handoff.
-- Deprecated/not being ported: `neuroecon`, GUI batch queue flow, manual click-based AIF tools, email notifications.
+- Deprecated/not being ported: `neuroecon`, GUI batch queue flow, manual click-based AIF tools, ImageJ `.roi` input, email notifications.
+- Retained output compatibility: ROI spreadsheet exports (`.xls`).
 - GPUfit support is planned as an optional backend when available; CPU remains the parity baseline.
 
 ## Environment setup (macOS)

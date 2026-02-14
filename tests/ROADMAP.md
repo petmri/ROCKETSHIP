@@ -20,8 +20,11 @@
   - GUI batch queue/prep flow for part D.
   - Email completion notification flow.
   - Manual click-based AIF tools.
+  - ImageJ ROI input support (`.roi`).
   - GUI entrypoints/UI helpers.
   - MATLAB-specific batch helper scripts.
+- Explicitly retained:
+  - ROI spreadsheet outputs (`.xls`).
 
 ## Implementation notes for parity-safe CLI
 - Keep A/B/D as logical stages but pass stage outputs in memory.

@@ -36,8 +36,12 @@ Confirmed out-of-scope/deprecated for the Python port:
 - Legacy GUI batch queue/prep flow for part D.
 - Email notification completion flow.
 - Manual click-based AIF tools.
+- ImageJ ROI input support (`.roi`).
 - GUI entrypoints and UI helper utilities.
 - MATLAB-specific batch helper scripts.
+
+Confirmed in-scope requirements to retain:
+- ROI spreadsheet outputs (`.xls`).
 
 ## Execution architecture decisions
 - Primary runtime path is a single-process end-to-end pipeline (`A -> B -> D`) with in-memory data flow.
