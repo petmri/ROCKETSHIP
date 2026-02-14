@@ -8,6 +8,16 @@
 - Python parity runner and baseline comparison tooling.
 - Initial Python ports for DCE/DSC helper/parametric core models.
 - MATLAB baseline + Python parity coverage for DSC `ssvd_deconvolution`.
+- Expanded DCE forward parity coverage (`model_vp_cfit`, `model_tissue_uptake_cfit`, `model_2cxm_cfit`).
+- Expanded DCE inverse parity coverage (`model_vp`, `model_tissue_uptake`, `model_2cxm`).
+- Expanded DCE FXR parity coverage (`model_fxr_cfit`, `model_fxr`).
+
+## Scope guardrails for Python CLI port
+- Primary target: DCE parts `A`, `B`, and `D` as CLI workflow.
+- Explicitly excluded/deprecated:
+  - `neuroecon` execution path.
+  - GUI batch queue/prep flow for part D.
+  - Email completion notification flow.
 
 ## Next expansion steps
 1. Add fixture generators for edge cases:
@@ -20,7 +30,7 @@
 3. Add pipeline integration tests:
    - scripted A->B->D DCE checks with assertions on numerical outputs
    - non-interactive DSC workflow checks for both sSVD and oSVD paths
-4. Close next parity gap:
+4. Close next DSC parity gap:
    - add baseline + contracts for `DSC_convolution_oSVD`
    - port `DSC_convolution_oSVD` and compare against baseline
 5. Grow real datasets as needed:

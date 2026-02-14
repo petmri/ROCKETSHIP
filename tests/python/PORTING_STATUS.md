@@ -9,8 +9,16 @@ Python implementations currently exist in `/Users/samuelbarnes/code/ROCKETSHIP/p
   - `model_tofts_cfit`
   - `model_patlak_cfit`
   - `model_extended_tofts_cfit`
+  - `model_vp_cfit`
+  - `model_tissue_uptake_cfit`
+  - `model_2cxm_cfit`
+  - `model_fxr_cfit`
   - `model_patlak_linear`
   - `model_tofts_fit` (SciPy least-squares)
+  - `model_vp_fit`
+  - `model_tissue_uptake_fit`
+  - `model_2cxm_fit`
+  - `model_fxr_fit`
 - `dsc_helpers.py`
   - `import_aif`
   - `previous_aif`
@@ -19,6 +27,14 @@ Python implementations currently exist in `/Users/samuelbarnes/code/ROCKETSHIP/p
 - `parametric_models.py`
   - `t2_linear_fast`
   - `t1_fa_linear_fit`
+
+## DCE CLI scope (agreed)
+Target deliverable is an end-to-end Python CLI path for DCE parts `A`, `B`, and `D`.
+
+Confirmed out-of-scope/deprecated for the Python port:
+- Any `neuroecon` server execution path.
+- Legacy GUI batch queue/prep flow for part D.
+- Email notification completion flow.
 
 ## Parity status against MATLAB baseline
 From `.venv`:
@@ -29,7 +45,7 @@ From `.venv`:
 ```
 
 Expected summary right now:
-- `10 pass`
+- `18 pass`
 - `0 fail`
 - `0 missing`
 - `0 skipped`
@@ -58,6 +74,6 @@ Workflow: `/Users/samuelbarnes/code/ROCKETSHIP/.github/workflows/run_DCE.yml`
 - Push to `dev/master`: heavier matrix (full validation path).
 
 ## Next recommended steps
-1. Port `DSC_convolution_oSVD` next and add it to parity contracts/baseline.
-2. Decide whether to improve `model_tofts_fit` confidence intervals beyond placeholder estimate values (current parity passes under `fit_recovery` tolerances).
-3. Add a top-level Python package test runner target (e.g., Makefile or npm-style script equivalent) if desired.
+1. Decide if DCE scope should now include reference-region/auxiliary models (`model_FXL_reference_region*`, `model_0`) or move to DSC next.
+2. Decide whether to improve confidence interval estimation for Python inverse fits (`model_tofts_fit`, `model_vp_fit`, `model_tissue_uptake_fit`, `model_2cxm_fit`, `model_fxr_fit`) beyond placeholder CI values.
+3. Port `DSC_convolution_oSVD` when ready.

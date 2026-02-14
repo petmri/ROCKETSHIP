@@ -24,6 +24,34 @@
       "tolerance_profile": "forward_exact"
     },
     {
+      "id": "vp_forward",
+      "function": "model_vp_cfit",
+      "inputs": ["vp", "Cp", "timer"],
+      "outputs": ["Ct"],
+      "tolerance_profile": "forward_exact"
+    },
+    {
+      "id": "tissue_uptake_forward",
+      "function": "model_tissue_uptake_cfit",
+      "inputs": ["Ktrans", "Fp", "Tp", "Cp", "timer"],
+      "outputs": ["Ct"],
+      "tolerance_profile": "forward_exact"
+    },
+    {
+      "id": "twocxm_forward",
+      "function": "model_2cxm_cfit",
+      "inputs": ["Ktrans", "ve", "vp", "Fp", "Cp", "timer"],
+      "outputs": ["Ct"],
+      "tolerance_profile": "forward_exact"
+    },
+    {
+      "id": "fxr_forward",
+      "function": "model_fxr_cfit",
+      "inputs": ["Ktrans", "ve", "tau", "Cp", "timer", "R1o", "R1i", "r1", "fw"],
+      "outputs": ["R1t"],
+      "tolerance_profile": "forward_exact"
+    },
+    {
       "id": "patlak_linear_inverse",
       "function": "model_patlak_linear",
       "inputs": ["Ct", "Cp", "timer"],
@@ -35,6 +63,34 @@
       "function": "model_tofts",
       "inputs": ["Ct", "Cp", "timer", "prefs"],
       "outputs": ["Ktrans", "ve", "sse"],
+      "tolerance_profile": "fit_recovery"
+    },
+    {
+      "id": "vp_fit_inverse",
+      "function": "model_vp",
+      "inputs": ["Ct", "Cp", "timer", "prefs"],
+      "outputs": ["vp", "sse"],
+      "tolerance_profile": "fit_recovery"
+    },
+    {
+      "id": "tissue_uptake_fit_inverse",
+      "function": "model_tissue_uptake",
+      "inputs": ["Ct", "Cp", "timer", "prefs"],
+      "outputs": ["Ktrans", "Fp", "vp", "sse"],
+      "tolerance_profile": "fit_recovery"
+    },
+    {
+      "id": "twocxm_fit_inverse",
+      "function": "model_2cxm",
+      "inputs": ["Ct", "Cp", "timer", "prefs"],
+      "outputs": ["Ktrans", "ve", "vp", "Fp", "sse"],
+      "tolerance_profile": "fit_recovery"
+    },
+    {
+      "id": "fxr_fit_inverse",
+      "function": "model_fxr",
+      "inputs": ["Ct", "Cp", "timer", "R1o", "R1i", "r1", "fw", "prefs"],
+      "outputs": ["Ktrans", "ve", "tau", "sse"],
       "tolerance_profile": "fit_recovery"
     }
   ]

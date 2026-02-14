@@ -25,13 +25,32 @@ baseline.dce.forward.Cp = fixture.Cp;
 baseline.dce.forward.tofts = fixture.Ct_tofts;
 baseline.dce.forward.extended_tofts = fixture.Ct_extended_tofts;
 baseline.dce.forward.patlak = fixture.Ct_patlak;
+baseline.dce.forward.vp = fixture.Ct_vp;
+baseline.dce.forward.tissue_uptake = fixture.Ct_tissue_uptake;
 baseline.dce.forward.twocxm = fixture.Ct_2cxm;
 baseline.dce.forward.fxr = fixture.R1t_fxr;
+
+baseline.dce.params = struct();
+baseline.dce.params.ktrans = fixture.ktrans;
+baseline.dce.params.ve = fixture.ve;
+baseline.dce.params.vp = fixture.vp;
+baseline.dce.params.fp = fixture.fp;
+baseline.dce.params.tp = fixture.tp;
+baseline.dce.params.tau = fixture.tau;
+baseline.dce.params.R1o = fixture.R1o;
+baseline.dce.params.R1i = fixture.R1i;
+baseline.dce.params.r1 = fixture.r1;
+baseline.dce.params.fw = fixture.fw;
 
 baseline.dce.inverse = struct();
 baseline.dce.inverse.patlak_linear = model_patlak_linear(fixture.Ct_patlak, fixture.Cp', fixture.timer);
 baseline.dce.inverse.tofts_fit = model_tofts(fixture.Ct_tofts, fixture.Cp', fixture.timer, prefs);
 baseline.dce.inverse.extended_tofts_fit = model_extended_tofts(fixture.Ct_extended_tofts, fixture.Cp', fixture.timer, prefs);
+baseline.dce.inverse.vp_fit = model_vp(fixture.Ct_vp, fixture.Cp', fixture.timer, prefs);
+baseline.dce.inverse.tissue_uptake_fit = model_tissue_uptake(fixture.Ct_tissue_uptake, fixture.Cp', fixture.timer, prefs);
+baseline.dce.inverse.twocxm_fit = model_2cxm(fixture.Ct_2cxm, fixture.Cp', fixture.timer, prefs);
+baseline.dce.inverse.fxr_fit = model_fxr(fixture.R1t_fxr, fixture.Cp', fixture.timer, ...
+    fixture.R1o, fixture.R1i, fixture.r1, fixture.fw, prefs);
 
 meanAIF = linspace(0, 1.1, 14)';
 bolusTime = 3;

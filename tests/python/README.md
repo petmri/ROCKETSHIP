@@ -4,6 +4,10 @@ This directory contains Python parity tooling and first model ports.
 For a resume-later snapshot, see:
 - `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/PORTING_STATUS.md`
 
+Current focus:
+- End-to-end DCE CLI port for parts `A`, `B`, and `D`.
+- Deprecated/not being ported: `neuroecon`, GUI batch queue flow, email notifications.
+
 ## Environment setup (macOS)
 This project is now configured to use a local `venv` at
 `/Users/samuelbarnes/code/ROCKETSHIP/.venv`.
@@ -24,8 +28,16 @@ python3 -m venv .venv
 - Function: `model_tofts_cfit`
 - Function: `model_patlak_cfit`
 - Function: `model_extended_tofts_cfit`
+- Function: `model_vp_cfit`
+- Function: `model_tissue_uptake_cfit`
+- Function: `model_2cxm_cfit`
+- Function: `model_fxr_cfit`
 - Function: `model_patlak_linear`
 - Function: `model_tofts_fit`
+- Function: `model_vp_fit`
+- Function: `model_tissue_uptake_fit`
+- Function: `model_2cxm_fit`
+- Function: `model_fxr_fit`
 - Source: `python/rocketship/dsc_helpers.py`
 - Function: `import_aif`
 - Function: `previous_aif`

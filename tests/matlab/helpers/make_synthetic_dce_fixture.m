@@ -13,6 +13,7 @@ fixture.ktrans = 0.03;
 fixture.ve = 0.25;
 fixture.vp = 0.04;
 fixture.fp = 0.15;
+fixture.tp = fixture.vp / fixture.fp;
 fixture.tau = 0.08;
 
 fixture.R1o = 1.30;
@@ -23,6 +24,8 @@ fixture.fw = 0.80;
 fixture.Ct_tofts = model_tofts_cfit(fixture.ktrans, fixture.ve, Cp, timer);
 fixture.Ct_extended_tofts = model_extended_tofts_cfit(fixture.ktrans, fixture.ve, fixture.vp, Cp, timer);
 fixture.Ct_patlak = model_patlak_cfit(fixture.ktrans, fixture.vp, Cp, timer);
+fixture.Ct_vp = model_vp_cfit(fixture.vp, Cp, timer);
+fixture.Ct_tissue_uptake = model_tissue_uptake_cfit(fixture.ktrans, fixture.fp, fixture.tp, Cp, timer);
 fixture.Ct_2cxm = model_2cxm_cfit(fixture.ktrans, fixture.ve, fixture.vp, fixture.fp, Cp, timer);
 fixture.R1t_fxr = model_fxr_cfit(fixture.ktrans, fixture.ve, fixture.tau, Cp, timer, ...
     fixture.R1o, fixture.R1i, fixture.r1, fixture.fw);
