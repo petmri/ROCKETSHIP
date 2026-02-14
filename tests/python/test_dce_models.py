@@ -11,7 +11,7 @@ import unittest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "python"))
 
-from rocketship import model_tofts_cfit  # noqa: E402
+from rocketship import model_patlak_cfit, model_tofts_cfit  # noqa: E402
 
 
 def _within_tol(actual: float, expected: float, atol: float, rtol: float) -> bool:
@@ -41,6 +41,36 @@ class TestDceModels(unittest.TestCase):
         ve = float(baseline["dce"]["inverse"]["tofts_fit"][1])
 
         actual = model_tofts_cfit(ktrans, ve, cp, timer)
+
+        self.assertEqual(len(actual), len(expected))
+        for a, e in zip(actual, expected):
+            self.assertTrue(
+                _within_tol(float(a), float(e), float(tol["atol"]), float(tol["rtol"])),
+                msg=f"Mismatch: actual={a} expected={e}",
+            )
+
+    def test_patlak_zero_cp_returns_zero(self) -> None:
+        timer = [0.0, 0.1, 0.2, 0.3]
+        cp = [0.0, 0.0, 0.0, 0.0]
+        out = model_patlak_cfit(0.03, 0.05, cp, timer)
+        self.assertEqual(len(out), len(timer))
+        self.assertTrue(all(v == 0.0 for v in out))
+
+    def test_patlak_matches_matlab_baseline_profile(self) -> None:
+        baseline = json.loads((REPO_ROOT / "tests/contracts/baselines/matlab_reference_v1.json").read_text())
+        tolerances = json.loads((REPO_ROOT / "tests/contracts/tolerance_profiles.json").read_text())
+        tol = tolerances["forward_exact"]
+
+        timer = baseline["dce"]["forward"]["timer"]
+        cp = baseline["dce"]["forward"]["Cp"]
+        expected = baseline["dce"]["forward"]["patlak"]
+
+        # Pull parameters from baseline inverse fit output so this test remains
+        # aligned with baseline fixture generation.
+        ktrans = float(baseline["dce"]["inverse"]["patlak_linear"][0])
+        vp = float(baseline["dce"]["inverse"]["patlak_linear"][1])
+
+        actual = model_patlak_cfit(ktrans, vp, cp, timer)
 
         self.assertEqual(len(actual), len(expected))
         for a, e in zip(actual, expected):

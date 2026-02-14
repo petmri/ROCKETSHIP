@@ -32,7 +32,7 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parents[2]
     sys.path.insert(0, str(repo_root / "python"))
 
-    from rocketship import model_tofts_cfit  # pylint: disable=import-outside-toplevel
+    from rocketship import model_patlak_cfit, model_tofts_cfit  # pylint: disable=import-outside-toplevel
 
     baseline = json.loads(args.baseline.read_text())
 
@@ -43,15 +43,19 @@ def main() -> int:
     tofts_fit = baseline["dce"]["inverse"]["tofts_fit"]
     ktrans = float(tofts_fit[0])
     ve = float(tofts_fit[1])
+    patlak_fit = baseline["dce"]["inverse"]["patlak_linear"]
+    patlak_ktrans = float(patlak_fit[0])
+    patlak_vp = float(patlak_fit[1])
 
     results = {
         "meta": {
             "source": "generate_python_results.py",
             "baseline": str(args.baseline),
-            "models": ["model_tofts_cfit"],
+            "models": ["model_tofts_cfit", "model_patlak_cfit"],
         },
         "results": {
             "tofts_forward": model_tofts_cfit(ktrans, ve, cp, timer),
+            "patlak_forward": model_patlak_cfit(patlak_ktrans, patlak_vp, cp, timer),
         },
     }
 

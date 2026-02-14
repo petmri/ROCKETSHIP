@@ -9,6 +9,7 @@ This directory contains Python parity tooling and first model ports.
 ## First model port
 - Source: `python/rocketship/dce_models.py`
 - Function: `model_tofts_cfit`
+- Function: `model_patlak_cfit`
 
 Run Python unit tests:
 
