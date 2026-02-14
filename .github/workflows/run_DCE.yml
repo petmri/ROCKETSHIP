@@ -12,8 +12,8 @@ on:
       - dev
 
 jobs:
-  build:
-    if: github.event_name == 'push' || (github.event_name == 'pull_request' && matrix.os == 'ubuntu-latest' && matrix.release == 'R2022a')
+  build_push:
+    if: github.event_name == 'push'
     strategy:
       #fail-fast: false
       matrix:
@@ -36,7 +36,6 @@ jobs:
       #    chmod +x mpm
       #    ./mpm install --release=${{ matrix.release }} --products MATLAB Statistics_and_Machine_Learning_Toolbox Parallel_Computing_Toolbox Curve_Fitting_Toolbox
       - name: Run T1 mapping
-        if: github.event_name == 'push'
         uses: matlab-actions/run-command@v2
         with:
           command: addpath .; addpath dce/; addpath external_programs/; addpath external_programs/niftitools/; addpath parametric_scripts/; addpath parametric_scripts/custom_scripts/; T1mapping_fit('test_data/BIDS_test/rawdata/sub-01/ses-01/anat/', 'test_data/BIDS_test/derivatives/sub-01/ses-01/anat/', 'sub-01_ses-01_space-DCEref_desc-bfczunified_VFA.nii')
@@ -51,38 +50,56 @@ jobs:
         with:
           command: addpath .; addpath tests/matlab/; addpath tests/matlab/helpers/; results = run_all_tests('suite','integration'); assert(~any([results.Failed]), 'Integration tests failed.');
 
+      - name: Run DCE (Full)
+        uses: matlab-actions/run-command@v2
+        with:
+          command: run_dce_cli('test_data/BIDS_test/rawdata/sub-01/ses-01/', 'test_data/BIDS_test/derivatives/sub-01/ses-01/')
+
+      - name: Upload Ktrans result (Full)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ktrans_result_${{ matrix.os }}-${{ matrix.release }}
+          path: test_data/BIDS_test/derivatives/sub-01/ses-01/dce/dce_patlak_fit_Ktrans.nii
+          retention-days: 7
+          if-no-files-found: error
+
+  build_pr:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MATLAB
+        uses: matlab-actions/setup-matlab@v2
+        with:
+          products: Curve_Fitting_Toolbox Image_Processing_Toolbox Optimization_Toolbox Parallel_Computing_Toolbox Statistics_and_Machine_Learning_Toolbox
+          release: R2022a
+
+      - name: Run Algorithm Unit Tests
+        uses: matlab-actions/run-command@v2
+        with:
+          command: addpath .; addpath tests/matlab/; addpath tests/matlab/helpers/; results = run_unit_tests(); assert(~any([results.Failed]), 'Unit tests failed.');
+
+      - name: Run Algorithm Integration Tests
+        uses: matlab-actions/run-command@v2
+        with:
+          command: addpath .; addpath tests/matlab/; addpath tests/matlab/helpers/; results = run_all_tests('suite','integration'); assert(~any([results.Failed]), 'Integration tests failed.');
+
       - name: Generate Synthetic DCE Smoke Dataset
-        if: github.event_name == 'pull_request'
         uses: matlab-actions/run-command@v2
         with:
           command: addpath .; addpath tests/matlab/; addpath tests/matlab/helpers/; generate_synthetic_datasets('outputRoot','test_data/synthetic/generated','clean',true);
 
       - name: Run DCE (PR Smoke)
-        if: github.event_name == 'pull_request'
         uses: matlab-actions/run-command@v2
         with:
           command: run_dce_cli('test_data/synthetic/generated/downsample_x2/rawdata/sub-01/ses-01/', 'test_data/synthetic/generated/downsample_x2/derivatives/sub-01/ses-01/')
 
-      - name: Run DCE (Full)
-        if: github.event_name == 'push'
-        uses: matlab-actions/run-command@v2
-        with:
-          command: run_dce_cli('test_data/BIDS_test/rawdata/sub-01/ses-01/', 'test_data/BIDS_test/derivatives/sub-01/ses-01/')
-
       - name: Upload Ktrans result (PR Smoke)
-        if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: Ktrans_result_${{ matrix.os }}-${{ matrix.release }}_pr
+          name: Ktrans_result_pr_ubuntu-latest-R2022a
           path: test_data/synthetic/generated/downsample_x2/derivatives/sub-01/ses-01/dce/dce_patlak_fit_Ktrans.nii
-          retention-days: 7
-          if-no-files-found: error
-
-      - name: Upload Ktrans result (Full)
-        if: github.event_name == 'push'
-        uses: actions/upload-artifact@v4
-        with:
-          name: Ktrans_result_${{ matrix.os }}-${{ matrix.release }}
-          path: test_data/BIDS_test/derivatives/sub-01/ses-01/dce/dce_patlak_fit_Ktrans.nii
           retention-days: 7
           if-no-files-found: error
