@@ -73,3 +73,5 @@ Then compare Python outputs by contract:
 python3 tests/python/compare_with_matlab_baseline.py \
   --python-results tests/python/python_results_template.json
 ```
+
+Current Python ports are under `/Users/samuelbarnes/code/ROCKETSHIP/python/rocketship/`.
