@@ -14,10 +14,20 @@
 
 ## Scope guardrails for Python CLI port
 - Primary target: DCE parts `A`, `B`, and `D` as CLI workflow.
+- Default runtime shape: single-process, end-to-end in-memory pipeline.
 - Explicitly excluded/deprecated:
   - `neuroecon` execution path.
   - GUI batch queue/prep flow for part D.
   - Email completion notification flow.
+  - Manual click-based AIF tools.
+  - GUI entrypoints/UI helpers.
+  - MATLAB-specific batch helper scripts.
+
+## Implementation notes for parity-safe CLI
+- Keep A/B/D as logical stages but pass stage outputs in memory.
+- Add optional checkpoint export (A_out/B_out/D_out) only for parity/debug workflows.
+- Keep CPU fitting as the canonical baseline path.
+- Add GPUfit as optional backend once installed; compare against CPU with backend-aware tolerances.
 
 ## Next expansion steps
 1. Add fixture generators for edge cases:

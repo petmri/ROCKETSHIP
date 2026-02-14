@@ -35,6 +35,17 @@ Confirmed out-of-scope/deprecated for the Python port:
 - Any `neuroecon` server execution path.
 - Legacy GUI batch queue/prep flow for part D.
 - Email notification completion flow.
+- Manual click-based AIF tools.
+- GUI entrypoints and UI helper utilities.
+- MATLAB-specific batch helper scripts.
+
+## Execution architecture decisions
+- Primary runtime path is a single-process end-to-end pipeline (`A -> B -> D`) with in-memory data flow.
+- Intermediate `.mat` handoff files are not part of normal execution.
+- Optional stage checkpoint export is allowed for parity/debug only.
+- Fitting backend approach:
+  - CPU path is required and treated as the parity baseline.
+  - GPUfit is optional (`backend=auto|cpu|gpufit`) and can be enabled once installed.
 
 ## Parity status against MATLAB baseline
 From `.venv`:

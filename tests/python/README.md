@@ -6,7 +6,9 @@ For a resume-later snapshot, see:
 
 Current focus:
 - End-to-end DCE CLI port for parts `A`, `B`, and `D`.
-- Deprecated/not being ported: `neuroecon`, GUI batch queue flow, email notifications.
+- Default execution: single-process with in-memory stage handoff.
+- Deprecated/not being ported: `neuroecon`, GUI batch queue flow, manual click-based AIF tools, email notifications.
+- GPUfit support is planned as an optional backend when available; CPU remains the parity baseline.
 
 ## Environment setup (macOS)
 This project is now configured to use a local `venv` at
