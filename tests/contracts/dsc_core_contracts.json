@@ -1,0 +1,27 @@
+{
+  "suite": "dsc_core",
+  "version": "v1",
+  "cases": [
+    {
+      "id": "import_aif_truncation",
+      "function": "import_AIF",
+      "inputs": ["meanAIF", "bolus_time", "time_vect", "concentration_array", "r2_star", "TE"],
+      "outputs": ["meanAIF_adjusted", "time_vect", "concentration_array", "meanSignal"],
+      "tolerance_profile": "forward_exact"
+    },
+    {
+      "id": "previous_aif_truncation",
+      "function": "previous_AIF",
+      "inputs": ["meanAIF", "meanSignal", "bolus_time", "time_vect", "concentration_array"],
+      "outputs": ["meanAIF_adjusted", "time_vect", "concentration_array"],
+      "tolerance_profile": "forward_exact"
+    },
+    {
+      "id": "ssvd_deconvolution",
+      "function": "DSC_convolution_sSVD",
+      "inputs": ["concentration_array", "AIF", "deltaT", "Kh", "rho", "Psvd", "method"],
+      "outputs": ["CBF", "CBV", "MTT"],
+      "tolerance_profile": "map_regression"
+    }
+  ]
+}

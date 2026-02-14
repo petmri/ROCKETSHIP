@@ -1,0 +1,41 @@
+{
+  "suite": "dce_core",
+  "version": "v1",
+  "cases": [
+    {
+      "id": "tofts_forward",
+      "function": "model_tofts_cfit",
+      "inputs": ["Ktrans", "ve", "Cp", "timer"],
+      "outputs": ["Ct"],
+      "tolerance_profile": "forward_exact"
+    },
+    {
+      "id": "extended_tofts_forward",
+      "function": "model_extended_tofts_cfit",
+      "inputs": ["Ktrans", "ve", "vp", "Cp", "timer"],
+      "outputs": ["Ct"],
+      "tolerance_profile": "forward_exact"
+    },
+    {
+      "id": "patlak_forward",
+      "function": "model_patlak_cfit",
+      "inputs": ["Ktrans", "vp", "Cp", "timer"],
+      "outputs": ["Ct"],
+      "tolerance_profile": "forward_exact"
+    },
+    {
+      "id": "patlak_linear_inverse",
+      "function": "model_patlak_linear",
+      "inputs": ["Ct", "Cp", "timer"],
+      "outputs": ["Ktrans", "vp", "sse"],
+      "tolerance_profile": "fit_recovery"
+    },
+    {
+      "id": "tofts_fit_inverse",
+      "function": "model_tofts",
+      "inputs": ["Ct", "Cp", "timer", "prefs"],
+      "outputs": ["Ktrans", "ve", "sse"],
+      "tolerance_profile": "fit_recovery"
+    }
+  ]
+}
