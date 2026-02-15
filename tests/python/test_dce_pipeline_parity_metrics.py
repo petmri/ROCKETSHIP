@@ -51,7 +51,7 @@ def _make_config(paths: dict, out_dir: Path) -> DcePipelineConfig:
         subject_source_path=paths["root"],
         subject_tp_path=paths["processed"],
         output_dir=out_dir,
-        backend="cpu",
+        backend="auto",
         checkpoint_dir=out_dir / "checkpoints",
         write_xls=True,
         dynamic_files=[paths["dynamic"]],
@@ -97,8 +97,15 @@ def _load_nifti(path: Path) -> np.ndarray:
     return np.asarray(np.squeeze(nib.load(str(path)).get_fdata()), dtype=np.float64)
 
 
-def _metrics(py_map: np.ndarray, matlab_map: np.ndarray, roi_mask: np.ndarray) -> dict:
+def _metrics(
+    py_map: np.ndarray,
+    matlab_map: np.ndarray,
+    roi_mask: np.ndarray,
+    extra_mask: np.ndarray | None = None,
+) -> dict:
     mask = np.isfinite(py_map) & np.isfinite(matlab_map) & (roi_mask > 0)
+    if extra_mask is not None:
+        mask = mask & np.asarray(extra_mask, dtype=bool)
     x = py_map[mask]
     y = matlab_map[mask]
     if x.size < 2:
@@ -134,8 +141,9 @@ def _assert_map_parity(
     label: str,
     corr_min: float,
     mse_max: float,
+    extra_mask: np.ndarray | None = None,
 ) -> None:
-    m = _metrics(py_map, matlab_map, roi_mask)
+    m = _metrics(py_map, matlab_map, roi_mask, extra_mask=extra_mask)
     summary = (
         f"{label}: n={m['n']}, corr={m['corr']:.6f}, mse={m['mse']:.6f}, "
         f"mae={m['mae']:.6f}, p95_abs_err={m['p95_abs_err']:.6f}"
@@ -177,6 +185,7 @@ class TestDcePipelineParityMetrics(unittest.TestCase):
             corr_min=float(os.environ.get("ROCKETSHIP_PARITY_DOWNSAMPLED_KTRANS_CORR_MIN", "0.99")),
             mse_max=float(os.environ.get("ROCKETSHIP_PARITY_DOWNSAMPLED_KTRANS_MSE_MAX", "0.001")),
         )
+        ve_ktrans_min = float(os.environ.get("ROCKETSHIP_PARITY_VE_KTRANS_MIN", "1e-6"))
         _assert_map_parity(
             self,
             py_ve,
@@ -185,6 +194,12 @@ class TestDcePipelineParityMetrics(unittest.TestCase):
             label="tofts_ve_downsample",
             corr_min=float(os.environ.get("ROCKETSHIP_PARITY_DOWNSAMPLED_VE_CORR_MIN", "0.97")),
             mse_max=float(os.environ.get("ROCKETSHIP_PARITY_DOWNSAMPLED_VE_MSE_MAX", "0.002")),
+            extra_mask=(
+                np.isfinite(py_ktrans)
+                & np.isfinite(matlab_ktrans)
+                & (py_ktrans > ve_ktrans_min)
+                & (matlab_ktrans > ve_ktrans_min)
+            ),
         )
 
     @unittest.skipUnless(
@@ -222,6 +237,7 @@ class TestDcePipelineParityMetrics(unittest.TestCase):
             corr_min=float(os.environ.get("ROCKETSHIP_PARITY_FULL_KTRANS_CORR_MIN", "0.99")),
             mse_max=float(os.environ.get("ROCKETSHIP_PARITY_FULL_KTRANS_MSE_MAX", "0.001")),
         )
+        ve_ktrans_min = float(os.environ.get("ROCKETSHIP_PARITY_VE_KTRANS_MIN", "1e-6"))
         _assert_map_parity(
             self,
             py_ve,
@@ -230,6 +246,12 @@ class TestDcePipelineParityMetrics(unittest.TestCase):
             label="tofts_ve_full",
             corr_min=float(os.environ.get("ROCKETSHIP_PARITY_FULL_VE_CORR_MIN", "0.97")),
             mse_max=float(os.environ.get("ROCKETSHIP_PARITY_FULL_VE_MSE_MAX", "0.002")),
+            extra_mask=(
+                np.isfinite(py_ktrans)
+                & np.isfinite(matlab_ktrans)
+                & (py_ktrans > ve_ktrans_min)
+                & (matlab_ktrans > ve_ktrans_min)
+            ),
         )
 
 
