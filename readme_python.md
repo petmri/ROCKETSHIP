@@ -44,6 +44,9 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 
 Default template location:
 - `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_default.json`
+- This default is prewired to the tiny fixture:
+  - `/Users/samuelbarnes/code/ROCKETSHIP/test_data/ci_fixtures/dce/tiny_settings_case`
+  - outputs to `/Users/samuelbarnes/code/ROCKETSHIP/out/dce_gui_tiny`
 
 Optional runtime overrides:
 
@@ -168,6 +171,10 @@ Launch GUI:
 cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python run_dce_python_gui.py
 ```
+
+One-click test run:
+- Launch the GUI and click `Run DCE` without changing fields.
+- It uses `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_default.json` and the tiny fixture by default.
 
 GUI v1 behavior:
 - Edits top-level config + all `stage_overrides` keys.

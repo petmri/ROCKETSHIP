@@ -1,29 +1,31 @@
 {
-  "subject_source_path": "/ABS/PATH/TO/BIDS/rawdata/sub-01/ses-01",
-  "subject_tp_path": "/ABS/PATH/TO/BIDS/derivatives/sub-01/ses-01",
-  "output_dir": "./out/dce_cli",
-  "checkpoint_dir": "./out/dce_cli/checkpoints",
-  "backend": "auto",
+  "subject_source_path": "./test_data/ci_fixtures/dce/tiny_settings_case",
+  "subject_tp_path": "./test_data/ci_fixtures/dce/tiny_settings_case/processed",
+  "output_dir": "./out/dce_gui_tiny",
+  "checkpoint_dir": "./out/dce_gui_tiny/checkpoints",
+  "backend": "cpu",
   "write_xls": true,
   "aif_mode": "auto",
   "dynamic_files": [
-    "/ABS/PATH/TO/BIDS/derivatives/sub-01/ses-01/dce/sub-01_ses-01_desc-bfcz_DCE.nii.gz"
+    "./test_data/ci_fixtures/dce/tiny_settings_case/Dynamic_t1w.nii"
   ],
   "aif_files": [
-    "/ABS/PATH/TO/BIDS/derivatives/sub-01/ses-01/anat/sub-01_ses-01_space-DCEref_desc-AIF_T1map.nii.gz"
+    "./test_data/ci_fixtures/dce/tiny_settings_case/processed/T1_AIF_roi.nii"
   ],
   "roi_files": [
-    "/ABS/PATH/TO/BIDS/derivatives/sub-01/ses-01/anat/sub-01_ses-01_space-DCEref_desc-brain_mask.nii.gz"
+    "./test_data/ci_fixtures/dce/tiny_settings_case/processed/T1_brain_roi.nii"
   ],
   "t1map_files": [
-    "/ABS/PATH/TO/BIDS/derivatives/sub-01/ses-01/anat/sub-01_ses-01_space-DCEref_T1map.nii.gz"
+    "./test_data/ci_fixtures/dce/tiny_settings_case/processed/T1_map_t1_fa_fit_fa10.nii"
   ],
-  "noise_files": [],
+  "noise_files": [
+    "./test_data/ci_fixtures/dce/tiny_settings_case/processed/T1_noise_roi.nii"
+  ],
   "drift_files": [],
   "model_flags": {
     "tofts": 1,
     "ex_tofts": 0,
-    "patlak": 1,
+    "patlak": 0,
     "tissue_uptake": 0,
     "two_cxm": 0,
     "fxr": 0,
@@ -38,28 +40,28 @@
     "stage_b_mode": "real",
     "stage_d_mode": "real",
     "aif_curve_mode": "fitted",
-    "rootname": "dce",
+    "rootname": "Dyn-1",
     "dce_metadata_path": "",
     "tr_sec": null,
-    "tr_ms": null,
-    "fa_deg": null,
-    "time_resolution_sec": null,
+    "tr_ms": 8.29,
+    "fa_deg": 15.0,
+    "time_resolution_sec": 15.84,
     "time_resolution_min": null,
     "steady_state_start": 1,
-    "steady_state_end": 2,
+    "steady_state_end": 3,
     "noise_pixsize": 5,
-    "snr_filter": 1,
+    "snr_filter": 0.0,
     "blood_t1_ms": null,
     "blood_t1_sec": null,
-    "relaxivity": 3.4,
-    "hematocrit": 0.45,
+    "relaxivity": 3.6,
+    "hematocrit": 0.42,
     "injection_duration": 1,
     "start_time": 0,
     "end_time": 0,
     "start_time_min": 0,
     "end_time_min": 0,
-    "start_injection_min": null,
-    "end_injection_min": null,
+    "start_injection_min": 1.056,
+    "end_injection_min": 1.584,
     "time_vector_path": "",
     "timevectpath": "",
     "timer_path": "",
@@ -106,7 +108,7 @@
     "voxel_TolFun": 1e-12,
     "voxel_TolX": 1e-6,
     "voxel_MaxIter": 50,
-    "voxel_MaxFunEvals": 50,
+    "voxel_MaxFunEvals": 200,
     "voxel_Robust": "off",
     "fxr_fw": 0.8
   }

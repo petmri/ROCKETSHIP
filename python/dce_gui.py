@@ -153,10 +153,34 @@ class DceGuiWindow(QMainWindow):
         self.aif_mode_combo.addItems(["auto", "fitted", "raw", "imported"])
         self.write_xls_check = QCheckBox()
 
-        form.addRow("subject_source_path", self.subject_source_edit)
-        form.addRow("subject_tp_path", self.subject_tp_edit)
-        form.addRow("output_dir", self.output_dir_edit)
-        form.addRow("checkpoint_dir", self.checkpoint_dir_edit)
+        form.addRow(
+            "subject_source_path",
+            self._line_edit_with_browse(
+                self.subject_source_edit,
+                lambda: self._choose_directory_for(self.subject_source_edit, "Select subject_source_path"),
+            ),
+        )
+        form.addRow(
+            "subject_tp_path",
+            self._line_edit_with_browse(
+                self.subject_tp_edit,
+                lambda: self._choose_directory_for(self.subject_tp_edit, "Select subject_tp_path"),
+            ),
+        )
+        form.addRow(
+            "output_dir",
+            self._line_edit_with_browse(
+                self.output_dir_edit,
+                lambda: self._choose_directory_for(self.output_dir_edit, "Select output_dir"),
+            ),
+        )
+        form.addRow(
+            "checkpoint_dir",
+            self._line_edit_with_browse(
+                self.checkpoint_dir_edit,
+                lambda: self._choose_directory_for(self.checkpoint_dir_edit, "Select checkpoint_dir"),
+            ),
+        )
         form.addRow("backend", self.backend_combo)
         form.addRow("aif_mode", self.aif_mode_combo)
         form.addRow("write_xls", self.write_xls_check)
@@ -179,13 +203,101 @@ class DceGuiWindow(QMainWindow):
         self.noise_edit.setFixedHeight(50)
         self.drift_edit.setFixedHeight(50)
 
-        form.addRow("dynamic_files", self.dynamic_edit)
-        form.addRow("aif_files", self.aif_edit)
-        form.addRow("roi_files", self.roi_edit)
-        form.addRow("t1map_files", self.t1map_edit)
-        form.addRow("noise_files", self.noise_edit)
-        form.addRow("drift_files", self.drift_edit)
+        form.addRow(
+            "dynamic_files",
+            self._text_edit_with_browse(
+                self.dynamic_edit,
+                lambda: self._choose_files_for(self.dynamic_edit, "Select dynamic_files"),
+            ),
+        )
+        form.addRow(
+            "aif_files",
+            self._text_edit_with_browse(
+                self.aif_edit,
+                lambda: self._choose_files_for(self.aif_edit, "Select aif_files"),
+            ),
+        )
+        form.addRow(
+            "roi_files",
+            self._text_edit_with_browse(
+                self.roi_edit,
+                lambda: self._choose_files_for(self.roi_edit, "Select roi_files"),
+            ),
+        )
+        form.addRow(
+            "t1map_files",
+            self._text_edit_with_browse(
+                self.t1map_edit,
+                lambda: self._choose_files_for(self.t1map_edit, "Select t1map_files"),
+            ),
+        )
+        form.addRow(
+            "noise_files",
+            self._text_edit_with_browse(
+                self.noise_edit,
+                lambda: self._choose_files_for(self.noise_edit, "Select noise_files"),
+            ),
+        )
+        form.addRow(
+            "drift_files",
+            self._text_edit_with_browse(
+                self.drift_edit,
+                lambda: self._choose_files_for(self.drift_edit, "Select drift_files"),
+            ),
+        )
         parent_layout.addWidget(group)
+
+    def _line_edit_with_browse(self, edit: QLineEdit, on_browse: Any) -> QWidget:
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(edit, 1)
+        browse = QPushButton("Browse...")
+        browse.clicked.connect(on_browse)
+        layout.addWidget(browse)
+        return row
+
+    def _text_edit_with_browse(self, edit: QPlainTextEdit, on_browse: Any) -> QWidget:
+        row = QWidget()
+        layout = QVBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(edit, 1)
+        controls = QHBoxLayout()
+        browse = QPushButton("Browse...")
+        clear = QPushButton("Clear")
+        browse.clicked.connect(on_browse)
+        clear.clicked.connect(lambda: edit.clear())
+        controls.addWidget(browse)
+        controls.addWidget(clear)
+        controls.addStretch(1)
+        layout.addLayout(controls)
+        return row
+
+    def _dialog_start_dir(self, current_text: str) -> str:
+        text = current_text.strip()
+        if text:
+            candidate = Path(text).expanduser()
+            if not candidate.is_absolute():
+                candidate = (REPO_ROOT / candidate).resolve()
+            if candidate.is_file():
+                return str(candidate.parent)
+            if candidate.exists():
+                return str(candidate)
+        return str(REPO_ROOT)
+
+    def _choose_directory_for(self, edit: QLineEdit, title: str) -> None:
+        start_dir = self._dialog_start_dir(edit.text())
+        chosen = QFileDialog.getExistingDirectory(self, title, start_dir)
+        if chosen:
+            edit.setText(chosen)
+
+    def _choose_files_for(self, edit: QPlainTextEdit, title: str) -> None:
+        existing_paths = _text_to_paths(edit.toPlainText())
+        start_seed = existing_paths[0] if existing_paths else ""
+        start_dir = self._dialog_start_dir(start_seed)
+        selected, _ = QFileDialog.getOpenFileNames(self, title, start_dir, "All Files (*)")
+        if selected:
+            edit.setPlainText(_paths_to_text(selected))
 
     def _build_model_flags(self, parent_layout: QVBoxLayout) -> None:
         group = QGroupBox("Model Flags")
@@ -367,9 +479,13 @@ class DceGuiWindow(QMainWindow):
         return payload
 
     def _prepare_run_config_path(self, payload: Dict[str, Any]) -> Path:
-        output_dir = Path(str(payload.get("output_dir", "")).strip()).expanduser()
-        if str(output_dir) == "." or str(output_dir) == "":
+        output_dir_raw = str(payload.get("output_dir", "")).strip()
+        if output_dir_raw in {"", "."}:
             output_dir = REPO_ROOT / "out" / "dce_gui"
+        else:
+            output_dir = Path(output_dir_raw).expanduser()
+            if not output_dir.is_absolute():
+                output_dir = (REPO_ROOT / output_dir).resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
         config_path = output_dir / "dce_gui_last_run_config.json"
         config_path.write_text(json.dumps(payload, indent=2) + "\n")
@@ -392,6 +508,7 @@ class DceGuiWindow(QMainWindow):
         self.model_label.setText("Model: -")
 
         proc = QProcess(self)
+        proc.setWorkingDirectory(str(REPO_ROOT))
         proc.setProcessChannelMode(QProcess.MergedChannels)
         proc.readyReadStandardOutput.connect(self._on_process_output)
         proc.finished.connect(self._on_process_finished)
