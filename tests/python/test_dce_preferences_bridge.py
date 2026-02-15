@@ -14,7 +14,7 @@ import numpy as np
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "python"))
 
-from rocketship.dce_pipeline import (  # noqa: E402
+from dce_pipeline import (  # noqa: E402
     DcePipelineConfig,
     _fit_aif_biexp,
     _stage_d_fit_prefs,
@@ -96,7 +96,7 @@ class TestDcePreferencesBridge(unittest.TestCase):
             fit_prefs = _stage_d_fit_prefs(config)
             self.assertEqual(int(fit_prefs["max_nfev"]), 123)
 
-    @patch("rocketship.dce_pipeline.is_gpufit_available", return_value=True)
+    @patch("dce_pipeline.is_gpufit_available", return_value=True)
     def test_force_cpu_preference_overrides_backend_auto(self, _gpufit_mock: object) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp = Path(tmp_dir)

@@ -4,16 +4,17 @@ from __future__ import annotations
 
 import ast
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from functools import lru_cache
 import json
 import math
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Protocol, Tuple
+from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 
 import numpy as np
 
-from .dce_models import (
+from dce_models import (
     model_2cxm_fit,
     model_extended_tofts_fit,
     model_fxr_fit,
@@ -484,13 +485,26 @@ class DcePipelineConfig:
 class DceStageRunner(Protocol):
     """Execution contract for in-memory A/B/D stages."""
 
-    def run_a(self, config: DcePipelineConfig) -> Dict[str, Any]:
+    def run_a(
+        self, config: DcePipelineConfig, event_callback: Optional[Callable[[Dict[str, Any]], None]] = None
+    ) -> Dict[str, Any]:
         ...
 
-    def run_b(self, config: DcePipelineConfig, stage_a: Dict[str, Any]) -> Dict[str, Any]:
+    def run_b(
+        self,
+        config: DcePipelineConfig,
+        stage_a: Dict[str, Any],
+        event_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> Dict[str, Any]:
         ...
 
-    def run_d(self, config: DcePipelineConfig, stage_a: Dict[str, Any], stage_b: Dict[str, Any]) -> Dict[str, Any]:
+    def run_d(
+        self,
+        config: DcePipelineConfig,
+        stage_a: Dict[str, Any],
+        stage_b: Dict[str, Any],
+        event_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> Dict[str, Any]:
         ...
 
 
@@ -1991,7 +2005,12 @@ def _fit_stage_d_model(
     return out
 
 
-def _run_stage_d_real(config: DcePipelineConfig, stage_a: Dict[str, Any], stage_b: Dict[str, Any]) -> Dict[str, Any]:
+def _run_stage_d_real(
+    config: DcePipelineConfig,
+    stage_a: Dict[str, Any],
+    stage_b: Dict[str, Any],
+    event_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+) -> Dict[str, Any]:
     arrays = stage_b.get("arrays")
     if not isinstance(arrays, dict):
         raise ValueError("Stage-D real mode requires Stage-B arrays")
@@ -2041,7 +2060,16 @@ def _run_stage_d_real(config: DcePipelineConfig, stage_a: Dict[str, Any], stage_
 
     model_outputs: Dict[str, Any] = {}
     stage_arrays: Dict[str, np.ndarray] = {}
-    for model_name in selected_models:
+    total_models = len(selected_models)
+    for model_index, model_name in enumerate(selected_models, start=1):
+        _emit_progress(
+            event_callback,
+            "model_start",
+            stage="D",
+            model=model_name,
+            model_index=model_index,
+            model_total=total_models,
+        )
         layout = MODEL_LAYOUTS[model_name]
         param_names = list(layout["param_names"])
 
@@ -2134,6 +2162,16 @@ def _run_stage_d_real(config: DcePipelineConfig, stage_a: Dict[str, Any], stage_
             "map_paths": map_paths,
             "xls_path": xls_path,
         }
+        _emit_progress(
+            event_callback,
+            "model_done",
+            stage="D",
+            model=model_name,
+            model_index=model_index,
+            model_total=total_models,
+            voxel_count=int(voxel_results.shape[0]),
+            roi_count=int(roi_results.shape[0]),
+        )
 
     selected_backend = _resolve_stage_d_backend(config)
     backend_used = "cpu" if selected_backend == "gpufit" else selected_backend
@@ -2157,7 +2195,10 @@ def _run_stage_d_real(config: DcePipelineConfig, stage_a: Dict[str, Any], stage_
 class HybridStageRunner:
     """Runner with real Stage-A and Stage-B support plus scaffold fallbacks."""
 
-    def run_a(self, config: DcePipelineConfig) -> Dict[str, Any]:
+    def run_a(
+        self, config: DcePipelineConfig, event_callback: Optional[Callable[[Dict[str, Any]], None]] = None
+    ) -> Dict[str, Any]:
+        del event_callback
         mode = str(_stage_override(config, "stage_a_mode", "real")).strip().lower()
         if mode == "scaffold":
             return {
@@ -2174,7 +2215,13 @@ class HybridStageRunner:
             }
         return _run_stage_a_real(config)
 
-    def run_b(self, config: DcePipelineConfig, stage_a: Dict[str, Any]) -> Dict[str, Any]:
+    def run_b(
+        self,
+        config: DcePipelineConfig,
+        stage_a: Dict[str, Any],
+        event_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> Dict[str, Any]:
+        del event_callback
         mode = str(_stage_override(config, "stage_b_mode", "auto")).strip().lower()
         if mode == "scaffold":
             return {
@@ -2204,7 +2251,13 @@ class HybridStageRunner:
 
         raise ValueError(f"Unsupported stage_b_mode '{mode}'")
 
-    def run_d(self, config: DcePipelineConfig, stage_a: Dict[str, Any], stage_b: Dict[str, Any]) -> Dict[str, Any]:
+    def run_d(
+        self,
+        config: DcePipelineConfig,
+        stage_a: Dict[str, Any],
+        stage_b: Dict[str, Any],
+        event_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> Dict[str, Any]:
         mode = str(_stage_override(config, "stage_d_mode", "auto")).strip().lower()
         if mode == "scaffold":
             selected_backend = _resolve_stage_d_backend(config)
@@ -2229,10 +2282,10 @@ class HybridStageRunner:
                     "model_flags": dict(config.model_flags),
                     "reason": "stage_b_arrays_missing",
                 }
-            return _run_stage_d_real(config, stage_a, stage_b)
+            return _run_stage_d_real(config, stage_a, stage_b, event_callback=event_callback)
 
         if mode == "real":
-            return _run_stage_d_real(config, stage_a, stage_b)
+            return _run_stage_d_real(config, stage_a, stage_b, event_callback=event_callback)
 
         raise ValueError(f"Unsupported stage_d_mode '{mode}'")
 
@@ -2243,6 +2296,17 @@ def _array_shapes(data: Dict[str, Any]) -> Dict[str, Any]:
         if isinstance(value, np.ndarray):
             out[key] = list(value.shape)
     return out
+
+
+def _emit_progress(event_callback: Optional[Callable[[Dict[str, Any]], None]], event_type: str, **payload: Any) -> None:
+    if event_callback is None:
+        return
+    event: Dict[str, Any] = {
+        "type": event_type,
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+    }
+    event.update(payload)
+    event_callback(event)
 
 
 def _stage_summary(stage_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -2276,9 +2340,58 @@ def _write_stage_checkpoint(checkpoint_dir: Path, stage_name: str, data: Dict[st
     return target
 
 
+def _emit_stage_artifacts(
+    event_callback: Optional[Callable[[Dict[str, Any]], None]], stage_name: str, stage_data: Dict[str, Any]
+) -> None:
+    figure_paths = stage_data.get("figure_paths")
+    if isinstance(figure_paths, dict):
+        for name, path in figure_paths.items():
+            _emit_progress(
+                event_callback,
+                "artifact_written",
+                stage=stage_name,
+                artifact_type="figure",
+                name=str(name),
+                path=str(path),
+            )
+
+    if stage_name != "D":
+        return
+    model_outputs = stage_data.get("model_outputs")
+    if not isinstance(model_outputs, dict):
+        return
+    for model_name, output in model_outputs.items():
+        if not isinstance(output, dict):
+            continue
+        map_paths = output.get("map_paths")
+        if isinstance(map_paths, dict):
+            for param, path in map_paths.items():
+                _emit_progress(
+                    event_callback,
+                    "artifact_written",
+                    stage="D",
+                    model=str(model_name),
+                    artifact_type="map",
+                    name=str(param),
+                    path=str(path),
+                )
+        xls_path = output.get("xls_path")
+        if isinstance(xls_path, str) and xls_path:
+            _emit_progress(
+                event_callback,
+                "artifact_written",
+                stage="D",
+                model=str(model_name),
+                artifact_type="roi_xls",
+                name="roi_xls",
+                path=xls_path,
+            )
+
+
 def run_dce_pipeline(
     config: DcePipelineConfig,
     runner: Optional[DceStageRunner] = None,
+    event_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     """Run DCE stages A->B->D in memory with optional checkpoints."""
     config.validate()
@@ -2287,20 +2400,85 @@ def run_dce_pipeline(
         config.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     active_runner = runner or HybridStageRunner()
-
-    stage_a = active_runner.run_a(config)
-    if config.checkpoint_dir:
-        _write_stage_checkpoint(config.checkpoint_dir, "A", stage_a)
-
-    stage_b = active_runner.run_b(config, stage_a)
-    if config.checkpoint_dir:
-        _write_stage_checkpoint(config.checkpoint_dir, "B", stage_b)
-
-    stage_d = active_runner.run_d(config, stage_a, stage_b)
-    if config.checkpoint_dir:
-        _write_stage_checkpoint(config.checkpoint_dir, "D", stage_d)
-
     prefs_path = _resolve_dce_preferences_path(config)
+    _emit_progress(
+        event_callback,
+        "run_start",
+        output_dir=str(config.output_dir),
+        checkpoint_dir=str(config.checkpoint_dir) if config.checkpoint_dir else None,
+        backend=str(config.backend),
+        dce_preferences_path=str(prefs_path) if prefs_path else None,
+    )
+
+    current_stage = "A"
+    try:
+        _emit_progress(event_callback, "stage_start", stage="A")
+        try:
+            stage_a = active_runner.run_a(config, event_callback=event_callback)
+        except TypeError:
+            stage_a = active_runner.run_a(config)  # type: ignore[misc]
+        if config.checkpoint_dir:
+            checkpoint_a = _write_stage_checkpoint(config.checkpoint_dir, "A", stage_a)
+            _emit_progress(event_callback, "checkpoint_written", stage="A", path=str(checkpoint_a))
+        _emit_progress(
+            event_callback,
+            "stage_done",
+            stage="A",
+            status=str(stage_a.get("status", "")),
+            impl=str(stage_a.get("impl", "")),
+            array_shapes=_array_shapes(stage_a.get("arrays", {})) if isinstance(stage_a.get("arrays"), dict) else {},
+        )
+        _emit_stage_artifacts(event_callback, "A", stage_a)
+
+        current_stage = "B"
+        _emit_progress(event_callback, "stage_start", stage="B")
+        try:
+            stage_b = active_runner.run_b(config, stage_a, event_callback=event_callback)
+        except TypeError:
+            stage_b = active_runner.run_b(config, stage_a)  # type: ignore[misc]
+        if config.checkpoint_dir:
+            checkpoint_b = _write_stage_checkpoint(config.checkpoint_dir, "B", stage_b)
+            _emit_progress(event_callback, "checkpoint_written", stage="B", path=str(checkpoint_b))
+        _emit_progress(
+            event_callback,
+            "stage_done",
+            stage="B",
+            status=str(stage_b.get("status", "")),
+            impl=str(stage_b.get("impl", "")),
+            array_shapes=_array_shapes(stage_b.get("arrays", {})) if isinstance(stage_b.get("arrays"), dict) else {},
+        )
+        _emit_stage_artifacts(event_callback, "B", stage_b)
+
+        current_stage = "D"
+        _emit_progress(event_callback, "stage_start", stage="D")
+        try:
+            stage_d = active_runner.run_d(config, stage_a, stage_b, event_callback=event_callback)
+        except TypeError:
+            stage_d = active_runner.run_d(config, stage_a, stage_b)  # type: ignore[misc]
+        if config.checkpoint_dir:
+            checkpoint_d = _write_stage_checkpoint(config.checkpoint_dir, "D", stage_d)
+            _emit_progress(event_callback, "checkpoint_written", stage="D", path=str(checkpoint_d))
+        _emit_progress(
+            event_callback,
+            "stage_done",
+            stage="D",
+            status=str(stage_d.get("status", "")),
+            impl=str(stage_d.get("impl", "")),
+            array_shapes=_array_shapes(stage_d.get("arrays", {})) if isinstance(stage_d.get("arrays"), dict) else {},
+            models_run=list(stage_d.get("models_run", [])),
+            models_skipped=list(stage_d.get("models_skipped", [])),
+        )
+        _emit_stage_artifacts(event_callback, "D", stage_d)
+    except Exception as exc:
+        _emit_progress(
+            event_callback,
+            "run_error",
+            stage=current_stage,
+            error_type=type(exc).__name__,
+            error=str(exc),
+        )
+        raise
+
     summary = {
         "meta": {
             "pipeline": "dce_cli_in_memory",
@@ -2319,4 +2497,5 @@ def run_dce_pipeline(
     summary_path = config.output_dir / "dce_pipeline_run.json"
     summary_path.write_text(json.dumps(summary, indent=2, default=_json_default))
     summary["meta"]["summary_path"] = str(summary_path)
+    _emit_progress(event_callback, "run_done", summary_path=str(summary_path), status="ok")
     return summary

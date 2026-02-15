@@ -2,8 +2,15 @@
 
 This file is the handoff point for resuming work later.
 
+## Current checkpoint
+- Branch: `codex/algorithm-test-suite`
+- Latest milestone commit: `e080d6c`
+- Python test baseline at this checkpoint:
+  - `.venv/bin/python -m unittest discover -s tests/python -p 'test_*.py'`
+  - `44` run, `0` failed, `2` skipped (parity-gated)
+
 ## Current scope covered
-Python implementations currently exist in `/Users/samuelbarnes/code/ROCKETSHIP/python/rocketship/`:
+Python implementations currently exist in `/Users/samuelbarnes/code/ROCKETSHIP/python/`:
 
 - `dce_models.py`
   - `model_tofts_cfit`
@@ -53,9 +60,10 @@ Confirmed in-scope requirements to retain:
 
 ## DCE CLI scaffold status
 - In-memory pipeline scaffold implemented in:
-  - `/Users/samuelbarnes/code/ROCKETSHIP/python/rocketship/dce_pipeline.py`
-  - `/Users/samuelbarnes/code/ROCKETSHIP/python/rocketship/dce_cli.py`
+  - `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_pipeline.py`
+  - `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_cli.py`
   - `/Users/samuelbarnes/code/ROCKETSHIP/run_dce_python_cli.py`
+  - `/Users/samuelbarnes/code/ROCKETSHIP/run_dce_python_gui.py` (GUI wrapper)
 - Stage A status:
   - real implementation path is wired (NIfTI input, ROI/AIF extraction, R1/Cp/Ct generation, QC figure saving)
 - Stage B status:
@@ -72,6 +80,14 @@ Confirmed in-scope requirements to retain:
   - explicit `stage_overrides` values always win over file defaults
   - preference parsing supports MATLAB numeric expressions (for example `10^-7`, `10^(-12)`)
   - Stage D auto-backend now honors `force_cpu` when backend is `auto`
+- CLI observability status:
+  - emits progress events to stdout (`ROCKETSHIP_EVENT <json>`)
+  - writes per-run event log JSONL (`<output_dir>/dce_pipeline_events.jsonl`)
+  - default config path is now `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_default.json`
+- GUI status (v1):
+  - PySide6 GUI implemented in `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_gui.py`
+  - GUI edits top-level config and all `stage_overrides` keys
+  - GUI runs CLI via subprocess, streams progress, supports hard-stop terminate, and previews PNG QC figures
 - Recent parity fixes (MATLAB alignment):
   - Stage A now uses MATLAB-style column-major voxel indexing for `lvind/tumind/noiseind`.
   - Stage D map writeback now uses MATLAB-style linear index mapping.
@@ -111,6 +127,9 @@ Confirmed in-scope requirements to retain:
   - writes `a_out.json`, `b_out.json`, `d_out.json` when `checkpoint_dir` is configured
 - Example config:
   - `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/dce_cli_config.example.json`
+  - `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_default.json`
+- Shared options docs:
+  - `/Users/samuelbarnes/code/ROCKETSHIP/docs/dce_options.md`
 
 ## Parity status against MATLAB baseline
 From `.venv`:
@@ -151,12 +170,15 @@ Workflow: `/Users/samuelbarnes/code/ROCKETSHIP/.github/workflows/run_DCE.yml`
 - Push to `dev/master`: heavier MATLAB matrix (full validation path).
 
 ## Next recommended steps
-1. Expand tiny fixture variants for edge-case sweeps:
+1. Complete MATLAB script-level option mapping audit:
+   - map `script_preferences.txt` keys to Python config/stage overrides
+   - classify each as `supported`, `dropped-by-design`, or `pending`
+   - add targeted tests for newly-wired options
+2. Expand tiny fixture variants for edge-case sweeps:
    - low-SNR case
    - non-uniform timer case (`stage_overrides.time_vector_path`)
    - harsh bounds / low-iteration fit case
-2. Expand dataset-backed DCE regression beyond current Tofts map checks (`Ktrans`, `ve`) into ROI table values and additional model maps.
-3. Complete script-level option mapping audit from MATLAB `script_preferences.txt` into Python config schema (for full CLI option parity documentation).
+3. Expand dataset-backed DCE regression beyond current Tofts map checks (`Ktrans`, `ve`) into ROI table values and additional model maps.
 4. Decide whether to port `nested` and `FXL_rr` DCE model flows in the Python CLI or keep them explicitly unsupported.
 5. Expand DSC parity work (`DSC_convolution_oSVD`) once DCE dataset regression checks are stable.
 6. Performance pass (post-stability/parity lock):

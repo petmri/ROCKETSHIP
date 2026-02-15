@@ -7,6 +7,8 @@ currently in this repository.
 
 - Primary Python entrypoint for DCE pipeline:
   - `/Users/samuelbarnes/code/ROCKETSHIP/run_dce_python_cli.py`
+- Optional GUI entrypoint:
+  - `/Users/samuelbarnes/code/ROCKETSHIP/run_dce_python_gui.py`
 - Current implemented workflow focus:
   - DCE parts `A -> B -> D` (non-GUI, single-process, in-memory handoff)
 - Current parity focus:
@@ -33,6 +35,16 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python run_dce_python_cli.py --config tests/python/dce_cli_config.example.json
 ```
 
+Run with built-in default config template:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python run_dce_python_cli.py
+```
+
+Default template location:
+- `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_default.json`
+
 Optional runtime overrides:
 
 ```bash
@@ -46,6 +58,7 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 
 Typical outputs:
 - Stage summary JSON: `<output_dir>/dce_pipeline_run.json`
+- Event log JSONL: `<output_dir>/dce_pipeline_events.jsonl`
 - Stage checkpoints (optional): `<checkpoint_dir>/a_out.json`, `b_out.json`, `d_out.json`
 - DCE model maps (NIfTI when possible; fallback `.npy`)
 - ROI spreadsheet output (`.xls`) for ROI-enabled runs
@@ -54,8 +67,8 @@ Typical outputs:
 ## Input expectations (DCE)
 
 Config fields are parsed by:
-- `/Users/samuelbarnes/code/ROCKETSHIP/python/rocketship/dce_cli.py`
-- `/Users/samuelbarnes/code/ROCKETSHIP/python/rocketship/dce_pipeline.py`
+- `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_cli.py`
+- `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_pipeline.py`
 
 Key expectations:
 - Dynamic image + ROI/AIF/T1/noise masks are provided (NIfTI path lists)
@@ -69,6 +82,9 @@ Preference precedence:
 - explicit `stage_overrides` value
 - `dce_preferences.txt` value
 - Python built-in fallback default
+
+Shared options documentation for CLI + GUI:
+- `/Users/samuelbarnes/code/ROCKETSHIP/docs/dce_options.md`
 
 ## What is intentionally not supported in Python port scope
 
@@ -136,3 +152,25 @@ CI currently runs:
 - Python downsample dataset parity check
 - MATLAB unit/integration checks
 - MATLAB DCE smoke/full jobs (event-dependent)
+
+## GUI (PySide6) v1
+
+Install GUI dependency:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python -m pip install -r requirements_gui.txt
+```
+
+Launch GUI:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python run_dce_python_gui.py
+```
+
+GUI v1 behavior:
+- Edits top-level config + all `stage_overrides` keys.
+- Runs CLI in a subprocess and streams progress from stdout events.
+- Uses hard-stop process termination.
+- Displays QC PNG figures when generated.

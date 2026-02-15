@@ -15,7 +15,7 @@ import numpy as np
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "python"))
 
-from rocketship.dce_pipeline import DcePipelineConfig, run_dce_pipeline  # noqa: E402
+from dce_pipeline import DcePipelineConfig, run_dce_pipeline  # noqa: E402
 
 
 RUN_PARITY = os.environ.get("ROCKETSHIP_RUN_PIPELINE_PARITY", "0") == "1"

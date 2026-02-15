@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the Python DCE in-memory CLI pipeline scaffold."""
+"""Run the PySide6 GUI for the Python DCE pipeline."""
 
 from __future__ import annotations
 
@@ -11,10 +11,11 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parent
     sys.path.insert(0, str(repo_root / "python"))
 
-    from dce_cli import main as cli_main  # pylint: disable=import-outside-toplevel
+    from dce_gui import main as gui_main  # pylint: disable=import-outside-toplevel
 
-    return cli_main()
+    return gui_main()
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

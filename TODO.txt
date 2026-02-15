@@ -1,5 +1,31 @@
--DONE Fix TR->temporal resolution for 2D versus 3D
--Copy header/orientation info over for nifti files
--handle .nii.gz files
--Remove dependance on findpeak (see git notes)
--Ask what noise is for, masking?, option for better/manual masking
+DCE Python Port TODO (active)
+
+Recently completed
+- Added tiny fast DCE fixture and settings-matrix tests.
+- Added MATLAB dce_preferences.txt bridge into Python defaults.
+- Added CLI overrides: --dce-preferences and repeatable --set KEY=VALUE.
+- Added Tofts ve map parity checks (downsample + optional full-volume).
+
+Highest priority next
+- Complete script-level option parity audit:
+  - map every MATLAB script_preferences.txt key to Python config/stage_overrides
+  - mark each key as supported, intentionally dropped, or pending
+  - add one regression test for each newly-supported key family
+- Expand dataset-backed DCE regression beyond Tofts maps:
+  - ROI .xls parity checks
+  - additional model-map parity (patlak, ex_tofts, tissue_uptake)
+- Add tiny fixture edge-case variants:
+  - low-SNR
+  - non-uniform timer
+  - harsh bounds / low-iteration fit stress case
+
+Secondary
+- Decide on nested and FXL_rr support vs explicit non-support.
+- DSC parity expansion for DSC_convolution_oSVD.
+- GUI distribution plan for non-programmers:
+  - evaluate packaged app targets (macOS app bundle, Windows installer)
+  - keep venv/dev launch path as baseline during early iterations
+- Performance pass after parity lock:
+  - profile Stage D hotspots
+  - investigate Python runtime gap (~2x-4x vs MATLAB on full volume)
+  - evaluate GPUfit CPU path as additional fast backend option

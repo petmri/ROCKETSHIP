@@ -53,7 +53,7 @@ def main() -> int:
         t1_fa_linear_fit,
         t2_linear_fast,
     )
-    from rocketship.dsc_helpers import matlab_reshape_linspace  # pylint: disable=import-outside-toplevel
+    from dsc_helpers import matlab_reshape_linspace  # pylint: disable=import-outside-toplevel
 
     baseline = json.loads(args.baseline.read_text())
 

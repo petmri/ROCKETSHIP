@@ -14,7 +14,7 @@ from unittest.mock import patch
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "python"))
 
-from rocketship.dce_pipeline import DcePipelineConfig, run_dce_pipeline, _run_stage_b_real, _run_stage_d_real  # noqa: E402
+from dce_pipeline import DcePipelineConfig, run_dce_pipeline, _run_stage_b_real, _run_stage_d_real  # noqa: E402
 
 
 def _make_config(tmp_dir: Path) -> DcePipelineConfig:
@@ -99,6 +99,23 @@ def _make_stage_a_payload() -> dict:
 
 
 class TestDcePipeline(unittest.TestCase):
+    def test_pipeline_emits_progress_events(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            events: list[dict] = []
+            run_dce_pipeline(config, event_callback=events.append)
+
+            event_types = [str(e.get("type", "")) for e in events]
+            self.assertIn("run_start", event_types)
+            self.assertIn("run_done", event_types)
+            self.assertIn("stage_start", event_types)
+            self.assertIn("stage_done", event_types)
+
+            stage_start = [e for e in events if e.get("type") == "stage_start"]
+            stage_done = [e for e in events if e.get("type") == "stage_done"]
+            self.assertEqual([e.get("stage") for e in stage_start], ["A", "B", "D"])
+            self.assertEqual([e.get("stage") for e in stage_done], ["A", "B", "D"])
+
     def test_pipeline_writes_summary_and_stage_checkpoints(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))
@@ -132,7 +149,7 @@ class TestDcePipeline(unittest.TestCase):
             config = _make_config(Path(tmp))
             config.backend = "auto"
 
-            with patch("rocketship.dce_pipeline.is_gpufit_available", return_value=False):
+            with patch("dce_pipeline.is_gpufit_available", return_value=False):
                 result = run_dce_pipeline(config)
             self.assertEqual(result["stages"]["D"]["selected_backend"], "cpu")
 
@@ -141,7 +158,7 @@ class TestDcePipeline(unittest.TestCase):
             config = _make_config(Path(tmp))
             config.backend = "gpufit"
 
-            with patch("rocketship.dce_pipeline.is_gpufit_available", return_value=False):
+            with patch("dce_pipeline.is_gpufit_available", return_value=False):
                 with self.assertRaisesRegex(RuntimeError, r"GPUfit backend requested"):
                     run_dce_pipeline(config)
 
@@ -184,17 +201,17 @@ class TestDcePipeline(unittest.TestCase):
                     return t1map
                 raise AssertionError(f"Unexpected path {path}")
 
-            with patch("rocketship.dce_pipeline._load_nifti_data", side_effect=fake_load):
+            with patch("dce_pipeline._load_nifti_data", side_effect=fake_load):
                 with patch(
-                    "rocketship.dce_pipeline._save_stage_a_qc_figures",
+                    "dce_pipeline._save_stage_a_qc_figures",
                     return_value={"timecurves_png": "/tmp/a.png", "roi_overview_png": "/tmp/b.png"},
                 ):
                     with patch(
-                        "rocketship.dce_pipeline._clean_ab",
+                        "dce_pipeline._clean_ab",
                         side_effect=lambda ab, t1_vals, idx_vals, threshold_fraction: (ab, t1_vals, idx_vals),
                     ):
                         with patch(
-                            "rocketship.dce_pipeline._clean_r1",
+                            "dce_pipeline._clean_r1",
                             side_effect=lambda r1_vals, t1_vals, idx_vals, threshold_fraction: (
                                 r1_vals,
                                 t1_vals,
@@ -290,7 +307,7 @@ class TestDcePipeline(unittest.TestCase):
                     return roi_mask
                 raise AssertionError(f"Unexpected path {path}")
 
-            with patch("rocketship.dce_pipeline._load_nifti_data", side_effect=fake_load):
+            with patch("dce_pipeline._load_nifti_data", side_effect=fake_load):
                 stage_d = _run_stage_d_real(config, stage_a, stage_b)
 
             self.assertEqual(stage_d["impl"], "real")
@@ -347,21 +364,21 @@ class TestDcePipeline(unittest.TestCase):
                     return t1map
                 raise AssertionError(f"Unexpected path {path}")
 
-            with patch("rocketship.dce_pipeline._load_nifti_data", side_effect=fake_load):
+            with patch("dce_pipeline._load_nifti_data", side_effect=fake_load):
                 with patch(
-                    "rocketship.dce_pipeline._save_stage_a_qc_figures",
+                    "dce_pipeline._save_stage_a_qc_figures",
                     return_value={"timecurves_png": "/tmp/a.png", "roi_overview_png": "/tmp/b.png"},
                 ):
                     with patch(
-                        "rocketship.dce_pipeline._save_stage_b_qc_figure",
+                        "dce_pipeline._save_stage_b_qc_figure",
                         return_value={"aif_fitting_png": "/tmp/c.png"},
                     ):
                         with patch(
-                            "rocketship.dce_pipeline._clean_ab",
+                            "dce_pipeline._clean_ab",
                             side_effect=lambda ab, t1_vals, idx_vals, threshold_fraction: (ab, t1_vals, idx_vals),
                         ):
                             with patch(
-                                "rocketship.dce_pipeline._clean_r1",
+                                "dce_pipeline._clean_r1",
                                 side_effect=lambda r1_vals, t1_vals, idx_vals, threshold_fraction: (
                                     r1_vals,
                                     t1_vals,

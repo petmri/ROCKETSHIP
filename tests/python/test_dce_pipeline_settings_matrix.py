@@ -15,7 +15,7 @@ import numpy as np
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "python"))
 
-from rocketship.dce_pipeline import DcePipelineConfig, _run_stage_a_real, _run_stage_b_real, _run_stage_d_real  # noqa: E402
+from dce_pipeline import DcePipelineConfig, _run_stage_a_real, _run_stage_b_real, _run_stage_d_real  # noqa: E402
 
 
 def _tiny_root() -> Path:

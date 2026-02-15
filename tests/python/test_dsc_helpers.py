@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "python"))
 
 from rocketship import import_aif, previous_aif  # noqa: E402
-from rocketship.dsc_helpers import last_dim_len, matlab_reshape_linspace  # noqa: E402
+from dsc_helpers import last_dim_len, matlab_reshape_linspace  # noqa: E402
 
 
 def _within_tol(actual: float, expected: float, atol: float, rtol: float) -> bool:

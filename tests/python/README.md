@@ -26,9 +26,10 @@ python3 -m venv .venv
 - `compare_with_matlab_baseline.py`
 - `generate_python_results.py`
 - `run_dce_python_cli.py` (repo root wrapper for in-memory A->B->D scaffold)
+- `run_dce_python_gui.py` (repo root wrapper for PySide6 GUI)
 
 ## First model port
-- Source: `python/rocketship/dce_models.py`
+- Source: `python/dce_models.py`
 - Function: `model_tofts_cfit`
 - Function: `model_patlak_cfit`
 - Function: `model_extended_tofts_cfit`
@@ -42,12 +43,12 @@ python3 -m venv .venv
 - Function: `model_tissue_uptake_fit`
 - Function: `model_2cxm_fit`
 - Function: `model_fxr_fit`
-- Source: `python/rocketship/dsc_helpers.py`
+- Source: `python/dsc_helpers.py`
 - Function: `import_aif`
 - Function: `previous_aif`
-- Source: `python/rocketship/dsc_models.py`
+- Source: `python/dsc_models.py`
 - Function: `dsc_convolution_ssvd`
-- Source: `python/rocketship/parametric_models.py`
+- Source: `python/parametric_models.py`
 - Function: `t2_linear_fast`
 - Function: `t1_fa_linear_fit`
 
@@ -98,6 +99,13 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python run_dce_python_cli.py --config tests/python/dce_cli_config.example.json
 ```
 
+Run with default config template:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python run_dce_python_cli.py
+```
+
 Optional CLI overrides (repeatable `--set KEY=VALUE`):
 
 ```bash
@@ -116,10 +124,29 @@ Current scaffold behavior:
 - Stage D has a real non-GUI implementation path (model fitting, parameter maps, and `.xls` ROI table output).
 - Loads MATLAB-style `dce_preferences.txt` defaults (explicit `stage_overrides` values still take precedence).
 - Writes run summary to `<output_dir>/dce_pipeline_run.json`.
+- Writes event log to `<output_dir>/dce_pipeline_events.jsonl`.
 - Optionally writes per-stage checkpoints (`a_out.json`, `b_out.json`, `d_out.json`) if `checkpoint_dir` is set.
 - Enforces scope decisions (for example, rejects ImageJ `.roi` inputs).
 - Saves QC figures during Stage A and Stage B real runs (for example `dce_timecurves.png`, `dce_roi_overview.png`, `dce_aif_fitting.png`).
 - Writes per-model DCE maps (NIfTI when possible; fallback `.npy`) for supported model parameters.
+
+Shared options doc (CLI + GUI):
+- `/Users/samuelbarnes/code/ROCKETSHIP/docs/dce_options.md`
+
+## GUI v1 (PySide6)
+Install:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python -m pip install -r requirements_gui.txt
+```
+
+Run:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python run_dce_python_gui.py
+```
 
 ## Dataset-backed DCE parity checks
 Default downsample parity fixture is committed for CI/local use:

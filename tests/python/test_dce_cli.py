@@ -13,7 +13,7 @@ from unittest.mock import patch
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "python"))
 
-from rocketship import dce_cli  # noqa: E402
+import dce_cli  # noqa: E402
 
 
 class TestDceCli(unittest.TestCase):
@@ -37,8 +37,8 @@ class TestDceCli(unittest.TestCase):
             dce_pref = tmp / "dce_preferences.txt"
             dce_pref.write_text("voxel_MaxFunEvals = 50\n")
 
-            with patch("rocketship.dce_cli.DcePipelineConfig.from_dict", return_value=object()) as from_dict_mock:
-                with patch("rocketship.dce_cli.run_dce_pipeline", return_value={"meta": {"status": "ok"}}):
+            with patch("dce_cli.DcePipelineConfig.from_dict", return_value=object()) as from_dict_mock:
+                with patch("dce_cli.run_dce_pipeline", return_value={"meta": {"status": "ok"}}):
                     with patch("builtins.print"):
                         rc = dce_cli.main(
                             [
