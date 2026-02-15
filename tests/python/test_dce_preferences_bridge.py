@@ -96,8 +96,19 @@ class TestDcePreferencesBridge(unittest.TestCase):
             fit_prefs = _stage_d_fit_prefs(config)
             self.assertEqual(int(fit_prefs["max_nfev"]), 123)
 
-    @patch("dce_pipeline.is_gpufit_available", return_value=True)
-    def test_force_cpu_preference_overrides_backend_auto(self, _gpufit_mock: object) -> None:
+    @patch(
+        "dce_pipeline.probe_acceleration_backend",
+        return_value={
+            "backend": "gpufit_cuda",
+            "reason": "test_gpu_available",
+            "cuda_available": True,
+            "pygpufit_imported": True,
+            "pycpufit_imported": True,
+            "pygpufit_error": None,
+            "pycpufit_error": None,
+        },
+    )
+    def test_force_cpu_preference_overrides_backend_auto(self, _probe_mock: object) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp = Path(tmp_dir)
             prefs = _write_prefs(tmp / "dce_preferences.txt", ["force_cpu = 1"])
@@ -142,4 +153,3 @@ class TestDcePreferencesBridge(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

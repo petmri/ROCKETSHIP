@@ -149,7 +149,18 @@ class TestDcePipeline(unittest.TestCase):
             config = _make_config(Path(tmp))
             config.backend = "auto"
 
-            with patch("dce_pipeline.is_gpufit_available", return_value=False):
+            with patch(
+                "dce_pipeline.probe_acceleration_backend",
+                return_value={
+                    "backend": "none",
+                    "reason": "test_no_backend",
+                    "cuda_available": False,
+                    "pygpufit_imported": False,
+                    "pycpufit_imported": False,
+                    "pygpufit_error": None,
+                    "pycpufit_error": None,
+                },
+            ):
                 result = run_dce_pipeline(config)
             self.assertEqual(result["stages"]["D"]["selected_backend"], "cpu")
 
@@ -158,9 +169,62 @@ class TestDcePipeline(unittest.TestCase):
             config = _make_config(Path(tmp))
             config.backend = "gpufit"
 
-            with patch("dce_pipeline.is_gpufit_available", return_value=False):
+            with patch(
+                "dce_pipeline.probe_acceleration_backend",
+                return_value={
+                    "backend": "none",
+                    "reason": "test_no_backend",
+                    "cuda_available": False,
+                    "pygpufit_imported": False,
+                    "pycpufit_imported": False,
+                    "pygpufit_error": "missing",
+                    "pycpufit_error": "missing",
+                },
+            ):
                 with self.assertRaisesRegex(RuntimeError, r"GPUfit backend requested"):
                     run_dce_pipeline(config)
+
+    def test_backend_auto_uses_cpufit_when_cuda_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            config.backend = "auto"
+
+            with patch(
+                "dce_pipeline.probe_acceleration_backend",
+                return_value={
+                    "backend": "cpufit_cpu",
+                    "reason": "test_cpufit_only",
+                    "cuda_available": False,
+                    "pygpufit_imported": True,
+                    "pycpufit_imported": True,
+                    "pygpufit_error": None,
+                    "pycpufit_error": None,
+                },
+            ):
+                result = run_dce_pipeline(config)
+            self.assertEqual(result["stages"]["D"]["selected_backend"], "gpufit")
+            self.assertEqual(result["stages"]["D"]["acceleration_backend"], "cpufit_cpu")
+
+    def test_backend_auto_prefers_gpufit_cuda_when_available(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            config.backend = "auto"
+
+            with patch(
+                "dce_pipeline.probe_acceleration_backend",
+                return_value={
+                    "backend": "gpufit_cuda",
+                    "reason": "test_cuda_available",
+                    "cuda_available": True,
+                    "pygpufit_imported": True,
+                    "pycpufit_imported": True,
+                    "pygpufit_error": None,
+                    "pycpufit_error": None,
+                },
+            ):
+                result = run_dce_pipeline(config)
+            self.assertEqual(result["stages"]["D"]["selected_backend"], "gpufit")
+            self.assertEqual(result["stages"]["D"]["acceleration_backend"], "gpufit_cuda")
 
     def test_stage_a_real_mode_runs_with_mocked_io(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

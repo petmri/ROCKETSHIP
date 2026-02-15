@@ -356,39 +356,146 @@ def _json_default(value: Any) -> Any:
     raise TypeError(f"Not JSON serializable: {type(value)}")
 
 
-def is_gpufit_available() -> bool:
-    """Return whether GPUfit appears available in the current environment."""
+@lru_cache(maxsize=1)
+def probe_acceleration_backend() -> Dict[str, Any]:
+    """Detect available acceleration backend in priority order."""
+
+    pygpufit_module: Any = None
+    pycpufit_module: Any = None
+    pygpufit_error: Optional[str] = None
+    pycpufit_error: Optional[str] = None
+    cuda_available = False
+
     try:
-        import pygpufit.gpufit  # type: ignore # noqa: F401
+        import pygpufit.gpufit as gf  # type: ignore
 
-        return True
-    except Exception:
-        return False
+        pygpufit_module = gf
+    except Exception as exc:
+        pygpufit_error = str(exc)
+
+    if pygpufit_module is not None:
+        try:
+            cuda_available = bool(pygpufit_module.cuda_available())
+        except Exception:
+            cuda_available = False
+        if cuda_available:
+            return {
+                "backend": "gpufit_cuda",
+                "reason": "pygpufit imported and CUDA is available",
+                "cuda_available": True,
+                "pygpufit_imported": True,
+                "pycpufit_imported": False,
+                "pygpufit_error": pygpufit_error,
+                "pycpufit_error": pycpufit_error,
+            }
+
+    try:
+        import pycpufit.cpufit as cf  # type: ignore
+
+        pycpufit_module = cf
+    except Exception as exc:
+        pycpufit_error = str(exc)
+
+    if pycpufit_module is not None:
+        return {
+            "backend": "cpufit_cpu",
+            "reason": "using pycpufit CPU backend",
+            "cuda_available": cuda_available,
+            "pygpufit_imported": pygpufit_module is not None,
+            "pycpufit_imported": True,
+            "pygpufit_error": pygpufit_error,
+            "pycpufit_error": pycpufit_error,
+        }
+
+    if pygpufit_module is not None:
+        return {
+            "backend": "gpufit_cpu_fallback",
+            "reason": "pygpufit imported without CUDA and pycpufit unavailable; using pygpufit fallback path",
+            "cuda_available": cuda_available,
+            "pygpufit_imported": True,
+            "pycpufit_imported": False,
+            "pygpufit_error": pygpufit_error,
+            "pycpufit_error": pycpufit_error,
+        }
+
+    return {
+        "backend": "none",
+        "reason": "no pygpufit/pycpufit backend detected",
+        "cuda_available": False,
+        "pygpufit_imported": False,
+        "pycpufit_imported": False,
+        "pygpufit_error": pygpufit_error,
+        "pycpufit_error": pycpufit_error,
+    }
 
 
-def resolve_backend(requested_backend: str) -> str:
-    """Resolve backend choice with optional GPUfit auto-detection."""
+def is_gpufit_available() -> bool:
+    """Return whether pygpufit is importable."""
+    probe = probe_acceleration_backend()
+    return bool(probe.get("pygpufit_imported", False))
+
+
+def _resolve_backend_selection(requested_backend: str) -> Dict[str, str]:
     backend = requested_backend.strip().lower()
     if backend not in ALLOWED_BACKENDS:
         raise ValueError(f"Unsupported backend '{requested_backend}'. Allowed: {sorted(ALLOWED_BACKENDS)}")
 
     if backend == "cpu":
-        return "cpu"
+        return {
+            "requested_backend": backend,
+            "selected_backend": "cpu",
+            "acceleration_backend": "none",
+            "reason": "backend=cpu forces pure CPU fitting path",
+        }
+
+    probe = probe_acceleration_backend()
+    probe_backend = str(probe.get("backend", "none"))
+    probe_reason = str(probe.get("reason", ""))
+    pygpufit_imported = bool(probe.get("pygpufit_imported", False))
+
     if backend == "gpufit":
-        if is_gpufit_available():
-            return "gpufit"
-        raise RuntimeError("GPUfit backend requested but not available in current Python environment")
+        if not pygpufit_imported:
+            raise RuntimeError("GPUfit backend requested but pygpufit could not be imported")
+        acceleration_backend = probe_backend if probe_backend != "none" else "gpufit_cpu_fallback"
+        return {
+            "requested_backend": backend,
+            "selected_backend": "gpufit",
+            "acceleration_backend": acceleration_backend,
+            "reason": f"backend=gpufit selected acceleration backend '{acceleration_backend}' ({probe_reason})",
+        }
 
     # auto
-    return "gpufit" if is_gpufit_available() else "cpu"
+    if probe_backend in {"gpufit_cuda", "cpufit_cpu", "gpufit_cpu_fallback"}:
+        return {
+            "requested_backend": backend,
+            "selected_backend": "gpufit",
+            "acceleration_backend": probe_backend,
+            "reason": f"backend=auto selected acceleration backend '{probe_backend}' ({probe_reason})",
+        }
+    return {
+        "requested_backend": backend,
+        "selected_backend": "cpu",
+        "acceleration_backend": "none",
+        "reason": "backend=auto fell back to pure CPU fitting path",
+    }
 
 
-def _resolve_stage_d_backend(config: "DcePipelineConfig") -> str:
+def resolve_backend(requested_backend: str) -> str:
+    """Resolve high-level backend choice (`cpu` or `gpufit`)."""
+    return _resolve_backend_selection(requested_backend)["selected_backend"]
+
+
+def _resolve_stage_d_backend(config: "DcePipelineConfig") -> Dict[str, str]:
     requested_backend = str(config.backend).strip().lower()
     force_cpu = _to_bool(_stage_override(config, "force_cpu", 0), False)
     if requested_backend == "auto" and force_cpu:
-        requested_backend = "cpu"
-    return resolve_backend(requested_backend)
+        return {
+            "requested_backend": "auto",
+            "selected_backend": "cpu",
+            "acceleration_backend": "none",
+            "reason": "force_cpu=1 overrides backend=auto to pure CPU fitting path",
+        }
+    return _resolve_backend_selection(requested_backend)
 
 
 @dataclass
@@ -1899,6 +2006,130 @@ def _fit_model_curve(
     raise ValueError(f"Unsupported model '{model_name}'")
 
 
+def _load_fit_module_for_acceleration(acceleration_backend: str) -> Any:
+    if acceleration_backend == "cpufit_cpu":
+        import pycpufit.cpufit as fit_module  # type: ignore
+
+        return fit_module
+    import pygpufit.gpufit as fit_module  # type: ignore
+
+    return fit_module
+
+
+def _fit_stage_d_model_accelerated(
+    model_name: str,
+    ct: np.ndarray,
+    cp_use: np.ndarray,
+    timer: np.ndarray,
+    prefs: Dict[str, Any],
+    acceleration_backend: str,
+) -> Optional[np.ndarray]:
+    if acceleration_backend == "none":
+        return None
+    if model_name not in {"tofts", "patlak"}:
+        return None
+
+    fit_module = _load_fit_module_for_acceleration(acceleration_backend)
+    n_fits = int(ct.shape[1])
+    if n_fits == 0:
+        return np.zeros((0, len(MODEL_LAYOUTS[model_name]["param_names"])), dtype=np.float64)
+
+    data = np.ascontiguousarray(np.asarray(ct.T, dtype=np.float32))
+    timer_f32 = np.ascontiguousarray(np.asarray(timer, dtype=np.float32).reshape(-1))
+    cp_f32 = np.ascontiguousarray(np.asarray(cp_use, dtype=np.float32).reshape(-1))
+    user_info = np.ascontiguousarray(np.concatenate([timer_f32, cp_f32], axis=0), dtype=np.float32)
+
+    if model_name == "tofts":
+        model_id = int(fit_module.ModelID.TOFTS)
+        init_pair = np.array(
+            [
+                float(prefs["initial_value_ktrans"]),
+                float(prefs["initial_value_ve"]),
+            ],
+            dtype=np.float32,
+        )
+        bounds_row = np.array(
+            [
+                float(prefs["lower_limit_ktrans"]),
+                float(prefs["upper_limit_ktrans"]),
+                float(prefs["lower_limit_ve"]),
+                float(prefs["upper_limit_ve"]),
+            ],
+            dtype=np.float32,
+        )
+    else:
+        model_id = int(fit_module.ModelID.PATLAK)
+        init_pair = np.array(
+            [
+                float(prefs["initial_value_ktrans"]),
+                float(prefs["initial_value_vp"]),
+            ],
+            dtype=np.float32,
+        )
+        bounds_row = np.array(
+            [
+                float(prefs["lower_limit_ktrans"]),
+                float(prefs["upper_limit_ktrans"]),
+                float(prefs["lower_limit_vp"]),
+                float(prefs["upper_limit_vp"]),
+            ],
+            dtype=np.float32,
+        )
+
+    initial_parameters = np.ascontiguousarray(np.tile(init_pair[None, :], (n_fits, 1)), dtype=np.float32)
+    constraints = np.ascontiguousarray(np.tile(bounds_row[None, :], (n_fits, 1)), dtype=np.float32)
+    constraint_types = np.ascontiguousarray(
+        np.array(
+            [
+                int(fit_module.ConstraintType.LOWER_UPPER),
+                int(fit_module.ConstraintType.LOWER_UPPER),
+            ],
+            dtype=np.int32,
+        )
+    )
+    tolerance = float(prefs.get("gpu_tolerance", 1e-12))
+    max_iterations = int(prefs.get("gpu_max_n_iterations", 200))
+
+    parameters, states, chi_squares, _, _ = fit_module.fit_constrained(
+        data=data,
+        weights=None,
+        model_id=model_id,
+        initial_parameters=initial_parameters,
+        constraints=constraints,
+        constraint_types=constraint_types,
+        tolerance=tolerance,
+        max_number_iterations=max_iterations,
+        parameters_to_fit=None,
+        estimator_id=int(fit_module.EstimatorID.LSE),
+        user_info=user_info,
+    )
+
+    params = np.asarray(parameters, dtype=np.float64)
+    states_arr = np.asarray(states, dtype=np.int32).reshape(-1)
+    chi = np.asarray(chi_squares, dtype=np.float64).reshape(-1)
+    failed = states_arr != 0
+    if np.any(failed):
+        params[failed, :] = np.nan
+        chi[failed] = np.nan
+
+    if model_name == "tofts":
+        out = np.full((n_fits, 7), np.nan, dtype=np.float64)
+        out[:, 0] = params[:, 0]
+        out[:, 1] = params[:, 1]
+        out[:, 2] = chi
+        out[:, 3] = params[:, 0]
+        out[:, 4] = params[:, 0]
+        out[:, 5] = params[:, 1]
+        out[:, 6] = params[:, 1]
+        return out
+
+    out = np.full((n_fits, 7), -1.0, dtype=np.float64)
+    out[:, 0] = params[:, 0]
+    out[:, 1] = params[:, 1]
+    out[:, 2] = chi
+    return out
+
+
 def _fit_auc_matrix(
     timer: np.ndarray,
     cp_use: np.ndarray,
@@ -1984,6 +2215,7 @@ def _fit_stage_d_model(
     start_injection_min: float,
     sss: Optional[np.ndarray],
     ssstum: Optional[np.ndarray],
+    acceleration_backend: str,
 ) -> np.ndarray:
     layout = MODEL_LAYOUTS[model_name]
     row_len = len(layout["param_names"])
@@ -1992,6 +2224,25 @@ def _fit_stage_d_model(
         if stlv_use is None or sttum is None:
             raise ValueError("AUC fitting requires Stlv_use and Sttum arrays")
         return _fit_auc_matrix(timer, cp_use, ct, stlv_use, sttum, start_injection_min, sss, ssstum)
+
+    if acceleration_backend != "none" and model_name in {"tofts", "patlak"}:
+        try:
+            accelerated = _fit_stage_d_model_accelerated(
+                model_name=model_name,
+                ct=ct,
+                cp_use=cp_use,
+                timer=timer,
+                prefs=prefs,
+                acceleration_backend=acceleration_backend,
+            )
+            if accelerated is not None:
+                return accelerated
+        except Exception as exc:
+            print(
+                f"[DCE] Stage-D {model_name}: acceleration backend '{acceleration_backend}' unavailable "
+                f"({exc}); falling back to pure CPU.",
+                flush=True,
+            )
 
     out = np.full((ct.shape[1], row_len), np.nan, dtype=np.float64)
     for i in range(ct.shape[1]):
@@ -2011,6 +2262,16 @@ def _run_stage_d_real(
     stage_b: Dict[str, Any],
     event_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
+    backend_info = _resolve_stage_d_backend(config)
+    selected_backend = backend_info["selected_backend"]
+    acceleration_backend = backend_info["acceleration_backend"]
+    backend_reason = backend_info["reason"]
+    print(
+        f"[DCE] Stage-D backend selection: requested={backend_info['requested_backend']} "
+        f"selected={selected_backend} acceleration={acceleration_backend} reason={backend_reason}",
+        flush=True,
+    )
+
     arrays = stage_b.get("arrays")
     if not isinstance(arrays, dict):
         raise ValueError("Stage-D real mode requires Stage-B arrays")
@@ -2100,6 +2361,7 @@ def _run_stage_d_real(
             start_injection_min=start_injection_min,
             sss=sss,
             ssstum=ssstum,
+            acceleration_backend=acceleration_backend,
         )
 
         roi_results = np.empty((0, voxel_results.shape[1]), dtype=np.float64)
@@ -2127,6 +2389,7 @@ def _run_stage_d_real(
                 ssstum=np.asarray([float(np.mean(ssstum[cols])) for cols in roi_columns], dtype=np.float64)
                 if ssstum is not None and ssstum.size == ct_source.shape[1]
                 else None,
+                acceleration_backend=acceleration_backend,
             )
 
         map_paths = _write_param_maps(
@@ -2173,13 +2436,14 @@ def _run_stage_d_real(
             roi_count=int(roi_results.shape[0]),
         )
 
-    selected_backend = _resolve_stage_d_backend(config)
-    backend_used = "cpu" if selected_backend == "gpufit" else selected_backend
+    backend_used = "cpu" if selected_backend == "cpu" else acceleration_backend
     return {
         "stage": "D",
         "status": "ok",
         "impl": "real",
         "selected_backend": selected_backend,
+        "acceleration_backend": acceleration_backend,
+        "backend_reason": backend_reason,
         "backend_used": backend_used,
         "write_xls": bool(config.write_xls),
         "time_smoothing": time_smoothing,
@@ -2260,24 +2524,28 @@ class HybridStageRunner:
     ) -> Dict[str, Any]:
         mode = str(_stage_override(config, "stage_d_mode", "auto")).strip().lower()
         if mode == "scaffold":
-            selected_backend = _resolve_stage_d_backend(config)
+            backend_info = _resolve_stage_d_backend(config)
             return {
                 "stage": "D",
                 "status": "scaffold",
                 "impl": "scaffold",
-                "selected_backend": selected_backend,
+                "selected_backend": backend_info["selected_backend"],
+                "acceleration_backend": backend_info["acceleration_backend"],
+                "backend_reason": backend_info["reason"],
                 "write_xls": bool(config.write_xls),
                 "model_flags": dict(config.model_flags),
             }
 
         if mode == "auto":
             if not isinstance(stage_b.get("arrays"), dict):
-                selected_backend = _resolve_stage_d_backend(config)
+                backend_info = _resolve_stage_d_backend(config)
                 return {
                     "stage": "D",
                     "status": "scaffold",
                     "impl": "scaffold",
-                    "selected_backend": selected_backend,
+                    "selected_backend": backend_info["selected_backend"],
+                    "acceleration_backend": backend_info["acceleration_backend"],
+                    "backend_reason": backend_info["reason"],
                     "write_xls": bool(config.write_xls),
                     "model_flags": dict(config.model_flags),
                     "reason": "stage_b_arrays_missing",
