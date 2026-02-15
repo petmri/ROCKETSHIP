@@ -5,6 +5,7 @@ Recently completed
 - Added MATLAB dce_preferences.txt bridge into Python defaults.
 - Added CLI overrides: --dce-preferences and repeatable --set KEY=VALUE.
 - Added Tofts ve map parity checks (downsample + optional full-volume).
+- Added GUI path/file browse dialogs and one-click tiny-fixture default run config.
 
 Highest priority next
 - Complete script-level option parity audit:
@@ -25,6 +26,10 @@ Secondary
 - GUI distribution plan for non-programmers:
   - evaluate packaged app targets (macOS app bundle, Windows installer)
   - keep venv/dev launch path as baseline during early iterations
+- GPUfit optional install/distribution plan:
+  - define release-manifest installer flow (download matching binary by OS/arch from ironictoo/Gpufit releases)
+  - include checksum verification + import smoke test
+  - keep CPU fallback as default when GPUfit is absent
 - Performance pass after parity lock:
   - profile Stage D hotspots
   - investigate Python runtime gap (~2x-4x vs MATLAB on full volume)

@@ -10,7 +10,7 @@ currently in this repository.
 - Optional GUI entrypoint:
   - `/Users/samuelbarnes/code/ROCKETSHIP/run_dce_python_gui.py`
 - Current implemented workflow focus:
-  - DCE parts `A -> B -> D` (non-GUI, single-process, in-memory handoff)
+  - DCE parts `A -> B -> D` (single-process, in-memory handoff; CLI-first with optional GUI wrapper)
 - Current parity focus:
   - MATLAB-vs-Python parity for model contracts and dataset-backed Tofts maps (`Ktrans`, `ve`)
 
@@ -91,10 +91,9 @@ Shared options documentation for CLI + GUI:
 
 ## What is intentionally not supported in Python port scope
 
-- GUI entrypoints and GUI helper flows
 - Manual click-based AIF tools
 - ImageJ ROI input (`.roi`)
-- MATLAB batch helper queue flow
+- Legacy MATLAB GUI batch queue/prep flow for part D
 - `neuroecon` execution path
 - legacy email-completion flow
 
@@ -177,7 +176,9 @@ One-click test run:
 - It uses `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_default.json` and the tiny fixture by default.
 
 GUI v1 behavior:
-- Edits top-level config + all `stage_overrides` keys.
+- Edits common top-level config fields + all `stage_overrides` keys.
 - Runs CLI in a subprocess and streams progress from stdout events.
 - Uses hard-stop process termination.
 - Displays QC PNG figures when generated.
+- Provides `Browse...` dialogs for all path/file input fields in the form.
+- If `aif_mode=imported` is needed, set `imported_aif_path` in JSON config (current GUI form does not expose it yet).

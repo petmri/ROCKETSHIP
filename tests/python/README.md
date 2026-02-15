@@ -25,7 +25,7 @@ python3 -m venv .venv
 ## Script
 - `compare_with_matlab_baseline.py`
 - `generate_python_results.py`
-- `run_dce_python_cli.py` (repo root wrapper for in-memory A->B->D scaffold)
+- `run_dce_python_cli.py` (repo root wrapper for in-memory A->B->D pipeline)
 - `run_dce_python_gui.py` (repo root wrapper for PySide6 GUI)
 
 ## First model port
@@ -88,7 +88,7 @@ python3 tests/python/compare_with_matlab_baseline.py \
 
 Add `--require-all` to fail if any mapped contract output is missing.
 
-## DCE CLI scaffold (single-process, in-memory)
+## DCE CLI pipeline (single-process, in-memory)
 Example config:
 - `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/dce_cli_config.example.json`
 
@@ -117,7 +117,7 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
   --set blood_t1_ms=1600
 ```
 
-Current scaffold behavior:
+Current pipeline behavior:
 - Runs A->B->D stage order in-memory with no `.mat` handoff files.
 - Stage A has a real implementation path (NIfTI + mask-driven Cp/Ct extraction).
 - Stage B has a real non-GUI implementation path (timer restriction, AIF `fitted|raw|imported`, and AIF QC figure output).
@@ -147,6 +147,11 @@ Run:
 cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python run_dce_python_gui.py
 ```
+
+GUI behavior highlights:
+- Path/file inputs in the form have `Browse...` actions.
+- One-click smoke run works with default config (`python/dce_default.json`) against tiny fixture data.
+- Current GUI form does not expose `imported_aif_path`; set it in JSON when using `aif_mode=imported`.
 
 ## Dataset-backed DCE parity checks
 Default downsample parity fixture is committed for CI/local use:

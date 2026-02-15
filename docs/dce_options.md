@@ -38,7 +38,9 @@ For options in `stage_overrides`:
 ## `stage_overrides` groups
 
 ### Runtime / staging
-- `stage_a_mode`, `stage_b_mode`, `stage_d_mode`: `real|scaffold|auto` (stage-specific)
+- `stage_a_mode`: `real|scaffold`
+- `stage_b_mode`: `real|scaffold|auto`
+- `stage_d_mode`: `real|scaffold|auto`
 - `rootname`: output name prefix
 - `write_param_maps`: bool for map writing
 
@@ -96,6 +98,8 @@ For options in `stage_overrides`:
 
 ## Notes
 - MATLAB-style numeric expressions in preferences (for example `10^-7`) are supported when loaded from `dce_preferences.txt`.
+- GUI v1 provides `Browse...` dialogs for all path/file input widgets currently shown in the form.
+- `imported_aif_path` exists at the config level, but current GUI form does not expose a dedicated field yet; set it via JSON config when using imported AIF mode.
 - Not all MATLAB-era options are fully consumed by current Python runtime yet; see active backlog:
   - `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/PORTING_STATUS.md`
   - `/Users/samuelbarnes/code/ROCKETSHIP/TODO.txt`

@@ -4,10 +4,10 @@ This file is the handoff point for resuming work later.
 
 ## Current checkpoint
 - Branch: `codex/algorithm-test-suite`
-- Latest milestone commit: `e080d6c`
+- Latest milestone commit: `b7b93cd`
 - Python test baseline at this checkpoint:
   - `.venv/bin/python -m unittest discover -s tests/python -p 'test_*.py'`
-  - `44` run, `0` failed, `2` skipped (parity-gated)
+  - `45` run, `0` failed, `2` skipped (parity-gated)
 
 ## Current scope covered
 Python implementations currently exist in `/Users/samuelbarnes/code/ROCKETSHIP/python/`:
@@ -44,7 +44,6 @@ Confirmed out-of-scope/deprecated for the Python port:
 - Email notification completion flow.
 - Manual click-based AIF tools.
 - ImageJ ROI input support (`.roi`).
-- GUI entrypoints and UI helper utilities.
 - MATLAB-specific batch helper scripts.
 
 Confirmed in-scope requirements to retain:
@@ -58,14 +57,15 @@ Confirmed in-scope requirements to retain:
   - CPU path is required and treated as the parity baseline.
   - GPUfit is optional (`backend=auto|cpu|gpufit`) and can be enabled once installed.
 
-## DCE CLI scaffold status
-- In-memory pipeline scaffold implemented in:
+## DCE CLI pipeline status
+- In-memory pipeline implemented in:
   - `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_pipeline.py`
   - `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_cli.py`
   - `/Users/samuelbarnes/code/ROCKETSHIP/run_dce_python_cli.py`
   - `/Users/samuelbarnes/code/ROCKETSHIP/run_dce_python_gui.py` (GUI wrapper)
 - Stage A status:
   - real implementation path is wired (NIfTI input, ROI/AIF extraction, R1/Cp/Ct generation, QC figure saving)
+  - stage mode control: `stage_overrides.stage_a_mode = real|scaffold`
 - Stage B status:
   - real non-GUI implementation path is wired (time restriction, non-interactive AIF selection/fitting, pass-through arrays, QC figure saving)
   - supported AIF modes: `fitted`, `raw`, `imported`
@@ -84,10 +84,13 @@ Confirmed in-scope requirements to retain:
   - emits progress events to stdout (`ROCKETSHIP_EVENT <json>`)
   - writes per-run event log JSONL (`<output_dir>/dce_pipeline_events.jsonl`)
   - default config path is now `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_default.json`
+  - default config is prewired to tiny fixture data for one-click local smoke runs
 - GUI status (v1):
   - PySide6 GUI implemented in `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_gui.py`
-  - GUI edits top-level config and all `stage_overrides` keys
+  - GUI edits common top-level config fields and all `stage_overrides` keys
   - GUI runs CLI via subprocess, streams progress, supports hard-stop terminate, and previews PNG QC figures
+  - GUI form includes `Browse...` dialogs for path/file inputs
+  - `imported_aif_path` currently remains JSON-config-only (not yet a dedicated GUI field)
 - Recent parity fixes (MATLAB alignment):
   - Stage A now uses MATLAB-style column-major voxel indexing for `lvind/tumind/noiseind`.
   - Stage D map writeback now uses MATLAB-style linear index mapping.

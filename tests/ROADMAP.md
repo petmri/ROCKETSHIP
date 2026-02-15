@@ -8,7 +8,7 @@
 - Python parity runner and baseline comparison tooling.
 - Initial Python ports for DCE/DSC helper/parametric core models.
 - Expanded DCE forward/inverse parity coverage through VP, tissue uptake, 2CXM, and FXR models.
-- Python in-memory DCE CLI scaffold (`A -> B -> D`) with optional stage checkpoints.
+- Python in-memory DCE CLI pipeline (`A -> B -> D`) with optional stage checkpoints.
 - Real Stage A/B/D implementation paths in Python with QC figure output and `.xls` ROI exports.
 - Dataset-backed DCE parity fixtures and tests:
   - downsampled `BBB data p19` committed fixture
@@ -29,7 +29,7 @@
   - Email completion notification flow.
   - Manual click-based AIF tools.
   - ImageJ ROI input support (`.roi`).
-  - GUI entrypoints/UI helpers.
+  - Legacy MATLAB GUI helper flows tied to queue/prep behavior.
   - MATLAB-specific batch helper scripts.
 - Explicitly retained:
   - ROI spreadsheet outputs (`.xls`).
