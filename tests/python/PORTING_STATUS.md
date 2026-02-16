@@ -4,10 +4,10 @@ This file is the handoff point for resuming work later.
 
 ## Current checkpoint
 - Branch: `codex/algorithm-test-suite`
-- Latest milestone commit: `b7b93cd`
+- Latest milestone commit: `d59c492`
 - Python test baseline at this checkpoint:
   - `.venv/bin/python -m unittest discover -s tests/python -p 'test_*.py'`
-  - `45` run, `0` failed, `2` skipped (parity-gated)
+  - `57` run, `0` failed, `2` skipped (parity-gated)
 
 ## Current scope covered
 Python implementations currently exist in `/Users/samuelbarnes/code/ROCKETSHIP/python/`:
@@ -80,6 +80,10 @@ Confirmed in-scope requirements to retain:
   - explicit `stage_overrides` values always win over file defaults
   - preference parsing supports MATLAB numeric expressions (for example `10^-7`, `10^(-12)`)
   - Stage D auto-backend now honors `force_cpu` when backend is `auto`
+  - Stage D acceleration runtime fallback order is now:
+    - selected acceleration backend
+    - `cpufit_cpu` (when selected backend is gpufit and pycpufit import is available)
+    - pure CPU fitting path
 - CLI observability status:
   - emits progress events to stdout (`ROCKETSHIP_EVENT <json>`)
   - writes per-run event log JSONL (`<output_dir>/dce_pipeline_events.jsonl`)
@@ -99,10 +103,19 @@ Confirmed in-scope requirements to retain:
   - Stage A cleanup behavior (`cleanAB`, `cleanR1t`) now mirrors MATLAB logic more closely.
 - Dataset parity tests:
   - `tests/python/test_dce_pipeline_parity_metrics.py` adds full-pipeline Tofts map checks (`Ktrans`, `ve`) against MATLAB maps using correlation and MSE tolerances.
+  - Stage-D acceleration wiring now includes `tofts`, `ex_tofts`, `patlak`, `tissue_uptake`, and `2cxm` in `python/dce_pipeline.py`.
+  - `tests/python/test_dce_pipeline.py` includes unit coverage for accelerated model dispatch, parameter bounds/initialization, and output-column mapping for those five models.
+  - opt-in multi-model map parity test:
+    - `test_downsample_bbb_p19_models_cpu_and_auto`
+    - compares MATLAB vs Python CPU-only and MATLAB vs Python `auto` backend for `tofts`, `ex_tofts`, `patlak`, `tissue_uptake`, `2cxm`
+    - also compares Python `auto` vs Python CPU-only maps
+    - enabled with `ROCKETSHIP_RUN_PIPELINE_PARITY=1` and `ROCKETSHIP_RUN_MULTI_MODEL_BACKEND_PARITY=1`
+    - uses sparse ROI sampling (`ROCKETSHIP_PARITY_MULTI_MODEL_ROI_STRIDE`, default `12`) to keep runtime manageable
   - fast path uses committed fixture `test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3` (with fallback to synthetic-generated path if needed).
   - full-volume `BBB data p19` path is available behind env gating and intended for occasional thorough checks due runtime.
   - both tests require MATLAB baseline map `processed/results_matlab/Dyn-1_tofts_fit_Ktrans.nii` (not legacy `processed/results`).
   - MATLAB baseline generator: `tests/matlab/generate_dce_tofts_parity_map.m`
+    - now accepts `'models', {...}` to emit non-Tofts baselines in one run.
   - latest measured parity (MATLAB `results_matlab` baseline):
     - downsample `x3y3` `Ktrans`: `corr=0.99816`, `mse=0.0001815`, `mae=0.004171` (`n=2834`)
     - downsample `x3y3` `ve`: `corr=0.98584`, `mse=0.001059`, `mae=0.001531` (`n=2834`)
@@ -126,6 +139,12 @@ Confirmed in-scope requirements to retain:
   - rejects ImageJ `.roi` input
   - accepts backend `auto|cpu|gpufit`
   - accepts AIF mode `auto|fitted|raw|imported`
+- Installer/acceleration setup status:
+  - installer script: `/Users/samuelbarnes/code/ROCKETSHIP/install_python_acceleration.py`
+  - installs pyCpufit/pyGpufit with `--no-deps` to avoid NumPy/SciPy resolver churn
+  - prefers `dev-latest` prerelease channel by default when no explicit release tag is provided
+  - auto-detects local CUDA version (`CUDA_VERSION`, `nvcc`, `nvidia-smi`) and selects the closest compatible host asset
+  - if local CUDA is older than all available CUDA assets and CPU asset exists, installer prefers CPU asset first
 - Checkpoint support:
   - writes `a_out.json`, `b_out.json`, `d_out.json` when `checkpoint_dir` is configured
 - Example config:
@@ -169,6 +188,7 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 Workflow: `/Users/samuelbarnes/code/ROCKETSHIP/.github/workflows/run_DCE.yml`
 
 - `python_checks` job (push + PR): Python unit tests, contract parity checks, and downsample DCE pipeline parity.
+- `python_portability` job (push + PR): Python unit/integration suite on `windows-latest` and `macos-latest` (non-parity mode).
 - PR MATLAB job: unit/integration checks + DCE smoke run using committed fixture `test_data/ci_fixtures/dce/downsample_x2_bids`.
 - Push to `dev/master`: heavier MATLAB matrix (full validation path).
 

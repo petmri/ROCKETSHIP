@@ -20,6 +20,15 @@ from dce_pipeline import DcePipelineConfig, run_dce_pipeline  # noqa: E402
 
 RUN_PARITY = os.environ.get("ROCKETSHIP_RUN_PIPELINE_PARITY", "0") == "1"
 RUN_FULL = os.environ.get("ROCKETSHIP_RUN_FULL_VOLUME_PARITY", "0") == "1"
+RUN_MULTI_MODEL_BACKEND_PARITY = os.environ.get("ROCKETSHIP_RUN_MULTI_MODEL_BACKEND_PARITY", "0") == "1"
+
+MULTI_MODEL_PARITY_SPECS = {
+    "tofts": {"params": ["Ktrans", "ve"]},
+    "ex_tofts": {"params": ["Ktrans", "ve", "vp"]},
+    "patlak": {"params": ["Ktrans", "vp"]},
+    "tissue_uptake": {"params": ["Ktrans", "fp", "vp"]},
+    "2cxm": {"params": ["Ktrans", "ve", "vp", "fp"]},
+}
 
 
 def _dataset_paths(root: Path) -> dict:
@@ -39,6 +48,30 @@ def _dataset_paths(root: Path) -> dict:
     }
 
 
+def _matlab_map_path(paths: dict, model_name: str, param: str) -> Path:
+    return Path(paths["processed"]) / "results_matlab" / f"Dyn-1_{model_name}_fit_{param}.nii"
+
+
+def _model_flags(models: list[str]) -> dict[str, int]:
+    flags = {
+        "tofts": 0,
+        "ex_tofts": 0,
+        "patlak": 0,
+        "tissue_uptake": 0,
+        "two_cxm": 0,
+        "fxr": 0,
+        "auc": 0,
+        "nested": 0,
+        "FXL_rr": 0,
+    }
+    for model in models:
+        if model == "2cxm":
+            flags["two_cxm"] = 1
+        elif model in flags:
+            flags[model] = 1
+    return flags
+
+
 def _default_downsample_root() -> Path:
     ci_fixture = REPO_ROOT / "test_data" / "ci_fixtures" / "dce" / "bbb_p19_downsample_x3y3"
     if ci_fixture.exists():
@@ -46,30 +79,28 @@ def _default_downsample_root() -> Path:
     return REPO_ROOT / "test_data" / "synthetic" / "generated" / "bbb_p19_downsample_x3y3"
 
 
-def _make_config(paths: dict, out_dir: Path) -> DcePipelineConfig:
+def _make_config(
+    paths: dict,
+    out_dir: Path,
+    *,
+    backend: str,
+    models: list[str],
+    roi_path: Path | None = None,
+) -> DcePipelineConfig:
+    roi_use = paths["roi"] if roi_path is None else roi_path
     return DcePipelineConfig(
         subject_source_path=paths["root"],
         subject_tp_path=paths["processed"],
         output_dir=out_dir,
-        backend="auto",
+        backend=backend,
         checkpoint_dir=out_dir / "checkpoints",
         write_xls=True,
         dynamic_files=[paths["dynamic"]],
         aif_files=[paths["aif"]],
-        roi_files=[paths["roi"]],
+        roi_files=[roi_use],
         t1map_files=[paths["t1map"]],
         noise_files=[paths["noise"]],
-        model_flags={
-            "tofts": 1,
-            "ex_tofts": 0,
-            "patlak": 0,
-            "tissue_uptake": 0,
-            "two_cxm": 0,
-            "fxr": 0,
-            "auc": 0,
-            "nested": 0,
-            "FXL_rr": 0,
-        },
+        model_flags=_model_flags(models),
         stage_overrides={
             "rootname": "Dyn-1",
             "stage_a_mode": "real",
@@ -97,6 +128,30 @@ def _load_nifti(path: Path) -> np.ndarray:
     return np.asarray(np.squeeze(nib.load(str(path)).get_fdata()), dtype=np.float64)
 
 
+def _write_sparse_roi_mask(src_roi_path: Path, dst_roi_path: Path, stride: int) -> None:
+    roi_img = nib.load(str(src_roi_path))
+    roi_data = np.asarray(np.squeeze(roi_img.get_fdata()), dtype=np.float32)
+    src_mask = roi_data > 0
+    src_flat = src_mask.reshape(-1, order="F")
+    indices = np.flatnonzero(src_flat)
+    if indices.size == 0:
+        raise AssertionError(f"ROI mask has no voxels: {src_roi_path}")
+
+    stride_use = max(1, int(stride))
+    keep = indices[::stride_use]
+    if keep.size < min(64, indices.size):
+        keep = indices
+
+    subset_flat = np.zeros_like(src_flat, dtype=np.float32)
+    subset_flat[keep] = 1.0
+    subset = subset_flat.reshape(src_mask.shape, order="F")
+
+    header = roi_img.header.copy()
+    header.set_data_dtype(np.float32)
+    subset_img = nib.Nifti1Image(subset, roi_img.affine, header)
+    nib.save(subset_img, str(dst_roi_path))
+
+
 def _metrics(
     py_map: np.ndarray,
     matlab_map: np.ndarray,
@@ -120,16 +175,29 @@ def _metrics(
     }
 
 
-def _parity_error_hint(paths: dict) -> str:
+def _valid_voxel_count(
+    py_map: np.ndarray,
+    ref_map: np.ndarray,
+    roi_mask: np.ndarray,
+    extra_mask: np.ndarray | None = None,
+) -> int:
+    mask = np.isfinite(py_map) & np.isfinite(ref_map) & (roi_mask > 0)
+    if extra_mask is not None:
+        mask = mask & np.asarray(extra_mask, dtype=bool)
+    return int(np.count_nonzero(mask))
+
+
+def _parity_error_hint(paths: dict, *, models: list[str], expected_maps: list[Path]) -> str:
+    models_expr = "{" + ",".join(f"'{name}'" for name in models) + "}"
+    expected_lines = "\n  ".join(str(p) for p in expected_maps)
     return (
         "Missing MATLAB baseline map(s). Generate them first with:\n"
         "  matlab -batch \"cd('/Users/samuelbarnes/code/ROCKETSHIP'); "
         "addpath('tests/matlab'); "
-        "generate_dce_tofts_parity_map('subjectRoot', '%s');\"\n"
+        "generate_dce_tofts_parity_map('subjectRoot', '%s', 'models', %s);\"\n"
         "Expected maps:\n"
-        "  %s\n"
         "  %s"
-    ) % (paths["root"], paths["matlab_tofts_ktrans"], paths["matlab_tofts_ve"])
+    ) % (paths["root"], models_expr, expected_lines)
 
 
 def _assert_map_parity(
@@ -153,6 +221,160 @@ def _assert_map_parity(
 
 
 class TestDcePipelineParityMetrics(unittest.TestCase):
+    @unittest.skipUnless(
+        RUN_PARITY and RUN_MULTI_MODEL_BACKEND_PARITY,
+        "Set ROCKETSHIP_RUN_PIPELINE_PARITY=1 and ROCKETSHIP_RUN_MULTI_MODEL_BACKEND_PARITY=1 "
+        "to run multi-model CPU-vs-auto map parity checks.",
+    )
+    def test_downsample_bbb_p19_models_cpu_and_auto(self) -> None:
+        root = Path(
+            os.environ.get(
+                "ROCKETSHIP_BBB_DOWNSAMPLED_ROOT",
+                str(_default_downsample_root()),
+            )
+        )
+        paths = _dataset_paths(root)
+        models = list(MULTI_MODEL_PARITY_SPECS.keys())
+        expected_maps = [
+            _matlab_map_path(paths, model_name, param)
+            for model_name, spec in MULTI_MODEL_PARITY_SPECS.items()
+            for param in spec["params"]
+        ]
+        for map_path in expected_maps:
+            self.assertTrue(map_path.exists(), _parity_error_hint(paths, models=models, expected_maps=expected_maps))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            out_cpu = tmp_path / "python_out_cpu"
+            out_auto = tmp_path / "python_out_auto"
+            sparse_roi_path = tmp_path / "roi_sparse.nii.gz"
+            roi_stride = int(os.environ.get("ROCKETSHIP_PARITY_MULTI_MODEL_ROI_STRIDE", "12"))
+            _write_sparse_roi_mask(paths["roi"], sparse_roi_path, roi_stride)
+
+            cpu_result = run_dce_pipeline(
+                _make_config(paths, out_cpu, backend="cpu", models=models, roi_path=sparse_roi_path)
+            )
+            auto_result = run_dce_pipeline(
+                _make_config(paths, out_auto, backend="auto", models=models, roi_path=sparse_roi_path)
+            )
+            self.assertEqual(cpu_result["meta"]["status"], "ok")
+            self.assertEqual(auto_result["meta"]["status"], "ok")
+
+            roi_mask = _load_nifti(sparse_roi_path)
+
+            ktrans_corr_min = float(os.environ.get("ROCKETSHIP_PARITY_MODEL_KTRANS_CORR_MIN", "0.95"))
+            ktrans_mse_max = float(os.environ.get("ROCKETSHIP_PARITY_MODEL_KTRANS_MSE_MAX", "0.01"))
+            param_corr_min = float(os.environ.get("ROCKETSHIP_PARITY_MODEL_PARAM_CORR_MIN", "0.90"))
+            param_mse_max = float(os.environ.get("ROCKETSHIP_PARITY_MODEL_PARAM_MSE_MAX", "0.02"))
+            cpu_auto_ktrans_corr_min = float(os.environ.get("ROCKETSHIP_PARITY_CPU_AUTO_KTRANS_CORR_MIN", "0.98"))
+            cpu_auto_ktrans_mse_max = float(os.environ.get("ROCKETSHIP_PARITY_CPU_AUTO_KTRANS_MSE_MAX", "0.002"))
+            cpu_auto_param_corr_min = float(os.environ.get("ROCKETSHIP_PARITY_CPU_AUTO_PARAM_CORR_MIN", "0.95"))
+            cpu_auto_param_mse_max = float(os.environ.get("ROCKETSHIP_PARITY_CPU_AUTO_PARAM_MSE_MAX", "0.01"))
+            param_ktrans_min = float(os.environ.get("ROCKETSHIP_PARITY_PARAM_KTRANS_MIN", "0.0"))
+
+            for model_name, spec in MULTI_MODEL_PARITY_SPECS.items():
+                py_cpu_ktrans = _load_nifti(out_cpu / f"Dyn-1_{model_name}_fit_Ktrans.nii.gz")
+                py_auto_ktrans = _load_nifti(out_auto / f"Dyn-1_{model_name}_fit_Ktrans.nii.gz")
+                matlab_ktrans = _load_nifti(_matlab_map_path(paths, model_name, "Ktrans"))
+
+                if _valid_voxel_count(py_cpu_ktrans, matlab_ktrans, roi_mask) >= 2:
+                    _assert_map_parity(
+                        self,
+                        py_cpu_ktrans,
+                        matlab_ktrans,
+                        roi_mask,
+                        label=f"{model_name}_ktrans_cpu_vs_matlab",
+                        corr_min=ktrans_corr_min,
+                        mse_max=ktrans_mse_max,
+                    )
+                if _valid_voxel_count(py_auto_ktrans, matlab_ktrans, roi_mask) >= 2:
+                    _assert_map_parity(
+                        self,
+                        py_auto_ktrans,
+                        matlab_ktrans,
+                        roi_mask,
+                        label=f"{model_name}_ktrans_auto_vs_matlab",
+                        corr_min=ktrans_corr_min,
+                        mse_max=ktrans_mse_max,
+                    )
+                if _valid_voxel_count(py_auto_ktrans, py_cpu_ktrans, roi_mask) >= 2:
+                    _assert_map_parity(
+                        self,
+                        py_auto_ktrans,
+                        py_cpu_ktrans,
+                        roi_mask,
+                        label=f"{model_name}_ktrans_auto_vs_cpu",
+                        corr_min=cpu_auto_ktrans_corr_min,
+                        mse_max=cpu_auto_ktrans_mse_max,
+                    )
+
+                for param in spec["params"]:
+                    if param == "Ktrans":
+                        continue
+                    py_cpu_map = _load_nifti(out_cpu / f"Dyn-1_{model_name}_fit_{param}.nii.gz")
+                    py_auto_map = _load_nifti(out_auto / f"Dyn-1_{model_name}_fit_{param}.nii.gz")
+                    matlab_map = _load_nifti(_matlab_map_path(paths, model_name, param))
+
+                    cpu_mask = (
+                        np.isfinite(py_cpu_ktrans)
+                        & np.isfinite(matlab_ktrans)
+                        & (py_cpu_ktrans > param_ktrans_min)
+                        & (matlab_ktrans > param_ktrans_min)
+                    )
+                    auto_mask = (
+                        np.isfinite(py_auto_ktrans)
+                        & np.isfinite(matlab_ktrans)
+                        & (py_auto_ktrans > param_ktrans_min)
+                        & (matlab_ktrans > param_ktrans_min)
+                    )
+                    cpu_auto_mask = (
+                        np.isfinite(py_cpu_ktrans)
+                        & np.isfinite(py_auto_ktrans)
+                        & (py_cpu_ktrans > param_ktrans_min)
+                        & (py_auto_ktrans > param_ktrans_min)
+                    )
+                    base_valid_cpu = np.isfinite(py_cpu_map) & np.isfinite(matlab_map) & (roi_mask > 0)
+                    base_valid_auto = np.isfinite(py_auto_map) & np.isfinite(matlab_map) & (roi_mask > 0)
+                    base_valid_cpu_auto = np.isfinite(py_auto_map) & np.isfinite(py_cpu_map) & (roi_mask > 0)
+
+                    cpu_mask_use = cpu_mask if np.count_nonzero(base_valid_cpu & cpu_mask) >= 2 else None
+                    auto_mask_use = auto_mask if np.count_nonzero(base_valid_auto & auto_mask) >= 2 else None
+                    cpu_auto_mask_use = cpu_auto_mask if np.count_nonzero(base_valid_cpu_auto & cpu_auto_mask) >= 2 else None
+
+                    if _valid_voxel_count(py_cpu_map, matlab_map, roi_mask, extra_mask=cpu_mask_use) >= 2:
+                        _assert_map_parity(
+                            self,
+                            py_cpu_map,
+                            matlab_map,
+                            roi_mask,
+                            label=f"{model_name}_{param}_cpu_vs_matlab",
+                            corr_min=param_corr_min,
+                            mse_max=param_mse_max,
+                            extra_mask=cpu_mask_use,
+                        )
+                    if _valid_voxel_count(py_auto_map, matlab_map, roi_mask, extra_mask=auto_mask_use) >= 2:
+                        _assert_map_parity(
+                            self,
+                            py_auto_map,
+                            matlab_map,
+                            roi_mask,
+                            label=f"{model_name}_{param}_auto_vs_matlab",
+                            corr_min=param_corr_min,
+                            mse_max=param_mse_max,
+                            extra_mask=auto_mask_use,
+                        )
+                    if _valid_voxel_count(py_auto_map, py_cpu_map, roi_mask, extra_mask=cpu_auto_mask_use) >= 2:
+                        _assert_map_parity(
+                            self,
+                            py_auto_map,
+                            py_cpu_map,
+                            roi_mask,
+                            label=f"{model_name}_{param}_auto_vs_cpu",
+                            corr_min=cpu_auto_param_corr_min,
+                            mse_max=cpu_auto_param_mse_max,
+                            extra_mask=cpu_auto_mask_use,
+                        )
+
     @unittest.skipUnless(RUN_PARITY, "Set ROCKETSHIP_RUN_PIPELINE_PARITY=1 to run dataset parity checks.")
     def test_downsample_bbb_p19_tofts_ktrans(self) -> None:
         root = Path(
@@ -162,12 +384,19 @@ class TestDcePipelineParityMetrics(unittest.TestCase):
             )
         )
         paths = _dataset_paths(root)
-        self.assertTrue(paths["matlab_tofts_ktrans"].exists(), _parity_error_hint(paths))
-        self.assertTrue(paths["matlab_tofts_ve"].exists(), _parity_error_hint(paths))
+        tofts_expected = [paths["matlab_tofts_ktrans"], paths["matlab_tofts_ve"]]
+        self.assertTrue(
+            paths["matlab_tofts_ktrans"].exists(),
+            _parity_error_hint(paths, models=["tofts"], expected_maps=tofts_expected),
+        )
+        self.assertTrue(
+            paths["matlab_tofts_ve"].exists(),
+            _parity_error_hint(paths, models=["tofts"], expected_maps=tofts_expected),
+        )
 
         with tempfile.TemporaryDirectory() as tmp:
             out_dir = Path(tmp) / "python_out"
-            result = run_dce_pipeline(_make_config(paths, out_dir))
+            result = run_dce_pipeline(_make_config(paths, out_dir, backend="auto", models=["tofts"]))
             self.assertEqual(result["meta"]["status"], "ok")
 
             py_ktrans = _load_nifti(out_dir / "Dyn-1_tofts_fit_Ktrans.nii.gz")
@@ -214,12 +443,19 @@ class TestDcePipelineParityMetrics(unittest.TestCase):
             )
         )
         paths = _dataset_paths(root)
-        self.assertTrue(paths["matlab_tofts_ktrans"].exists(), _parity_error_hint(paths))
-        self.assertTrue(paths["matlab_tofts_ve"].exists(), _parity_error_hint(paths))
+        tofts_expected = [paths["matlab_tofts_ktrans"], paths["matlab_tofts_ve"]]
+        self.assertTrue(
+            paths["matlab_tofts_ktrans"].exists(),
+            _parity_error_hint(paths, models=["tofts"], expected_maps=tofts_expected),
+        )
+        self.assertTrue(
+            paths["matlab_tofts_ve"].exists(),
+            _parity_error_hint(paths, models=["tofts"], expected_maps=tofts_expected),
+        )
 
         with tempfile.TemporaryDirectory() as tmp:
             out_dir = Path(tmp) / "python_out"
-            result = run_dce_pipeline(_make_config(paths, out_dir))
+            result = run_dce_pipeline(_make_config(paths, out_dir, backend="auto", models=["tofts"]))
             self.assertEqual(result["meta"]["status"], "ok")
 
             py_ktrans = _load_nifti(out_dir / "Dyn-1_tofts_fit_Ktrans.nii.gz")

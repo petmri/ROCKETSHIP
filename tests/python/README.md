@@ -9,7 +9,7 @@ Current focus:
 - Default execution: single-process with in-memory stage handoff.
 - Deprecated/not being ported: `neuroecon`, GUI batch queue flow, manual click-based AIF tools, ImageJ `.roi` input, email notifications.
 - Retained output compatibility: ROI spreadsheet exports (`.xls`).
-- GPUfit support is planned as an optional backend when available; CPU remains the parity baseline.
+- GPUfit/Cpufit acceleration is supported as an optional backend; CPU remains the parity baseline.
 
 ## Environment setup (macOS)
 This project is now configured to use a local `venv` at
@@ -172,13 +172,20 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python tests/python/generate_bbb_p19_downsample.py --clean --factor-x 3 --factor-y 3
 ```
 
-Generate MATLAB parity baselines (`processed/results_matlab/Dyn-1_tofts_fit_Ktrans.nii` and `Dyn-1_tofts_fit_ve.nii`).
-This is required for both downsample and full-volume parity tests if you are regenerating fixtures:
+Generate MATLAB parity baselines.
+Tofts-only (default):
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
 matlab -batch "cd('/Users/samuelbarnes/code/ROCKETSHIP'); addpath('tests/matlab'); generate_dce_tofts_parity_map('subjectRoot','/Users/samuelbarnes/code/ROCKETSHIP/test_data/synthetic/generated/bbb_p19_downsample_x3y3')"
 matlab -batch "cd('/Users/samuelbarnes/code/ROCKETSHIP'); addpath('tests/matlab'); generate_dce_tofts_parity_map('subjectRoot','/Users/samuelbarnes/code/ROCKETSHIP/test_data/BBB data p19')"
+```
+
+Multi-model baselines (for `tofts`, `ex_tofts`, `patlak`, `tissue_uptake`, `2cxm`):
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+matlab -batch "cd('/Users/samuelbarnes/code/ROCKETSHIP'); addpath('tests/matlab'); generate_dce_tofts_parity_map('subjectRoot','/Users/samuelbarnes/code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3','models',{'tofts','ex_tofts','patlak','tissue_uptake','2cxm'})"
 ```
 
 Run downsampled full-pipeline Tofts parity test (Python vs MATLAB maps for `Ktrans` and `ve`, with corr/MSE tolerances):
@@ -197,6 +204,19 @@ ROCKETSHIP_RUN_PIPELINE_PARITY=1 ROCKETSHIP_RUN_FULL_VOLUME_PARITY=1 .venv/bin/p
   tests.python.test_dce_pipeline_parity_metrics.TestDcePipelineParityMetrics.test_full_bbb_p19_tofts_ktrans
 ```
 
+Optional multi-model backend parity (CPU-only vs auto backend vs MATLAB maps).
+This is opt-in because it is heavier than the Tofts-only check:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+ROCKETSHIP_RUN_PIPELINE_PARITY=1 \
+ROCKETSHIP_RUN_MULTI_MODEL_BACKEND_PARITY=1 \
+.venv/bin/python -m unittest \
+  tests.python.test_dce_pipeline_parity_metrics.TestDcePipelineParityMetrics.test_downsample_bbb_p19_models_cpu_and_auto
+```
+
+This check is intended to expose remaining model parity gaps; tune thresholds with env vars below as needed during bring-up.
+
 Tune parity thresholds via environment variables:
 
 ```bash
@@ -208,6 +228,15 @@ ROCKETSHIP_PARITY_FULL_KTRANS_CORR_MIN=0.99
 ROCKETSHIP_PARITY_FULL_KTRANS_MSE_MAX=0.001
 ROCKETSHIP_PARITY_FULL_VE_CORR_MIN=0.97
 ROCKETSHIP_PARITY_FULL_VE_MSE_MAX=0.002
+ROCKETSHIP_PARITY_MODEL_KTRANS_CORR_MIN=0.95
+ROCKETSHIP_PARITY_MODEL_KTRANS_MSE_MAX=0.01
+ROCKETSHIP_PARITY_MODEL_PARAM_CORR_MIN=0.90
+ROCKETSHIP_PARITY_MODEL_PARAM_MSE_MAX=0.02
+ROCKETSHIP_PARITY_CPU_AUTO_KTRANS_CORR_MIN=0.98
+ROCKETSHIP_PARITY_CPU_AUTO_KTRANS_MSE_MAX=0.002
+ROCKETSHIP_PARITY_CPU_AUTO_PARAM_CORR_MIN=0.95
+ROCKETSHIP_PARITY_CPU_AUTO_PARAM_MSE_MAX=0.01
+ROCKETSHIP_PARITY_MULTI_MODEL_ROI_STRIDE=12
 ```
 
 ## Tiny settings-matrix tests (very fast)

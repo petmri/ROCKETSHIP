@@ -14,7 +14,64 @@ from unittest.mock import patch
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "python"))
 
-from dce_pipeline import DcePipelineConfig, _fit_stage_d_model, run_dce_pipeline, _run_stage_b_real, _run_stage_d_real  # noqa: E402
+from dce_pipeline import (  # noqa: E402
+    DcePipelineConfig,
+    MODEL_LAYOUTS,
+    _fit_stage_d_model,
+    _fit_stage_d_model_accelerated,
+    run_dce_pipeline,
+    _run_stage_b_real,
+    _run_stage_d_real,
+)
+
+
+class _FakeAccelModule:
+    class ModelID:
+        PATLAK = 17
+        TOFTS = 18
+        TOFTS_EXTENDED = 19
+        TISSUE_UPTAKE = 20
+        TWO_COMPARTMENT_EXCHANGE = 21
+
+    class ConstraintType:
+        LOWER_UPPER = 3
+
+    class EstimatorID:
+        LSE = 0
+
+    last_call = None
+
+    @classmethod
+    def fit_constrained(
+        cls,
+        *,
+        data,
+        weights,
+        model_id,
+        initial_parameters,
+        constraints,
+        constraint_types,
+        tolerance,
+        max_number_iterations,
+        parameters_to_fit,
+        estimator_id,
+        user_info,
+    ):
+        del weights, tolerance, max_number_iterations, parameters_to_fit, estimator_id, user_info
+        cls.last_call = {
+            "model_id": int(model_id),
+            "initial_parameters": np.asarray(initial_parameters, dtype=np.float32),
+            "constraints": np.asarray(constraints, dtype=np.float32),
+            "constraint_types": np.asarray(constraint_types, dtype=np.int32),
+        }
+        n_fits = int(np.asarray(data).shape[0])
+        n_params = int(np.asarray(initial_parameters).shape[1])
+        params = np.tile(np.arange(1, n_params + 1, dtype=np.float32), (n_fits, 1))
+        states = np.zeros((n_fits,), dtype=np.int32)
+        chi = np.full((n_fits,), 0.1, dtype=np.float32)
+        n_iterations = np.ones((n_fits,), dtype=np.int32)
+        exec_time = np.zeros((n_fits,), dtype=np.float32)
+        return params, states, chi, n_iterations, exec_time
 
 
 def _make_config(tmp_dir: Path) -> DcePipelineConfig:
@@ -325,6 +382,183 @@ class TestDcePipeline(unittest.TestCase):
         self.assertEqual(out.shape, (ct.shape[1], 7))
         self.assertTrue(np.allclose(out[:, 0], 0.2))
         self.assertTrue(np.allclose(out[:, 1], 0.3))
+
+    def test_stage_d_cpufit_failure_falls_back_to_gpufit(self) -> None:
+        ct = np.asarray(
+            [
+                [1.0, 2.0],
+                [1.1, 2.1],
+                [1.2, 2.2],
+                [1.3, 2.3],
+                [1.4, 2.4],
+            ],
+            dtype=np.float64,
+        )
+        cp = np.asarray([0.8, 0.9, 1.0, 1.1, 1.2], dtype=np.float64)
+        timer = np.asarray([0.0, 0.1, 0.2, 0.3, 0.4], dtype=np.float64)
+
+        calls: list[str] = []
+
+        def fake_accel(**kwargs):
+            backend = str(kwargs["acceleration_backend"])
+            calls.append(backend)
+            if backend == "cpufit_cpu":
+                raise RuntimeError("status = -1, message = unknown model ID")
+            if backend == "gpufit_cpu_fallback":
+                return np.full((ct.shape[1], 10), 9.0, dtype=np.float64)
+            return None
+
+        with patch("dce_pipeline._gpufit_import_available", return_value=True):
+            with patch("dce_pipeline._fit_stage_d_model_accelerated", side_effect=fake_accel):
+                out = _fit_stage_d_model(
+                    model_name="ex_tofts",
+                    ct=ct,
+                    cp_use=cp,
+                    timer=timer,
+                    prefs={},
+                    r1o=None,
+                    relaxivity=3.6,
+                    fw=0.8,
+                    stlv_use=None,
+                    sttum=None,
+                    start_injection_min=0.0,
+                    sss=None,
+                    ssstum=None,
+                    acceleration_backend="cpufit_cpu",
+                )
+
+        self.assertEqual(calls, ["cpufit_cpu", "gpufit_cpu_fallback"])
+        self.assertEqual(out.shape, (ct.shape[1], 10))
+        self.assertTrue(np.allclose(out, 9.0))
+
+    def test_stage_d_accelerated_outputs_for_supported_models(self) -> None:
+        ct = np.asarray(
+            [
+                [1.0, 2.0],
+                [1.1, 2.1],
+                [1.2, 2.2],
+                [1.3, 2.3],
+                [1.4, 2.4],
+            ],
+            dtype=np.float64,
+        )
+        cp = np.asarray([0.7, 0.8, 0.9, 1.0, 1.1], dtype=np.float64)
+        timer = np.asarray([0.0, 0.1, 0.2, 0.3, 0.4], dtype=np.float64)
+        prefs = {
+            "initial_value_ktrans": 0.11,
+            "initial_value_ve": 0.22,
+            "initial_value_vp": 0.33,
+            "initial_value_fp": 0.44,
+            "lower_limit_ktrans": 0.01,
+            "upper_limit_ktrans": 1.01,
+            "lower_limit_ve": 0.02,
+            "upper_limit_ve": 1.02,
+            "lower_limit_vp": 0.03,
+            "upper_limit_vp": 1.03,
+            "lower_limit_fp": 0.04,
+            "upper_limit_fp": 1.04,
+            "gpu_tolerance": 1e-12,
+            "gpu_max_n_iterations": 64,
+        }
+
+        cases = [
+            (
+                "tofts",
+                _FakeAccelModule.ModelID.TOFTS,
+                [0.11, 0.22],
+                [0.01, 1.01, 0.02, 1.02],
+                [1.0, 2.0, 0.1, 1.0, 1.0, 2.0, 2.0],
+            ),
+            (
+                "ex_tofts",
+                _FakeAccelModule.ModelID.TOFTS_EXTENDED,
+                [0.11, 0.22, 0.33],
+                [0.01, 1.01, 0.02, 1.02, 0.03, 1.03],
+                [1.0, 2.0, 3.0, 0.1, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0],
+            ),
+            (
+                "patlak",
+                _FakeAccelModule.ModelID.PATLAK,
+                [0.11, 0.33],
+                [0.01, 1.01, 0.03, 1.03],
+                [1.0, 2.0, 0.1, -1.0, -1.0, -1.0, -1.0],
+            ),
+            (
+                "tissue_uptake",
+                _FakeAccelModule.ModelID.TISSUE_UPTAKE,
+                [0.11, 0.33, 0.44],
+                [0.01, 1.01, 0.03, 1.03, 0.04, 1.04],
+                [1.0, 3.0, 2.0, 0.1, 1.0, 1.0, 3.0, 3.0, 2.0, 2.0],
+            ),
+            (
+                "2cxm",
+                _FakeAccelModule.ModelID.TWO_COMPARTMENT_EXCHANGE,
+                [0.11, 0.22, 0.33, 0.44],
+                [0.01, 1.01, 0.02, 1.02, 0.03, 1.03, 0.04, 1.04],
+                [1.0, 2.0, 3.0, 4.0, 0.1, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0],
+            ),
+        ]
+
+        for model_name, model_id, expected_init, expected_bounds, expected_row0 in cases:
+            with self.subTest(model=model_name):
+                _FakeAccelModule.last_call = None
+                with patch("dce_pipeline._load_fit_module_for_acceleration", return_value=_FakeAccelModule):
+                    out = _fit_stage_d_model_accelerated(
+                        model_name=model_name,
+                        ct=ct,
+                        cp_use=cp,
+                        timer=timer,
+                        prefs=prefs,
+                        acceleration_backend="cpufit_cpu",
+                    )
+
+                self.assertIsNotNone(out)
+                self.assertEqual(out.shape, (ct.shape[1], len(MODEL_LAYOUTS[model_name]["param_names"])))
+                self.assertTrue(np.allclose(np.asarray(out)[0, :], np.asarray(expected_row0, dtype=np.float64)))
+                self.assertIsNotNone(_FakeAccelModule.last_call)
+                self.assertEqual(_FakeAccelModule.last_call["model_id"], model_id)
+                self.assertTrue(
+                    np.allclose(_FakeAccelModule.last_call["initial_parameters"][0, :], np.asarray(expected_init))
+                )
+                self.assertTrue(np.allclose(_FakeAccelModule.last_call["constraints"][0, :], np.asarray(expected_bounds)))
+
+    def test_stage_d_uses_acceleration_for_new_models(self) -> None:
+        ct = np.asarray(
+            [
+                [1.0, 2.0],
+                [1.1, 2.1],
+                [1.2, 2.2],
+                [1.3, 2.3],
+            ],
+            dtype=np.float64,
+        )
+        cp = np.asarray([0.8, 0.9, 1.0, 1.1], dtype=np.float64)
+        timer = np.asarray([0.0, 0.1, 0.2, 0.3], dtype=np.float64)
+
+        for model_name in ("ex_tofts", "tissue_uptake", "2cxm"):
+            with self.subTest(model=model_name):
+                row_len = len(MODEL_LAYOUTS[model_name]["param_names"])
+                sentinel = np.full((ct.shape[1], row_len), 77.0, dtype=np.float64)
+                with patch("dce_pipeline._fit_stage_d_model_accelerated", return_value=sentinel) as mocked_accel:
+                    out = _fit_stage_d_model(
+                        model_name=model_name,
+                        ct=ct,
+                        cp_use=cp,
+                        timer=timer,
+                        prefs={},
+                        r1o=None,
+                        relaxivity=3.6,
+                        fw=0.8,
+                        stlv_use=None,
+                        sttum=None,
+                        start_injection_min=0.0,
+                        sss=None,
+                        ssstum=None,
+                        acceleration_backend="cpufit_cpu",
+                    )
+                mocked_accel.assert_called_once()
+                self.assertEqual(out.shape, (ct.shape[1], row_len))
+                self.assertTrue(np.allclose(out, 77.0))
 
     def test_stage_a_real_mode_runs_with_mocked_io(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

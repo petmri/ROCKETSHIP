@@ -196,6 +196,7 @@ MODEL_LAYOUTS: Dict[str, Dict[str, Any]] = {
 }
 
 SUPPORTED_STAGE_D_MODELS = {"tofts", "ex_tofts", "patlak", "tissue_uptake", "2cxm", "fxr", "auc"}
+ACCELERATED_STAGE_D_MODELS = {"tofts", "ex_tofts", "patlak", "tissue_uptake", "2cxm"}
 PREFERENCE_NUMERIC_CHARS = set("0123456789eE.+-*/^() ")
 
 
@@ -2026,12 +2027,24 @@ def _cpufit_import_available() -> bool:
         return False
 
 
+@lru_cache(maxsize=1)
+def _gpufit_import_available() -> bool:
+    try:
+        import pygpufit.gpufit as _  # type: ignore  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
 def _acceleration_backend_attempt_order(acceleration_backend: str) -> List[str]:
     if acceleration_backend == "none":
         return []
     backends = [acceleration_backend]
     if acceleration_backend.startswith("gpufit") and _cpufit_import_available():
         backends.append("cpufit_cpu")
+    if acceleration_backend == "cpufit_cpu" and _gpufit_import_available():
+        backends.append("gpufit_cpu_fallback")
     return backends
 
 
@@ -2045,7 +2058,7 @@ def _fit_stage_d_model_accelerated(
 ) -> Optional[np.ndarray]:
     if acceleration_backend == "none":
         return None
-    if model_name not in {"tofts", "patlak"}:
+    if model_name not in ACCELERATED_STAGE_D_MODELS:
         return None
 
     fit_module = _load_fit_module_for_acceleration(acceleration_backend)
@@ -2059,8 +2072,8 @@ def _fit_stage_d_model_accelerated(
     user_info = np.ascontiguousarray(np.concatenate([timer_f32, cp_f32], axis=0), dtype=np.float32)
 
     if model_name == "tofts":
-        model_id = int(fit_module.ModelID.TOFTS)
-        init_pair = np.array(
+        model_id_name = "TOFTS"
+        initial_row = np.array(
             [
                 float(prefs["initial_value_ktrans"]),
                 float(prefs["initial_value_ve"]),
@@ -2076,9 +2089,30 @@ def _fit_stage_d_model_accelerated(
             ],
             dtype=np.float32,
         )
-    else:
-        model_id = int(fit_module.ModelID.PATLAK)
-        init_pair = np.array(
+    elif model_name == "ex_tofts":
+        model_id_name = "TOFTS_EXTENDED"
+        initial_row = np.array(
+            [
+                float(prefs["initial_value_ktrans"]),
+                float(prefs["initial_value_ve"]),
+                float(prefs["initial_value_vp"]),
+            ],
+            dtype=np.float32,
+        )
+        bounds_row = np.array(
+            [
+                float(prefs["lower_limit_ktrans"]),
+                float(prefs["upper_limit_ktrans"]),
+                float(prefs["lower_limit_ve"]),
+                float(prefs["upper_limit_ve"]),
+                float(prefs["lower_limit_vp"]),
+                float(prefs["upper_limit_vp"]),
+            ],
+            dtype=np.float32,
+        )
+    elif model_name == "patlak":
+        model_id_name = "PATLAK"
+        initial_row = np.array(
             [
                 float(prefs["initial_value_ktrans"]),
                 float(prefs["initial_value_vp"]),
@@ -2094,17 +2128,63 @@ def _fit_stage_d_model_accelerated(
             ],
             dtype=np.float32,
         )
+    elif model_name == "tissue_uptake":
+        # GpuFit/CpuFit tissue uptake parameter order is [Ktrans, vp, fp].
+        model_id_name = "TISSUE_UPTAKE"
+        initial_row = np.array(
+            [
+                float(prefs["initial_value_ktrans"]),
+                float(prefs["initial_value_vp"]),
+                float(prefs["initial_value_fp"]),
+            ],
+            dtype=np.float32,
+        )
+        bounds_row = np.array(
+            [
+                float(prefs["lower_limit_ktrans"]),
+                float(prefs["upper_limit_ktrans"]),
+                float(prefs["lower_limit_vp"]),
+                float(prefs["upper_limit_vp"]),
+                float(prefs["lower_limit_fp"]),
+                float(prefs["upper_limit_fp"]),
+            ],
+            dtype=np.float32,
+        )
+    else:
+        model_id_name = "TWO_COMPARTMENT_EXCHANGE"
+        initial_row = np.array(
+            [
+                float(prefs["initial_value_ktrans"]),
+                float(prefs["initial_value_ve"]),
+                float(prefs["initial_value_vp"]),
+                float(prefs["initial_value_fp"]),
+            ],
+            dtype=np.float32,
+        )
+        bounds_row = np.array(
+            [
+                float(prefs["lower_limit_ktrans"]),
+                float(prefs["upper_limit_ktrans"]),
+                float(prefs["lower_limit_ve"]),
+                float(prefs["upper_limit_ve"]),
+                float(prefs["lower_limit_vp"]),
+                float(prefs["upper_limit_vp"]),
+                float(prefs["lower_limit_fp"]),
+                float(prefs["upper_limit_fp"]),
+            ],
+            dtype=np.float32,
+        )
 
-    initial_parameters = np.ascontiguousarray(np.tile(init_pair[None, :], (n_fits, 1)), dtype=np.float32)
+    try:
+        model_id = int(getattr(fit_module.ModelID, model_id_name))
+    except AttributeError as exc:
+        raise RuntimeError(f"Acceleration backend does not expose ModelID.{model_id_name}") from exc
+
+    n_params = int(initial_row.size)
+    initial_parameters = np.ascontiguousarray(np.tile(initial_row[None, :], (n_fits, 1)), dtype=np.float32)
     constraints = np.ascontiguousarray(np.tile(bounds_row[None, :], (n_fits, 1)), dtype=np.float32)
     constraint_types = np.ascontiguousarray(
-        np.array(
-            [
-                int(fit_module.ConstraintType.LOWER_UPPER),
-                int(fit_module.ConstraintType.LOWER_UPPER),
-            ],
-            dtype=np.int32,
-        )
+        np.full((n_params,), int(fit_module.ConstraintType.LOWER_UPPER), dtype=np.int32)
     )
     tolerance = float(prefs.get("gpu_tolerance", 1e-12))
     max_iterations = int(prefs.get("gpu_max_n_iterations", 200))
@@ -2132,7 +2212,7 @@ def _fit_stage_d_model_accelerated(
         chi[failed] = np.nan
 
     if model_name == "tofts":
-        out = np.full((n_fits, 7), np.nan, dtype=np.float64)
+        out = np.full((n_fits, len(MODEL_LAYOUTS["tofts"]["param_names"])), np.nan, dtype=np.float64)
         out[:, 0] = params[:, 0]
         out[:, 1] = params[:, 1]
         out[:, 2] = chi
@@ -2142,10 +2222,55 @@ def _fit_stage_d_model_accelerated(
         out[:, 6] = params[:, 1]
         return out
 
-    out = np.full((n_fits, 7), -1.0, dtype=np.float64)
+    if model_name == "ex_tofts":
+        out = np.full((n_fits, len(MODEL_LAYOUTS["ex_tofts"]["param_names"])), np.nan, dtype=np.float64)
+        out[:, 0] = params[:, 0]
+        out[:, 1] = params[:, 1]
+        out[:, 2] = params[:, 2]
+        out[:, 3] = chi
+        out[:, 4] = params[:, 0]
+        out[:, 5] = params[:, 0]
+        out[:, 6] = params[:, 1]
+        out[:, 7] = params[:, 1]
+        out[:, 8] = params[:, 2]
+        out[:, 9] = params[:, 2]
+        return out
+
+    if model_name == "patlak":
+        out = np.full((n_fits, len(MODEL_LAYOUTS["patlak"]["param_names"])), -1.0, dtype=np.float64)
+        out[:, 0] = params[:, 0]
+        out[:, 1] = params[:, 1]
+        out[:, 2] = chi
+        return out
+
+    if model_name == "tissue_uptake":
+        out = np.full((n_fits, len(MODEL_LAYOUTS["tissue_uptake"]["param_names"])), np.nan, dtype=np.float64)
+        out[:, 0] = params[:, 0]
+        out[:, 1] = params[:, 2]
+        out[:, 2] = params[:, 1]
+        out[:, 3] = chi
+        out[:, 4] = params[:, 0]
+        out[:, 5] = params[:, 0]
+        out[:, 6] = params[:, 2]
+        out[:, 7] = params[:, 2]
+        out[:, 8] = params[:, 1]
+        out[:, 9] = params[:, 1]
+        return out
+
+    out = np.full((n_fits, len(MODEL_LAYOUTS["2cxm"]["param_names"])), np.nan, dtype=np.float64)
     out[:, 0] = params[:, 0]
     out[:, 1] = params[:, 1]
-    out[:, 2] = chi
+    out[:, 2] = params[:, 2]
+    out[:, 3] = params[:, 3]
+    out[:, 4] = chi
+    out[:, 5] = params[:, 0]
+    out[:, 6] = params[:, 0]
+    out[:, 7] = params[:, 1]
+    out[:, 8] = params[:, 1]
+    out[:, 9] = params[:, 2]
+    out[:, 10] = params[:, 2]
+    out[:, 11] = params[:, 3]
+    out[:, 12] = params[:, 3]
     return out
 
 
@@ -2244,7 +2369,7 @@ def _fit_stage_d_model(
             raise ValueError("AUC fitting requires Stlv_use and Sttum arrays")
         return _fit_auc_matrix(timer, cp_use, ct, stlv_use, sttum, start_injection_min, sss, ssstum)
 
-    if acceleration_backend != "none" and model_name in {"tofts", "patlak"}:
+    if acceleration_backend != "none" and model_name in ACCELERATED_STAGE_D_MODELS:
         candidates = _acceleration_backend_attempt_order(acceleration_backend)
         for idx, backend_candidate in enumerate(candidates):
             try:

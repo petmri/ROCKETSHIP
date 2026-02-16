@@ -1,14 +1,15 @@
 function output = generate_dce_tofts_parity_map(varargin)
-% generate_dce_tofts_parity_map Build a MATLAB Tofts Ktrans parity baseline.
+% generate_dce_tofts_parity_map Build MATLAB DCE parity baselines.
 %
 % This runs parts A->B->D non-interactively on a dataset and writes
-% `<rootname>_tofts_fit_Ktrans.nii` into `outputRoot`.
+% `<rootname>_<model>_fit_*.nii` maps into `outputRoot`.
 %
 % Example:
 %   output = generate_dce_tofts_parity_map();
 %   output = generate_dce_tofts_parity_map( ...
 %       'subjectRoot', '/path/to/test_data/BBB data p19', ...
-%       'outputRoot', '/path/to/test_data/BBB data p19/processed/results_matlab');
+%       'outputRoot', '/path/to/test_data/BBB data p19/processed/results_matlab', ...
+%       'models', {'tofts','ex_tofts','patlak','tissue_uptake','2cxm'});
 
 thisFile = mfilename('fullpath');
 testsMatlabDir = fileparts(thisFile);
@@ -50,11 +51,13 @@ addParameter(p, 'steadyStateTime', -2, @isscalar);
 addParameter(p, 'hematocrit', 0.42, @isscalar);
 addParameter(p, 'snrFilter', 5.0, @isscalar);
 addParameter(p, 'relaxivity', 3.6, @isscalar);
+addParameter(p, 'models', {'tofts'}, @is_model_list);
 parse(p, varargin{:});
 
 subjectRoot = char(p.Results.subjectRoot);
 outputRoot = char(p.Results.outputRoot);
 rootname = char(p.Results.rootname);
+modelList = normalize_models(p.Results.models);
 if isempty(outputRoot)
     outputRoot = fullfile(subjectRoot, 'processed', 'results_matlab');
 end
@@ -130,7 +133,7 @@ timevectPath = '';
 
 resultsBPath = fullfile(outputRoot, ['B_' rootname 'fitted_R1info.mat']);
 dce_model = struct( ...
-    'tofts', 1, ...
+    'tofts', 0, ...
     'ex_tofts', 0, ...
     'fxr', 0, ...
     'fractal', 0, ...
@@ -140,6 +143,16 @@ dce_model = struct( ...
     'tissue_uptake', 0, ...
     'two_cxm', 0, ...
     'FXL_rr', 0);
+for i = 1:numel(modelList)
+    modelName = modelList{i};
+    if strcmp(modelName, '2cxm')
+        dce_model.two_cxm = 1;
+    elseif isfield(dce_model, modelName)
+        dce_model.(modelName) = 1;
+    else
+        error('Unsupported model requested: %s', modelName);
+    end
+end
 
 time_smoothing = 'none';
 time_smoothing_window = 0;
@@ -154,21 +167,67 @@ D_fit_voxels_func(resultsBPath, B_vars, dce_model, time_smoothing, ...
     time_smoothing_window, xy_smooth_size, number_cpus, roi_list, ...
     fit_voxels, neuroecon, outputft, false);
 
-ktransPath = fullfile(outputRoot, [rootname '_tofts_fit_Ktrans.nii']);
-if ~exist(ktransPath, 'file')
-    error('Expected Ktrans map not found: %s', ktransPath);
+missing = {};
+ktransPaths = cell(numel(modelList), 1);
+for i = 1:numel(modelList)
+    modelName = modelList{i};
+    ktransPaths{i} = fullfile(outputRoot, [rootname '_' modelName '_fit_Ktrans.nii']);
+    if ~exist(ktransPaths{i}, 'file')
+        missing{end + 1} = ktransPaths{i}; %#ok<AGROW>
+    end
+end
+if ~isempty(missing)
+    errText = sprintf('%s\n', missing{:});
+    error('Expected Ktrans map(s) not found:\n%s', errText);
 end
 
 output = struct();
 output.subjectRoot = subjectRoot;
 output.outputRoot = outputRoot;
-output.ktransPath = ktransPath;
+output.models = modelList;
+output.ktransPaths = ktransPaths;
 output.resultsAPath = resultsAPath;
 output.resultsBPath = resultsBPath;
 
-fprintf('MATLAB Tofts baseline written: %s\n', ktransPath);
+fprintf('MATLAB DCE baseline written for models: %s\n', strjoin(modelList, ', '));
 end
 
 function ok = is_text_scalar(value)
 ok = ischar(value) || (isstring(value) && isscalar(value));
+end
+
+function ok = is_model_list(value)
+ok = is_text_scalar(value) || iscellstr(value) || ...
+    (iscell(value) && all(cellfun(@is_text_scalar, value)));
+end
+
+function out = normalize_models(value)
+if is_text_scalar(value)
+    raw = {char(value)};
+elseif isstring(value)
+    raw = cellstr(value(:));
+elseif iscell(value)
+    raw = cell(size(value));
+    for i = 1:numel(value)
+        raw{i} = char(value{i});
+    end
+else
+    error('Unsupported model list input');
+end
+
+out = {};
+for i = 1:numel(raw)
+    modelName = lower(strtrim(raw{i}));
+    if isempty(modelName)
+        continue;
+    end
+    if any(strcmp(modelName, out))
+        continue;
+    end
+    out{end + 1} = modelName; %#ok<AGROW>
+end
+
+if isempty(out)
+    out = {'tofts'};
+end
 end
