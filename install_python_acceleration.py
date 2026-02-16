@@ -161,9 +161,15 @@ def _find_release(
         raise RuntimeError(f"No releases found in {repo}")
 
     if prefer_prerelease:
-        for rel in releases:
-            if bool(rel.get("prerelease", False)):
-                return rel
+        prereleases = [r for r in releases if bool(r.get("prerelease", False))]
+        if prereleases:
+            # Manual dev builds may reuse the persistent "dev-latest" tag.
+            # Prefer that channel when present so users get the latest refreshed dev asset.
+            for preferred_tag in ("dev-latest", "latest"):
+                for rel in prereleases:
+                    if str(rel.get("tag_name", "")) == preferred_tag:
+                        return rel
+            return prereleases[0]
         raise RuntimeError(
             "No prerelease release found. Use --release-tag to target a specific release."
         )
@@ -270,10 +276,14 @@ def _install_acceleration_packages(venv_python: Path, package_root: Path) -> Non
             raise RuntimeError("Could not find pyGpufit wheel or source package in release bundle")
         gpufit_target = gpufit_src
 
+    # Dependencies are installed from requirements.txt / requirements_gui.txt first.
+    # Keep those versions stable to avoid pip backtracking NumPy into incompatible versions.
+    install_base = [str(venv_python), "-m", "pip", "install", "--upgrade", "--force-reinstall", "--no-deps"]
+
     _log(f"Installing pyCpufit from {cpufit_target}")
-    _run([str(venv_python), "-m", "pip", "install", "--upgrade", "--force-reinstall", str(cpufit_target)])
+    _run([*install_base, str(cpufit_target)])
     _log(f"Installing pyGpufit from {gpufit_target}")
-    _run([str(venv_python), "-m", "pip", "install", "--upgrade", "--force-reinstall", str(gpufit_target)])
+    _run([*install_base, str(gpufit_target)])
 
 
 def _verify_install(venv_python: Path) -> None:
@@ -284,7 +294,25 @@ def _verify_install(venv_python: Path) -> None:
         "print('pygpufit:', gf.__file__); "
         "print('cuda_available:', bool(gf.cuda_available()))"
     )
-    _run([str(venv_python), "-c", code])
+    cmd = [str(venv_python), "-c", code]
+    _log("$ " + " ".join(cmd))
+    result = subprocess.run(cmd, text=True, capture_output=True)
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.returncode == 0:
+        return
+
+    if result.stderr:
+        print(result.stderr, file=sys.stderr, end="")
+
+    details = "Acceleration package import check failed."
+    combined = f"{result.stdout}\n{result.stderr}"
+    if "cpufit_constrained" in combined:
+        details += (
+            " Installed Cpufit binary is missing symbol 'cpufit_constrained' "
+            "(likely release packaging/export issue in the selected Gpufit asset)."
+        )
+    raise RuntimeError(details)
 
 
 def _ensure_venv(repo_root: Path, venv_path_arg: str, recreate: bool) -> Path:
