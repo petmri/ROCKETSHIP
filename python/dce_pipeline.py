@@ -2016,6 +2016,25 @@ def _load_fit_module_for_acceleration(acceleration_backend: str) -> Any:
     return fit_module
 
 
+@lru_cache(maxsize=1)
+def _cpufit_import_available() -> bool:
+    try:
+        import pycpufit.cpufit as _  # type: ignore  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
+def _acceleration_backend_attempt_order(acceleration_backend: str) -> List[str]:
+    if acceleration_backend == "none":
+        return []
+    backends = [acceleration_backend]
+    if acceleration_backend.startswith("gpufit") and _cpufit_import_available():
+        backends.append("cpufit_cpu")
+    return backends
+
+
 def _fit_stage_d_model_accelerated(
     model_name: str,
     ct: np.ndarray,
@@ -2226,23 +2245,38 @@ def _fit_stage_d_model(
         return _fit_auc_matrix(timer, cp_use, ct, stlv_use, sttum, start_injection_min, sss, ssstum)
 
     if acceleration_backend != "none" and model_name in {"tofts", "patlak"}:
-        try:
-            accelerated = _fit_stage_d_model_accelerated(
-                model_name=model_name,
-                ct=ct,
-                cp_use=cp_use,
-                timer=timer,
-                prefs=prefs,
-                acceleration_backend=acceleration_backend,
-            )
-            if accelerated is not None:
-                return accelerated
-        except Exception as exc:
-            print(
-                f"[DCE] Stage-D {model_name}: acceleration backend '{acceleration_backend}' unavailable "
-                f"({exc}); falling back to pure CPU.",
-                flush=True,
-            )
+        candidates = _acceleration_backend_attempt_order(acceleration_backend)
+        for idx, backend_candidate in enumerate(candidates):
+            try:
+                accelerated = _fit_stage_d_model_accelerated(
+                    model_name=model_name,
+                    ct=ct,
+                    cp_use=cp_use,
+                    timer=timer,
+                    prefs=prefs,
+                    acceleration_backend=backend_candidate,
+                )
+                if accelerated is not None:
+                    return accelerated
+                if idx + 1 < len(candidates):
+                    print(
+                        f"[DCE] Stage-D {model_name}: acceleration backend '{backend_candidate}' returned no result; "
+                        f"trying fallback acceleration backend '{candidates[idx + 1]}'.",
+                        flush=True,
+                    )
+            except Exception as exc:
+                if idx + 1 < len(candidates):
+                    print(
+                        f"[DCE] Stage-D {model_name}: acceleration backend '{backend_candidate}' unavailable "
+                        f"({exc}); trying fallback acceleration backend '{candidates[idx + 1]}'.",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"[DCE] Stage-D {model_name}: acceleration backend '{backend_candidate}' unavailable "
+                        f"({exc}); falling back to pure CPU.",
+                        flush=True,
+                    )
 
     out = np.full((ct.shape[1], row_len), np.nan, dtype=np.float64)
     for i in range(ct.shape[1]):

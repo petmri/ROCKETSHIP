@@ -14,7 +14,7 @@ from unittest.mock import patch
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "python"))
 
-from dce_pipeline import DcePipelineConfig, run_dce_pipeline, _run_stage_b_real, _run_stage_d_real  # noqa: E402
+from dce_pipeline import DcePipelineConfig, _fit_stage_d_model, run_dce_pipeline, _run_stage_b_real, _run_stage_d_real  # noqa: E402
 
 
 def _make_config(tmp_dir: Path) -> DcePipelineConfig:
@@ -225,6 +225,106 @@ class TestDcePipeline(unittest.TestCase):
                 result = run_dce_pipeline(config)
             self.assertEqual(result["stages"]["D"]["selected_backend"], "gpufit")
             self.assertEqual(result["stages"]["D"]["acceleration_backend"], "gpufit_cuda")
+
+    def test_stage_d_gpu_failure_falls_back_to_cpufit_before_cpu(self) -> None:
+        ct = np.asarray(
+            [
+                [1.0, 2.0, 3.0],
+                [1.1, 2.1, 3.1],
+                [1.2, 2.2, 3.2],
+                [1.3, 2.3, 3.3],
+                [1.4, 2.4, 3.4],
+            ],
+            dtype=np.float64,
+        )
+        cp = np.asarray([0.8, 0.9, 1.0, 1.1, 1.2], dtype=np.float64)
+        timer = np.asarray([0.0, 0.1, 0.2, 0.3, 0.4], dtype=np.float64)
+
+        calls: list[str] = []
+
+        def fake_accel(**kwargs):
+            backend = str(kwargs["acceleration_backend"])
+            calls.append(backend)
+            if backend == "gpufit_cuda":
+                raise RuntimeError("the provided PTX was compiled with an unsupported toolchain")
+            if backend == "cpufit_cpu":
+                return np.full((ct.shape[1], 7), 42.0, dtype=np.float64)
+            return None
+
+        with patch("dce_pipeline._cpufit_import_available", return_value=True):
+            with patch("dce_pipeline._fit_stage_d_model_accelerated", side_effect=fake_accel):
+                out = _fit_stage_d_model(
+                    model_name="tofts",
+                    ct=ct,
+                    cp_use=cp,
+                    timer=timer,
+                    prefs={},
+                    r1o=None,
+                    relaxivity=3.6,
+                    fw=0.8,
+                    stlv_use=None,
+                    sttum=None,
+                    start_injection_min=0.0,
+                    sss=None,
+                    ssstum=None,
+                    acceleration_backend="gpufit_cuda",
+                )
+
+        self.assertEqual(calls, ["gpufit_cuda", "cpufit_cpu"])
+        self.assertEqual(out.shape, (ct.shape[1], 7))
+        self.assertTrue(np.allclose(out, 42.0))
+
+    def test_stage_d_gpu_failure_without_cpufit_falls_back_to_cpu(self) -> None:
+        ct = np.asarray(
+            [
+                [1.0, 2.0, 3.0],
+                [1.1, 2.1, 3.1],
+                [1.2, 2.2, 3.2],
+                [1.3, 2.3, 3.3],
+                [1.4, 2.4, 3.4],
+            ],
+            dtype=np.float64,
+        )
+        cp = np.asarray([0.8, 0.9, 1.0, 1.1, 1.2], dtype=np.float64)
+        timer = np.asarray([0.0, 0.1, 0.2, 0.3, 0.4], dtype=np.float64)
+
+        accel_calls: list[str] = []
+        cpu_calls: list[int] = []
+
+        def fake_accel(**kwargs):
+            accel_calls.append(str(kwargs["acceleration_backend"]))
+            raise RuntimeError("the provided PTX was compiled with an unsupported toolchain")
+
+        def fake_cpu_fit(*args, **kwargs):
+            del args, kwargs
+            cpu_calls.append(1)
+            return np.asarray([0.2, 0.3, 0.4, 0.2, 0.2, 0.3, 0.3], dtype=np.float64)
+
+        with patch("dce_pipeline._cpufit_import_available", return_value=False):
+            with patch("dce_pipeline._fit_stage_d_model_accelerated", side_effect=fake_accel):
+                with patch("dce_pipeline._fit_model_curve", side_effect=fake_cpu_fit):
+                    out = _fit_stage_d_model(
+                        model_name="tofts",
+                        ct=ct,
+                        cp_use=cp,
+                        timer=timer,
+                        prefs={},
+                        r1o=None,
+                        relaxivity=3.6,
+                        fw=0.8,
+                        stlv_use=None,
+                        sttum=None,
+                        start_injection_min=0.0,
+                        sss=None,
+                        ssstum=None,
+                        acceleration_backend="gpufit_cuda",
+                    )
+
+        self.assertEqual(accel_calls, ["gpufit_cuda"])
+        self.assertEqual(len(cpu_calls), ct.shape[1])
+        self.assertEqual(out.shape, (ct.shape[1], 7))
+        self.assertTrue(np.allclose(out[:, 0], 0.2))
+        self.assertTrue(np.allclose(out[:, 1], 0.3))
 
     def test_stage_a_real_mode_runs_with_mocked_io(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
