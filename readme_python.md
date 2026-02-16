@@ -151,6 +151,10 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python -m unittest discover -s tests/python -p 'test_*.py'
 ```
 
+This includes Phase-1 reliability coverage such as installer asset-selection logic and
+pipeline output/event contract checks (`tests/python/test_install_python_acceleration.py`,
+`tests/python/test_dce_pipeline_contracts.py`).
+
 ### Contract parity against MATLAB baseline JSON
 
 ```bash

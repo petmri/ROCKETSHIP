@@ -52,10 +52,18 @@ python3 -m venv .venv
 - Function: `t2_linear_fast`
 - Function: `t1_fa_linear_fit`
 
-Run Python unit tests:
+Run Python reliability suite (no MATLAB required; parity-gated tests remain skipped unless explicitly enabled):
 
 ```bash
 .venv/bin/python -m unittest discover -s tests/python -p 'test_*.py'
+```
+
+Targeted Phase-1 reliability tests:
+
+```bash
+.venv/bin/python -m unittest \
+  tests.python.test_install_python_acceleration \
+  tests.python.test_dce_pipeline_contracts -v
 ```
 
 ## What it does
