@@ -19,6 +19,12 @@
 - Flattened Python module layout (`python/rocketship/*` moved to `python/*`).
 - Added Python DCE GUI v1 (PySide6) as optional frontend over CLI.
 - Added CLI stdout progress events + JSONL event log output.
+- Added Stage-D acceleration fallback chain (`gpufit -> cpufit -> pure CPU`) with regression tests.
+- Added installer auto-selection for CUDA-matched release assets (with CPU-first fallback when local CUDA is older).
+- Added Phase-1 Python reliability tests:
+  - installer CUDA/asset-selection unit tests
+  - DCE CLI output/event contract end-to-end test on tiny fixture
+- Added cross-platform Python portability CI job (Windows + macOS) while retaining PR parity checks.
 
 ## Scope guardrails for Python CLI port
 - Primary target: DCE parts `A`, `B`, and `D` as CLI workflow.

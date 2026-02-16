@@ -6,6 +6,15 @@ Recently completed
 - Added CLI overrides: --dce-preferences and repeatable --set KEY=VALUE.
 - Added Tofts ve map parity checks (downsample + optional full-volume).
 - Added GUI path/file browse dialogs and one-click tiny-fixture default run config.
+- Added Stage-D acceleration fallback chain: gpufit -> cpufit -> pure CPU.
+- Added installer hardening:
+  - prevents dependency backtracking during pyCpufit/pyGpufit install
+  - clearer error on missing cpufit_constrained export
+  - CUDA-aware release-asset auto-selection by local environment
+- Added Phase-1 Python reliability tests:
+  - installer asset-selection/CUDA detection logic tests
+  - DCE CLI output/event contract end-to-end test on tiny fixture
+- Added cross-platform Python portability CI job (Windows + macOS) while keeping parity checks on PR CI.
 
 Highest priority next
 - Complete script-level option parity audit:
@@ -27,9 +36,9 @@ Secondary
   - evaluate packaged app targets (macOS app bundle, Windows installer)
   - keep venv/dev launch path as baseline during early iterations
 - GPUfit optional install/distribution plan:
-  - define release-manifest installer flow (download matching binary by OS/arch from ironictoo/Gpufit releases)
-  - include checksum verification + import smoke test
-  - keep CPU fallback as default when GPUfit is absent
+  - expand binary coverage matrix across CUDA/runtime combinations
+  - add a machine-readable release manifest to avoid filename-parsing heuristics
+  - add CI smoke install checks against release artifacts
 - Performance pass after parity lock:
   - profile Stage D hotspots
   - investigate Python runtime gap vs MATLAB on full volume for non-accelerated models

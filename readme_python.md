@@ -213,6 +213,7 @@ CI currently runs:
 - Python unit tests
 - Python contract parity checks
 - Python downsample dataset parity check
+- Python cross-platform portability checks on Windows and macOS (non-parity mode)
 - MATLAB unit/integration checks
 - MATLAB DCE smoke/full jobs (event-dependent)
 
