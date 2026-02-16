@@ -32,5 +32,6 @@ Secondary
   - keep CPU fallback as default when GPUfit is absent
 - Performance pass after parity lock:
   - profile Stage D hotspots
-  - investigate Python runtime gap (~2x-4x vs MATLAB on full volume)
-  - evaluate GPUfit CPU path as additional fast backend option
+  - investigate Python runtime gap vs MATLAB on full volume for non-accelerated models
+  - extend acceleration beyond tofts/patlak where safe
+  - benchmark and tune cpufit/gpufit tolerance and iteration settings vs parity stability

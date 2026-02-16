@@ -65,6 +65,7 @@ Other Publications using ROCKETSHIP for a more complete list see [google scholar
 * Computer:
   * Some of the processing is very CPU intensive, a modern multi-core (≥4) processor, while not required, helps keep the processing time reasonable (heavily dependent on image matrix size).
   * (Optional) An NVIDIA GPU can be used to significantly speed up processing by using the [gpufit](https://github.com/ironictoo/Gpufit) library.
+  * Python port note: Stage-D `tofts`/`patlak` can also accelerate on CPU via `pyCpufit` when CUDA is not available (see `/Users/samuelbarnes/code/ROCKETSHIP/readme_python.md`).
 
 ## File formats
 
@@ -235,4 +236,3 @@ Listing of various programs incorporated under BSD license as part of ROCKETSHIP
 'niftitools'
 'uirecall'
 ```
-

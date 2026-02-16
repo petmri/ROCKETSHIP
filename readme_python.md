@@ -19,11 +19,45 @@ For detailed port status and todo items, see:
 
 ## Environment setup
 
+Recommended setup (default):
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+python3 install_python_acceleration.py
+```
+
+What this script does:
+- creates/reuses `.venv` (use `--recreate-venv` to rebuild)
+- installs Python requirements (including GUI by default)
+- downloads latest prerelease package from `ironictoo/Gpufit`
+- auto-detects host platform/arch and picks matching release asset
+- installs both `pyCpufit` and `pyGpufit` into the venv
+- verifies imports and reports CUDA availability
+
+Common installer options:
+- `--release-tag <tag>`: pin to a specific Gpufit release
+- `--asset-id <id>`: force specific asset id
+- `--venv-path <path>`: custom venv path
+- `--no-gui`: skip GUI dependency install
+
+### Manual setup
+
+Use this path only if you do not want to use the automated installer.
+
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
 python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip setuptools wheel
 .venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m pip install -r requirements_gui.txt
+```
+
+Manual acceleration package install (from local wheel/source paths):
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python -m pip install /path/to/pyCpufit-*.whl
+.venv/bin/python -m pip install /path/to/pyGpufit-*.whl
 ```
 
 ## Run the Python DCE CLI
@@ -78,6 +112,15 @@ Key expectations:
 - `stage_overrides` should provide TR/FA/timing parameters for parity-safe runs
 - MATLAB-style `dce_preferences.txt` defaults are loaded automatically from `/Users/samuelbarnes/code/ROCKETSHIP/dce/dce_preferences.txt` when present
 - Supported backend values: `auto`, `cpu`, `gpufit`
+- Backend selection behavior:
+  - `auto`: tries `pygpufit` with CUDA first, then `pycpufit` CPU backend, then `pygpufit` CPU fallback, then pure CPU path
+  - `cpu`: forces pure Python/Scipy CPU fitting path (no gpufit/cpufit acceleration)
+  - `gpufit`: requires `pygpufit` import and then uses CUDA when available, otherwise fallback path
+- Current acceleration coverage in Stage D:
+  - accelerated: `tofts`, `patlak`
+  - non-accelerated (currently pure CPU path): other models
+- Stage D logs backend selection on each run:
+  - `[DCE] Stage-D backend selection: requested=... selected=... acceleration=... reason=...`
 - Supported AIF curve modes: `auto`, `fitted`, `raw`, `imported`
 - Static blood-T1 override for Stage A is available via `stage_overrides.blood_t1_ms` (or `blood_t1_sec`)
 
@@ -123,6 +166,18 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 ROCKETSHIP_RUN_PIPELINE_PARITY=1 .venv/bin/python -m unittest \
   tests.python.test_dce_pipeline_parity_metrics.TestDcePipelineParityMetrics.test_downsample_bbb_p19_tofts_ktrans
 ```
+
+Optional VE parity mask threshold (measurable-Ktrans voxels only):
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+ROCKETSHIP_RUN_PIPELINE_PARITY=1 ROCKETSHIP_PARITY_VE_KTRANS_MIN=1e-6 .venv/bin/python -m unittest \
+  tests.python.test_dce_pipeline_parity_metrics.TestDcePipelineParityMetrics.test_downsample_bbb_p19_tofts_ktrans
+```
+
+Notes:
+- `ROCKETSHIP_PARITY_VE_KTRANS_MIN` default is `1e-6`
+- VE parity is evaluated only where both MATLAB and Python Ktrans exceed that threshold
 
 Optional full-volume parity (slower; reserve for occasional thorough checks):
 

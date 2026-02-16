@@ -19,6 +19,9 @@ For options in `stage_overrides`:
 - `output_dir`: output folder for maps, logs, figures, summary
 - `checkpoint_dir`: optional stage checkpoint folder
 - `backend`: `auto|cpu|gpufit`
+  - `auto`: probe in order `gpufit_cuda -> cpufit_cpu -> gpufit_cpu_fallback -> pure_cpu`
+  - `cpu`: force pure CPU fitting path (no acceleration backend)
+  - `gpufit`: require `pygpufit` import; CUDA is used when available, otherwise fallback path
 - `write_xls`: write ROI spreadsheet output
 - `aif_mode`: `auto|fitted|raw|imported`
 - `imported_aif_path`: used when imported AIF mode is selected
@@ -88,13 +91,21 @@ For options in `stage_overrides`:
 - `voxel_value_ve_RR`
 - `voxel_TolFun`, `voxel_TolX`, `voxel_MaxIter`, `voxel_MaxFunEvals`, `voxel_Robust`
 
-### GPUfit tuning (future/optional backend tuning)
+### Acceleration tuning
 - `gpu_tolerance`
 - `gpu_max_n_iterations`
 - `gpu_initial_value_ktrans`
 - `gpu_initial_value_ve`
 - `gpu_initial_value_vp`
 - `gpu_initial_value_fp`
+
+Notes:
+- Stage-D acceleration currently applies to `tofts` and `patlak`.
+- Stage summary for part D includes:
+  - `selected_backend`
+  - `acceleration_backend`
+  - `backend_reason`
+  - `backend_used`
 
 ## Notes
 - MATLAB-style numeric expressions in preferences (for example `10^-7`) are supported when loaded from `dce_preferences.txt`.
