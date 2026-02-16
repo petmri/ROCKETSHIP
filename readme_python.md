@@ -31,6 +31,8 @@ What this script does:
 - installs Python requirements (including GUI by default)
 - downloads latest prerelease package from `ironictoo/Gpufit`
 - auto-detects host platform/arch and picks matching release asset
+- detects local CUDA version (when available) and prefers the closest matching CUDA asset for your host
+- falls back to CPU asset IDs when CUDA builds are not a good local match
 - installs both `pyCpufit` and `pyGpufit` into the venv
 - verifies imports and reports CUDA availability
 

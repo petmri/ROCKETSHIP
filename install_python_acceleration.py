@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -182,9 +183,9 @@ def _asset_id_candidates_for_host() -> Tuple[str, List[str]]:
     machine = platform.machine().lower()
 
     if system == "windows" and machine in {"amd64", "x86_64"}:
-        return "windows-x64", ["windows-x64-cuda12.8", "windows-x64-cuda12.4"]
+        return "windows-x64", ["windows-x64-cuda12.8", "windows-x64-cuda12.4", "windows-x64-cpu"]
     if system == "linux" and machine in {"amd64", "x86_64"}:
-        return "linux-x64", ["linux-x64-cuda12.8", "linux-x64-cuda11.8"]
+        return "linux-x64", ["linux-x64-cuda12.8", "linux-x64-cuda11.8", "linux-x64-cpu"]
     if system == "darwin" and machine in {"x86_64", "amd64"}:
         return "macos-x64", ["macos-x64-cpu"]
     if system == "darwin" and machine in {"arm64", "aarch64"}:
@@ -193,6 +194,133 @@ def _asset_id_candidates_for_host() -> Tuple[str, List[str]]:
     raise RuntimeError(
         f"Unsupported host platform for prebuilt assets: system={system} machine={machine}"
     )
+
+
+def _parse_cuda_version_pair(text: str) -> Optional[Tuple[int, int]]:
+    match = re.search(r"(\d+)(?:\.(\d+))?", text)
+    if not match:
+        return None
+    major = int(match.group(1))
+    minor = int(match.group(2) or "0")
+    return (major, minor)
+
+
+def _format_cuda_version(version_pair: Tuple[int, int]) -> str:
+    return f"{version_pair[0]}.{version_pair[1]}"
+
+
+def _detect_local_cuda_version() -> Tuple[Optional[Tuple[int, int]], str]:
+    env_cuda = os.environ.get("CUDA_VERSION", "").strip()
+    if env_cuda:
+        parsed = _parse_cuda_version_pair(env_cuda)
+        if parsed is not None:
+            return parsed, "CUDA_VERSION"
+
+    probes: List[Tuple[List[str], str, str]] = [
+        (["nvcc", "--version"], r"release\s+(\d+)\.(\d+)", "nvcc --version"),
+        (["nvidia-smi"], r"CUDA Version:\s*(\d+)\.(\d+)", "nvidia-smi"),
+    ]
+    for cmd, pattern, source in probes:
+        try:
+            result = subprocess.run(
+                cmd,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=8,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            continue
+        if result.returncode != 0:
+            continue
+        combined = (result.stdout or "") + "\n" + (result.stderr or "")
+        match = re.search(pattern, combined, flags=re.IGNORECASE)
+        if match:
+            return (int(match.group(1)), int(match.group(2))), source
+
+    return None, "not detected"
+
+
+def _extract_host_asset_id(archive_name: str, host_key: str) -> Optional[str]:
+    lower = archive_name.lower()
+    if lower.endswith(".tar.gz"):
+        suffix_len = len(".tar.gz")
+    elif lower.endswith(".zip"):
+        suffix_len = len(".zip")
+    else:
+        return None
+
+    base = archive_name[:-suffix_len]
+    marker = f"-{host_key}"
+    idx = base.rfind(marker)
+    if idx < 0:
+        return None
+    candidate = base[idx + 1 :]
+    if not candidate.startswith(host_key):
+        return None
+    return candidate
+
+
+def _discover_host_asset_ids(release_payload: Dict[str, object], host_key: str) -> List[str]:
+    seen: set[str] = set()
+    out: List[str] = []
+    for asset in _as_asset_list(release_payload):
+        name = str(asset.get("name", ""))
+        asset_id = _extract_host_asset_id(name, host_key)
+        if not asset_id:
+            continue
+        if asset_id in seen:
+            continue
+        seen.add(asset_id)
+        out.append(asset_id)
+    return out
+
+
+def _cuda_version_from_asset_id(asset_id: str) -> Optional[Tuple[int, int]]:
+    match = re.search(r"-cuda(\d+)(?:\.(\d+))?$", asset_id, flags=re.IGNORECASE)
+    if not match:
+        return None
+    return (int(match.group(1)), int(match.group(2) or "0"))
+
+
+def _rank_host_asset_ids(asset_ids: List[str], local_cuda: Optional[Tuple[int, int]]) -> List[str]:
+    seen: set[str] = set()
+    ordered_unique: List[str] = []
+    for aid in asset_ids:
+        if aid in seen:
+            continue
+        seen.add(aid)
+        ordered_unique.append(aid)
+
+    cuda_assets: List[Tuple[str, Tuple[int, int]]] = []
+    cpu_assets: List[str] = []
+    other_assets: List[str] = []
+    for aid in ordered_unique:
+        if aid.endswith("-cpu"):
+            cpu_assets.append(aid)
+            continue
+        cuda_version = _cuda_version_from_asset_id(aid)
+        if cuda_version is not None:
+            cuda_assets.append((aid, cuda_version))
+            continue
+        other_assets.append(aid)
+
+    ordered_cuda: List[str] = []
+    if cuda_assets:
+        if local_cuda is None:
+            ordered_cuda = [aid for aid, _ in sorted(cuda_assets, key=lambda item: item[1], reverse=True)]
+        else:
+            lower_or_equal = [item for item in cuda_assets if item[1] <= local_cuda]
+            higher = [item for item in cuda_assets if item[1] > local_cuda]
+
+            if not lower_or_equal and cpu_assets:
+                ordered_cuda = [aid for aid, _ in sorted(higher, key=lambda item: item[1])]
+                return cpu_assets + ordered_cuda + other_assets
+
+            ordered_cuda.extend(aid for aid, _ in sorted(lower_or_equal, key=lambda item: item[1], reverse=True))
+            ordered_cuda.extend(aid for aid, _ in sorted(higher, key=lambda item: item[1]))
+
+    return ordered_cuda + other_assets + cpu_assets
 
 
 def _as_asset_list(release_payload: Dict[str, object]) -> List[Dict[str, object]]:
@@ -388,12 +516,7 @@ def main() -> int:
 
     try:
         host_key, auto_asset_candidates = _asset_id_candidates_for_host()
-        if args.asset_id:
-            asset_candidates = [args.asset_id]
-        else:
-            asset_candidates = auto_asset_candidates
         _log(f"Detected host: {host_key}")
-        _log(f"Asset candidates: {asset_candidates}")
 
         release = _find_release(
             repo=args.repo,
@@ -404,6 +527,26 @@ def main() -> int:
         release_tag = str(release.get("tag_name", "unknown"))
         release_name = str(release.get("name", ""))
         _log(f"Selected release: tag={release_tag} name={release_name}")
+
+        if args.asset_id:
+            asset_candidates = [args.asset_id]
+            _log(f"Asset id pinned by user: {args.asset_id}")
+        else:
+            local_cuda, cuda_source = _detect_local_cuda_version()
+            if local_cuda is not None:
+                _log(f"Detected local CUDA version: {_format_cuda_version(local_cuda)} (source: {cuda_source})")
+            else:
+                _log("Detected local CUDA version: not found")
+
+            release_host_assets = _discover_host_asset_ids(release, host_key)
+            if release_host_assets:
+                _log(f"Host-matching assets in release: {release_host_assets}")
+                asset_candidates = _rank_host_asset_ids(release_host_assets, local_cuda)
+            else:
+                _log("No host-matching assets parsed from release names; using built-in fallback list.")
+                asset_candidates = auto_asset_candidates
+
+        _log(f"Asset candidates: {asset_candidates}")
 
         asset = _pick_release_archive_asset(release, asset_candidates)
         asset_name = str(asset.get("name", ""))
