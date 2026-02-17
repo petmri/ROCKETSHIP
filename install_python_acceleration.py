@@ -209,7 +209,40 @@ def _format_cuda_version(version_pair: Tuple[int, int]) -> str:
     return f"{version_pair[0]}.{version_pair[1]}"
 
 
-def _detect_local_cuda_version() -> Tuple[Optional[Tuple[int, int]], str]:
+def _run_version_probe(
+    cmd: List[str],
+    pattern: str,
+    source: str,
+) -> Tuple[Optional[Tuple[int, int]], str]:
+    try:
+        result = subprocess.run(
+            cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None, source
+    if result.returncode != 0:
+        return None, source
+    combined = (result.stdout or "") + "\n" + (result.stderr or "")
+    match = re.search(pattern, combined, flags=re.IGNORECASE)
+    if not match:
+        return None, source
+    return (int(match.group(1)), int(match.group(2))), source
+
+
+def _detect_driver_cuda_capability() -> Tuple[Optional[Tuple[int, int]], str]:
+    # NVIDIA driver capability from `nvidia-smi` is the compatibility gate for prebuilt CUDA binaries.
+    return _run_version_probe(
+        ["nvidia-smi"],
+        r"CUDA Version:\s*(\d+)\.(\d+)",
+        "nvidia-smi",
+    )
+
+
+def _detect_toolkit_cuda_version() -> Tuple[Optional[Tuple[int, int]], str]:
     env_cuda = os.environ.get("CUDA_VERSION", "").strip()
     if env_cuda:
         parsed = _parse_cuda_version_pair(env_cuda)
@@ -218,25 +251,27 @@ def _detect_local_cuda_version() -> Tuple[Optional[Tuple[int, int]], str]:
 
     probes: List[Tuple[List[str], str, str]] = [
         (["nvcc", "--version"], r"release\s+(\d+)\.(\d+)", "nvcc --version"),
-        (["nvidia-smi"], r"CUDA Version:\s*(\d+)\.(\d+)", "nvidia-smi"),
     ]
     for cmd, pattern, source in probes:
-        try:
-            result = subprocess.run(
-                cmd,
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=8,
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-            continue
-        if result.returncode != 0:
-            continue
-        combined = (result.stdout or "") + "\n" + (result.stderr or "")
-        match = re.search(pattern, combined, flags=re.IGNORECASE)
-        if match:
-            return (int(match.group(1)), int(match.group(2))), source
+        parsed, parsed_source = _run_version_probe(cmd, pattern, source)
+        if parsed is not None:
+            return parsed, parsed_source
+
+    return None, "not detected"
+
+
+def _detect_local_cuda_version() -> Tuple[Optional[Tuple[int, int]], str]:
+    driver_cuda, driver_source = _detect_driver_cuda_capability()
+    toolkit_cuda, toolkit_source = _detect_toolkit_cuda_version()
+
+    if driver_cuda is not None:
+        # Driver capability is authoritative for runtime compatibility.
+        if toolkit_cuda is not None and toolkit_cuda > driver_cuda:
+            return driver_cuda, f"{driver_source} (capped by driver; toolkit={_format_cuda_version(toolkit_cuda)})"
+        return driver_cuda, f"{driver_source} (driver capability)"
+
+    if toolkit_cuda is not None:
+        return toolkit_cuda, f"{toolkit_source} (toolkit hint; driver capability unavailable)"
 
     return None, "not detected"
 
@@ -309,6 +344,9 @@ def _rank_host_asset_ids(asset_ids: List[str], local_cuda: Optional[Tuple[int, i
     if cuda_assets:
         if local_cuda is None:
             ordered_cuda = [aid for aid, _ in sorted(cuda_assets, key=lambda item: item[1], reverse=True)]
+            if cpu_assets:
+                # When compatibility cannot be detected, prefer CPU build over blind CUDA pick.
+                return cpu_assets + ordered_cuda + other_assets
         else:
             lower_or_equal = [item for item in cuda_assets if item[1] <= local_cuda]
             higher = [item for item in cuda_assets if item[1] > local_cuda]

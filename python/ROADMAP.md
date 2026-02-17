@@ -1,4 +1,4 @@
-# Test Roadmap
+# Python Port and Test Roadmap
 
 ## Completed
 - Core MATLAB unit test scaffold for DCE/DSC/parametric algorithms.
@@ -42,24 +42,4 @@
   - QC figure saving.
 
 ## Near-term next steps
-1. Complete MATLAB option parity audit at script level:
-   - map `script_preferences.txt` keys to Python config/stage overrides
-   - mark each key as supported, intentionally dropped, or pending
-   - add targeted tests for newly-wired option families
-2. Broaden dataset-backed DCE regression beyond current Tofts map checks:
-   - ROI `.xls` parity checks
-   - additional map/model parity (for example `patlak`, `ex_tofts`, `tissue_uptake`)
-3. Expand tiny edge-case fixture variants:
-   - low-SNR variant
-   - non-uniform timer variant
-   - harsh-bounds/low-iteration stress variant
-4. Decide whether to port currently unsupported DCE model branches:
-   - `nested`
-   - `FXL_rr`
-5. Close next DSC parity gap:
-   - add baseline + contracts for `DSC_convolution_oSVD`
-   - port `DSC_convolution_oSVD` and compare against baseline
-6. Performance pass after parity lock:
-   - investigate Python-vs-MATLAB runtime gap (`~2x-4x` on full DCE runs)
-   - profile and optimize Python Stage D hot spots
-   - evaluate GPUfit CPU backend options as an additional fast path
+See TODO in top level folder
