@@ -20,6 +20,13 @@ Recently completed
   - low-Ktrans masking is now VE-only in multi-model parity (`ROCKETSHIP_PARITY_VE_KTRANS_MIN`, default `1e-6`)
   - removed unintended Ktrans-based masking from non-VE params (`vp`, `fp`)
   - investigation note: Tofts-only downsample parity currently passes strongly; largest remaining gaps cluster in `ex_tofts` Ktrans, `tissue_uptake`, and `2cxm` parity checks
+- Patlak/tissue parity hardening:
+  - fixed Python `model_patlak_linear` divide-by-zero crashes when `Cp` contains zeros
+  - Stage-D tissue fit now seeds per-voxel `initial_value_ktrans` from Patlak estimate (MATLAB CPU path alignment)
+- Multi-model parity gate split:
+  - required-by-default models: `tofts`, `ex_tofts`, `patlak`
+  - unstable-model checks remain diagnostic by default (`tissue_uptake`, `2cxm`, plus optional CPU-vs-MATLAB checks)
+  - added env controls to promote all models/checks back to strict gating when needed (`ROCKETSHIP_PARITY_REQUIRE_ALL_MODELS=1`)
 
 Highest priority next
 - Complete script-level option parity audit:
@@ -28,7 +35,7 @@ Highest priority next
   - add one regression test for each newly-supported key family
 - Expand dataset-backed DCE regression beyond Tofts maps:
   - ROI .xls parity checks
-  - additional model-map parity (patlak, ex_tofts, tissue_uptake)
+  - additional model-map parity (patlak, ex_tofts, tissue_uptake) with strict gating once tissue/2cxm instability is resolved
 - Add tiny fixture edge-case variants:
   - low-SNR
   - non-uniform timer

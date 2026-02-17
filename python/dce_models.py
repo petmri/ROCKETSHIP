@@ -370,21 +370,31 @@ def model_patlak_linear(ct: Iterable[float], cp: Iterable[float], timer: Iterabl
     if len(t_vec) < 2:
         return [0.0, 0.0, 0.0, -1.0, -1.0, -1.0, -1.0]
 
-    y_value = [ct_vec[i] / cp_vec[i] for i in range(len(t_vec))]
-    x_value = [0.0] * len(t_vec)
+    tiny = 1e-12
+    y_value = [float("nan")] * len(t_vec)
+    x_value = [float("nan")] * len(t_vec)
 
     for t in range(len(t_vec)):
+        denom = cp_vec[t]
+        if abs(denom) > tiny:
+            y_value[t] = ct_vec[t] / denom
         if t == 0:
             m = 0.0
         else:
             tau = t_vec[: t + 1]
             cp_t = cp_vec[: t + 1]
             m = _trapz(tau, cp_t)
-        x_value[t] = m / cp_vec[t]
+        if abs(denom) > tiny:
+            x_value[t] = m / denom
 
     # Trim to after injection (MATLAB drops first element)
     x_trim = x_value[1:]
     y_trim = y_value[1:]
+    valid = [math.isfinite(x_trim[i]) and math.isfinite(y_trim[i]) for i in range(len(x_trim))]
+    x_trim = [x_trim[i] for i in range(len(x_trim)) if valid[i]]
+    y_trim = [y_trim[i] for i in range(len(y_trim)) if valid[i]]
+    if len(x_trim) < 2:
+        return [0.0, 0.0, 0.0, -1.0, -1.0, -1.0, -1.0]
 
     x_bar = sum(x_trim) / len(x_trim)
     y_bar = sum(y_trim) / len(y_trim)

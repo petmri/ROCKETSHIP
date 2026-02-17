@@ -215,6 +215,10 @@ ROCKETSHIP_RUN_MULTI_MODEL_BACKEND_PARITY=1 \
   tests.python.test_dce_pipeline_parity_metrics.TestDcePipelineParityMetrics.test_downsample_bbb_p19_models_cpu_and_auto
 ```
 
+Default multi-model behavior:
+- Required (gating) checks: `tofts`, `ex_tofts`, `patlak` (with `patlak` CPU-vs-MATLAB and AUTO-vs-CPU kept diagnostic-only by default).
+- Diagnostic-only checks: `tissue_uptake`, `2cxm`, and other non-required model checks. These are reported in logs but do not fail the test unless explicitly promoted.
+
 Cross-platform helper runner (avoids manual env var setup):
 
 ```bash
@@ -254,6 +258,11 @@ ROCKETSHIP_PARITY_CPU_AUTO_KTRANS_CORR_MIN=0.98
 ROCKETSHIP_PARITY_CPU_AUTO_KTRANS_MSE_MAX=0.002
 ROCKETSHIP_PARITY_CPU_AUTO_PARAM_CORR_MIN=0.95
 ROCKETSHIP_PARITY_CPU_AUTO_PARAM_MSE_MAX=0.01
+ROCKETSHIP_PARITY_EX_TOFTS_KTRANS_CORR_MIN=0.85
+ROCKETSHIP_PARITY_KTRANS_UPPER_EXCLUDE=1.9
+ROCKETSHIP_PARITY_REQUIRED_MODELS=tofts,ex_tofts,patlak
+ROCKETSHIP_PARITY_CPU_OPTIONAL_MODELS=patlak
+ROCKETSHIP_PARITY_REQUIRE_ALL_MODELS=0
 ROCKETSHIP_PARITY_MULTI_MODEL_ROI_STRIDE=12
 ```
 

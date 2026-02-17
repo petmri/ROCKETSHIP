@@ -1985,7 +1985,23 @@ def _fit_model_curve(
     if model_name == "patlak":
         return np.asarray(model_patlak_linear(ct_list, cp_list, timer_list), dtype=np.float64)
     if model_name == "tissue_uptake":
-        return np.asarray(model_tissue_uptake_fit(ct_list, cp_list, timer_list, prefs), dtype=np.float64)
+        prefs_local = dict(prefs)
+        # MATLAB CPU path seeds tissue-uptake fits with a quick Patlak estimate per voxel.
+        try:
+            patlak_estimate = model_patlak_linear(ct_list, cp_list, timer_list)
+            ktrans_guess = float(patlak_estimate[0])
+            vp_guess = float(patlak_estimate[1])
+            if math.isfinite(ktrans_guess):
+                lo = float(prefs_local.get("lower_limit_ktrans", 1e-7))
+                hi = float(prefs_local.get("upper_limit_ktrans", 2.0))
+                prefs_local["initial_value_ktrans"] = min(max(ktrans_guess, lo), hi)
+            if math.isfinite(vp_guess):
+                lo_vp = float(prefs_local.get("lower_limit_vp", 1e-3))
+                hi_vp = float(prefs_local.get("upper_limit_vp", 1.0))
+                prefs_local["initial_value_vp"] = min(max(vp_guess, lo_vp), hi_vp)
+        except Exception:
+            pass
+        return np.asarray(model_tissue_uptake_fit(ct_list, cp_list, timer_list, prefs_local), dtype=np.float64)
     if model_name == "2cxm":
         return np.asarray(model_2cxm_fit(ct_list, cp_list, timer_list, prefs), dtype=np.float64)
     if model_name == "fxr":
