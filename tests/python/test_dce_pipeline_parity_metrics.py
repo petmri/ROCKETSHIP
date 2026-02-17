@@ -31,6 +31,10 @@ MULTI_MODEL_PARITY_SPECS = {
 }
 
 
+def _parity_log(message: str) -> None:
+    print(f"[PARITY] {message}", flush=True)
+
+
 def _dataset_paths(root: Path) -> dict:
     processed = root / "processed"
     matlab_ktrans = processed / "results_matlab" / "Dyn-1_tofts_fit_Ktrans.nii"
@@ -210,14 +214,44 @@ def _assert_map_parity(
     corr_min: float,
     mse_max: float,
     extra_mask: np.ndarray | None = None,
-) -> None:
+) -> dict:
     m = _metrics(py_map, matlab_map, roi_mask, extra_mask=extra_mask)
     summary = (
         f"{label}: n={m['n']}, corr={m['corr']:.6f}, mse={m['mse']:.6f}, "
         f"mae={m['mae']:.6f}, p95_abs_err={m['p95_abs_err']:.6f}"
     )
+    _parity_log(summary)
     testcase.assertGreaterEqual(m["corr"], corr_min, f"{summary} (corr_min={corr_min})")
     testcase.assertLessEqual(m["mse"], mse_max, f"{summary} (mse_max={mse_max})")
+    return m
+
+
+def _assert_map_parity_if_enough(
+    testcase: unittest.TestCase,
+    lhs: np.ndarray,
+    rhs: np.ndarray,
+    roi_mask: np.ndarray,
+    *,
+    label: str,
+    corr_min: float,
+    mse_max: float,
+    extra_mask: np.ndarray | None = None,
+) -> bool:
+    n_valid = _valid_voxel_count(lhs, rhs, roi_mask, extra_mask=extra_mask)
+    if n_valid < 2:
+        _parity_log(f"{label}: skipped (valid_voxels={n_valid})")
+        return False
+    _assert_map_parity(
+        testcase,
+        lhs,
+        rhs,
+        roi_mask,
+        label=label,
+        corr_min=corr_min,
+        mse_max=mse_max,
+        extra_mask=extra_mask,
+    )
+    return True
 
 
 class TestDcePipelineParityMetrics(unittest.TestCase):
@@ -249,6 +283,10 @@ class TestDcePipelineParityMetrics(unittest.TestCase):
             out_auto = tmp_path / "python_out_auto"
             sparse_roi_path = tmp_path / "roi_sparse.nii.gz"
             roi_stride = int(os.environ.get("ROCKETSHIP_PARITY_MULTI_MODEL_ROI_STRIDE", "12"))
+            _parity_log(
+                "starting multi-model backend parity: "
+                f"root={paths['root']} roi_stride={roi_stride} models={models}"
+            )
             _write_sparse_roi_mask(paths["roi"], sparse_roi_path, roi_stride)
 
             cpu_result = run_dce_pipeline(
@@ -270,43 +308,60 @@ class TestDcePipelineParityMetrics(unittest.TestCase):
             cpu_auto_ktrans_mse_max = float(os.environ.get("ROCKETSHIP_PARITY_CPU_AUTO_KTRANS_MSE_MAX", "0.002"))
             cpu_auto_param_corr_min = float(os.environ.get("ROCKETSHIP_PARITY_CPU_AUTO_PARAM_CORR_MIN", "0.95"))
             cpu_auto_param_mse_max = float(os.environ.get("ROCKETSHIP_PARITY_CPU_AUTO_PARAM_MSE_MAX", "0.01"))
-            param_ktrans_min = float(os.environ.get("ROCKETSHIP_PARITY_PARAM_KTRANS_MIN", "0.0"))
+            ve_ktrans_min = float(os.environ.get("ROCKETSHIP_PARITY_VE_KTRANS_MIN", "1e-6"))
+            failures: list[str] = []
+
+            def run_check(
+                lhs: np.ndarray,
+                rhs: np.ndarray,
+                *,
+                label: str,
+                corr_min: float,
+                mse_max: float,
+                extra_mask: np.ndarray | None = None,
+            ) -> None:
+                try:
+                    _assert_map_parity_if_enough(
+                        self,
+                        lhs,
+                        rhs,
+                        roi_mask,
+                        label=label,
+                        corr_min=corr_min,
+                        mse_max=mse_max,
+                        extra_mask=extra_mask,
+                    )
+                except AssertionError as exc:
+                    failures.append(f"{label}: {exc}")
+                    _parity_log(f"{label}: FAILED")
 
             for model_name, spec in MULTI_MODEL_PARITY_SPECS.items():
+                _parity_log(f"model={model_name}: running checks")
                 py_cpu_ktrans = _load_nifti(out_cpu / f"Dyn-1_{model_name}_fit_Ktrans.nii.gz")
                 py_auto_ktrans = _load_nifti(out_auto / f"Dyn-1_{model_name}_fit_Ktrans.nii.gz")
                 matlab_ktrans = _load_nifti(_matlab_map_path(paths, model_name, "Ktrans"))
 
-                if _valid_voxel_count(py_cpu_ktrans, matlab_ktrans, roi_mask) >= 2:
-                    _assert_map_parity(
-                        self,
-                        py_cpu_ktrans,
-                        matlab_ktrans,
-                        roi_mask,
-                        label=f"{model_name}_ktrans_cpu_vs_matlab",
-                        corr_min=ktrans_corr_min,
-                        mse_max=ktrans_mse_max,
-                    )
-                if _valid_voxel_count(py_auto_ktrans, matlab_ktrans, roi_mask) >= 2:
-                    _assert_map_parity(
-                        self,
-                        py_auto_ktrans,
-                        matlab_ktrans,
-                        roi_mask,
-                        label=f"{model_name}_ktrans_auto_vs_matlab",
-                        corr_min=ktrans_corr_min,
-                        mse_max=ktrans_mse_max,
-                    )
-                if _valid_voxel_count(py_auto_ktrans, py_cpu_ktrans, roi_mask) >= 2:
-                    _assert_map_parity(
-                        self,
-                        py_auto_ktrans,
-                        py_cpu_ktrans,
-                        roi_mask,
-                        label=f"{model_name}_ktrans_auto_vs_cpu",
-                        corr_min=cpu_auto_ktrans_corr_min,
-                        mse_max=cpu_auto_ktrans_mse_max,
-                    )
+                run_check(
+                    py_cpu_ktrans,
+                    matlab_ktrans,
+                    label=f"{model_name}_ktrans_cpu_vs_matlab",
+                    corr_min=ktrans_corr_min,
+                    mse_max=ktrans_mse_max,
+                )
+                run_check(
+                    py_auto_ktrans,
+                    matlab_ktrans,
+                    label=f"{model_name}_ktrans_auto_vs_matlab",
+                    corr_min=ktrans_corr_min,
+                    mse_max=ktrans_mse_max,
+                )
+                run_check(
+                    py_auto_ktrans,
+                    py_cpu_ktrans,
+                    label=f"{model_name}_ktrans_auto_vs_cpu",
+                    corr_min=cpu_auto_ktrans_corr_min,
+                    mse_max=cpu_auto_ktrans_mse_max,
+                )
 
                 for param in spec["params"]:
                     if param == "Ktrans":
@@ -315,65 +370,75 @@ class TestDcePipelineParityMetrics(unittest.TestCase):
                     py_auto_map = _load_nifti(out_auto / f"Dyn-1_{model_name}_fit_{param}.nii.gz")
                     matlab_map = _load_nifti(_matlab_map_path(paths, model_name, param))
 
-                    cpu_mask = (
-                        np.isfinite(py_cpu_ktrans)
-                        & np.isfinite(matlab_ktrans)
-                        & (py_cpu_ktrans > param_ktrans_min)
-                        & (matlab_ktrans > param_ktrans_min)
-                    )
-                    auto_mask = (
-                        np.isfinite(py_auto_ktrans)
-                        & np.isfinite(matlab_ktrans)
-                        & (py_auto_ktrans > param_ktrans_min)
-                        & (matlab_ktrans > param_ktrans_min)
-                    )
-                    cpu_auto_mask = (
-                        np.isfinite(py_cpu_ktrans)
-                        & np.isfinite(py_auto_ktrans)
-                        & (py_cpu_ktrans > param_ktrans_min)
-                        & (py_auto_ktrans > param_ktrans_min)
-                    )
+                    param_use_ktrans_mask = param.lower() == "ve"
+                    if param_use_ktrans_mask:
+                        cpu_mask = (
+                            np.isfinite(py_cpu_ktrans)
+                            & np.isfinite(matlab_ktrans)
+                            & (py_cpu_ktrans > ve_ktrans_min)
+                            & (matlab_ktrans > ve_ktrans_min)
+                        )
+                        auto_mask = (
+                            np.isfinite(py_auto_ktrans)
+                            & np.isfinite(matlab_ktrans)
+                            & (py_auto_ktrans > ve_ktrans_min)
+                            & (matlab_ktrans > ve_ktrans_min)
+                        )
+                        cpu_auto_mask = (
+                            np.isfinite(py_cpu_ktrans)
+                            & np.isfinite(py_auto_ktrans)
+                            & (py_cpu_ktrans > ve_ktrans_min)
+                            & (py_auto_ktrans > ve_ktrans_min)
+                        )
+                    else:
+                        cpu_mask = None
+                        auto_mask = None
+                        cpu_auto_mask = None
                     base_valid_cpu = np.isfinite(py_cpu_map) & np.isfinite(matlab_map) & (roi_mask > 0)
                     base_valid_auto = np.isfinite(py_auto_map) & np.isfinite(matlab_map) & (roi_mask > 0)
                     base_valid_cpu_auto = np.isfinite(py_auto_map) & np.isfinite(py_cpu_map) & (roi_mask > 0)
 
-                    cpu_mask_use = cpu_mask if np.count_nonzero(base_valid_cpu & cpu_mask) >= 2 else None
-                    auto_mask_use = auto_mask if np.count_nonzero(base_valid_auto & auto_mask) >= 2 else None
-                    cpu_auto_mask_use = cpu_auto_mask if np.count_nonzero(base_valid_cpu_auto & cpu_auto_mask) >= 2 else None
+                    if param_use_ktrans_mask:
+                        cpu_mask_use = cpu_mask if np.count_nonzero(base_valid_cpu & cpu_mask) >= 2 else None
+                        auto_mask_use = auto_mask if np.count_nonzero(base_valid_auto & auto_mask) >= 2 else None
+                        cpu_auto_mask_use = cpu_auto_mask if np.count_nonzero(base_valid_cpu_auto & cpu_auto_mask) >= 2 else None
+                    else:
+                        cpu_mask_use = None
+                        auto_mask_use = None
+                        cpu_auto_mask_use = None
 
-                    if _valid_voxel_count(py_cpu_map, matlab_map, roi_mask, extra_mask=cpu_mask_use) >= 2:
-                        _assert_map_parity(
-                            self,
-                            py_cpu_map,
-                            matlab_map,
-                            roi_mask,
-                            label=f"{model_name}_{param}_cpu_vs_matlab",
-                            corr_min=param_corr_min,
-                            mse_max=param_mse_max,
-                            extra_mask=cpu_mask_use,
-                        )
-                    if _valid_voxel_count(py_auto_map, matlab_map, roi_mask, extra_mask=auto_mask_use) >= 2:
-                        _assert_map_parity(
-                            self,
-                            py_auto_map,
-                            matlab_map,
-                            roi_mask,
-                            label=f"{model_name}_{param}_auto_vs_matlab",
-                            corr_min=param_corr_min,
-                            mse_max=param_mse_max,
-                            extra_mask=auto_mask_use,
-                        )
-                    if _valid_voxel_count(py_auto_map, py_cpu_map, roi_mask, extra_mask=cpu_auto_mask_use) >= 2:
-                        _assert_map_parity(
-                            self,
-                            py_auto_map,
-                            py_cpu_map,
-                            roi_mask,
-                            label=f"{model_name}_{param}_auto_vs_cpu",
-                            corr_min=cpu_auto_param_corr_min,
-                            mse_max=cpu_auto_param_mse_max,
-                            extra_mask=cpu_auto_mask_use,
-                        )
+                    run_check(
+                        py_cpu_map,
+                        matlab_map,
+                        label=f"{model_name}_{param}_cpu_vs_matlab",
+                        corr_min=param_corr_min,
+                        mse_max=param_mse_max,
+                        extra_mask=cpu_mask_use,
+                    )
+                    run_check(
+                        py_auto_map,
+                        matlab_map,
+                        label=f"{model_name}_{param}_auto_vs_matlab",
+                        corr_min=param_corr_min,
+                        mse_max=param_mse_max,
+                        extra_mask=auto_mask_use,
+                    )
+                    run_check(
+                        py_auto_map,
+                        py_cpu_map,
+                        label=f"{model_name}_{param}_auto_vs_cpu",
+                        corr_min=cpu_auto_param_corr_min,
+                        mse_max=cpu_auto_param_mse_max,
+                        extra_mask=cpu_auto_mask_use,
+                    )
+
+            _parity_log("completed multi-model backend parity")
+            if failures:
+                failure_text = "\n\n".join(failures)
+                self.fail(
+                    "multi-model parity checks failed; see details below:\n"
+                    f"{failure_text}"
+                )
 
     @unittest.skipUnless(RUN_PARITY, "Set ROCKETSHIP_RUN_PIPELINE_PARITY=1 to run dataset parity checks.")
     def test_downsample_bbb_p19_tofts_ktrans(self) -> None:

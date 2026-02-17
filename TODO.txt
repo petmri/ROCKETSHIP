@@ -15,6 +15,11 @@ Recently completed
   - installer asset-selection/CUDA detection logic tests
   - DCE CLI output/event contract end-to-end test on tiny fixture
 - Added cross-platform Python portability CI job (Windows + macOS) while keeping parity checks on PR CI.
+- Multi-model parity usability + masking fixes:
+  - multi-model parity test now reports all model/check failures in one run (no fail-fast on first model)
+  - low-Ktrans masking is now VE-only in multi-model parity (`ROCKETSHIP_PARITY_VE_KTRANS_MIN`, default `1e-6`)
+  - removed unintended Ktrans-based masking from non-VE params (`vp`, `fp`)
+  - investigation note: Tofts-only downsample parity currently passes strongly; largest remaining gaps cluster in `ex_tofts` Ktrans, `tissue_uptake`, and `2cxm` parity checks
 
 Highest priority next
 - Complete script-level option parity audit:

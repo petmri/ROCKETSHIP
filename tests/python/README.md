@@ -215,6 +215,24 @@ ROCKETSHIP_RUN_MULTI_MODEL_BACKEND_PARITY=1 \
   tests.python.test_dce_pipeline_parity_metrics.TestDcePipelineParityMetrics.test_downsample_bbb_p19_models_cpu_and_auto
 ```
 
+Cross-platform helper runner (avoids manual env var setup):
+
+```bash
+cd /path/to/ROCKETSHIP
+python tests/python/run_dce_parity.py --suite multi-model
+```
+
+Examples:
+
+```bash
+python tests/python/run_dce_parity.py --suite tofts-downsample
+python tests/python/run_dce_parity.py --suite tofts-full --full-root "/path/to/ROCKETSHIP/test_data/BBB data p19"
+python tests/python/run_dce_parity.py --suite multi-model --dataset-root "/path/to/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3" --roi-stride 12
+python tests/python/run_dce_parity.py --suite multi-model --show-warnings
+```
+
+The runner suppresses deprecation warnings by default to keep parity output readable.
+
 This check is intended to expose remaining model parity gaps; tune thresholds with env vars below as needed during bring-up.
 
 Tune parity thresholds via environment variables:
