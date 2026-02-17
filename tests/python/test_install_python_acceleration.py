@@ -42,7 +42,7 @@ class TestInstallPythonAcceleration(unittest.TestCase):
             "linux-x64-cpu",
         ]
         ranked = installer._rank_host_asset_ids(asset_ids, None)
-        self.assertEqual(ranked, ["linux-x64-cuda12.8", "linux-x64-cuda11.8", "linux-x64-cpu"])
+        self.assertEqual(ranked, ["linux-x64-cpu", "linux-x64-cuda12.8", "linux-x64-cuda11.8"])
 
     def test_discover_host_asset_ids_from_release_assets(self) -> None:
         release_payload = {
@@ -61,7 +61,7 @@ class TestInstallPythonAcceleration(unittest.TestCase):
         with patch.dict(os.environ, {"CUDA_VERSION": "12.4"}, clear=False):
             version, source = installer._detect_local_cuda_version()
         self.assertEqual(version, (12, 4))
-        self.assertEqual(source, "CUDA_VERSION")
+        self.assertIn("CUDA_VERSION", source)
 
     def test_detect_local_cuda_version_from_nvcc_output(self) -> None:
         fake_nvcc = subprocess.CompletedProcess(
@@ -78,10 +78,29 @@ class TestInstallPythonAcceleration(unittest.TestCase):
         )
 
         with patch.dict(os.environ, {"CUDA_VERSION": ""}, clear=False):
-            with patch("install_python_acceleration.subprocess.run", side_effect=[fake_nvcc, fake_smi]):
+            with patch("install_python_acceleration.subprocess.run", side_effect=[fake_smi, fake_nvcc]):
                 version, source = installer._detect_local_cuda_version()
         self.assertEqual(version, (12, 4))
-        self.assertEqual(source, "nvcc --version")
+        self.assertIn("nvcc --version", source)
+
+    def test_detect_local_cuda_version_caps_toolkit_to_driver(self) -> None:
+        fake_smi = subprocess.CompletedProcess(
+            args=["nvidia-smi"],
+            returncode=0,
+            stdout="CUDA Version: 12.4",
+            stderr="",
+        )
+        fake_nvcc = subprocess.CompletedProcess(
+            args=["nvcc", "--version"],
+            returncode=0,
+            stdout="Cuda compilation tools, release 12.8, V12.8.0",
+            stderr="",
+        )
+        with patch.dict(os.environ, {"CUDA_VERSION": ""}, clear=False):
+            with patch("install_python_acceleration.subprocess.run", side_effect=[fake_smi, fake_nvcc]):
+                version, source = installer._detect_local_cuda_version()
+        self.assertEqual(version, (12, 4))
+        self.assertIn("capped by driver", source)
 
     def test_find_release_prefers_dev_latest_prerelease_tag(self) -> None:
         releases_payload = [
