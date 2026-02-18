@@ -18,6 +18,7 @@ from dce_models import (
     model_2cxm_fit,
     model_extended_tofts_fit,
     model_fxr_fit,
+    model_patlak_fit,
     model_patlak_linear,
     model_tissue_uptake_fit,
     model_tofts_fit,
@@ -1849,7 +1850,58 @@ def _stage_d_fit_prefs(config: DcePipelineConfig) -> Dict[str, Any]:
         "gpu_initial_value_vp": _safe_float(_stage_override(config, "gpu_initial_value_vp", 0.02), 0.02),
         "gpu_initial_value_fp": _safe_float(_stage_override(config, "gpu_initial_value_fp", 0.2), 0.2),
         "fxr_fw": _safe_float(_stage_override(config, "fxr_fw", 0.8), 0.8),
+        # Optional model-specific overrides to tune unstable models without impacting others.
+        "2cxm_lower_limit_ktrans": _stage_override(config, "voxel_lower_limit_ktrans_2cxm", 1e-7),
+        "2cxm_upper_limit_ktrans": _stage_override(config, "voxel_upper_limit_ktrans_2cxm", 2.0),
+        "2cxm_initial_value_ktrans": _stage_override(config, "voxel_initial_value_ktrans_2cxm", 2e-4),
+        "2cxm_lower_limit_ve": _stage_override(config, "voxel_lower_limit_ve_2cxm", 0.05),
+        "2cxm_upper_limit_ve": _stage_override(config, "voxel_upper_limit_ve_2cxm", 1.0),
+        "2cxm_initial_value_ve": _stage_override(config, "voxel_initial_value_ve_2cxm", 0.15),
+        "2cxm_lower_limit_vp": _stage_override(config, "voxel_lower_limit_vp_2cxm", 1e-3),
+        "2cxm_upper_limit_vp": _stage_override(config, "voxel_upper_limit_vp_2cxm", 1.0),
+        "2cxm_initial_value_vp": _stage_override(config, "voxel_initial_value_vp_2cxm", 0.02),
+        "2cxm_lower_limit_fp": _stage_override(config, "voxel_lower_limit_fp_2cxm", 1e-3),
+        "2cxm_upper_limit_fp": _stage_override(config, "voxel_upper_limit_fp_2cxm", 20.0),
+        "2cxm_initial_value_fp": _stage_override(config, "voxel_initial_value_fp_2cxm", 0.35),
+        "2cxm_max_nfev": _stage_override(config, "voxel_MaxFunEvals_2cxm", 140),
+        "2cxm_max_iter": _stage_override(config, "voxel_MaxIter_2cxm", 140),
+        "2cxm_robust": _stage_override(config, "voxel_Robust_2cxm", None),
+        "tissue_uptake_lower_limit_ktrans": _stage_override(config, "voxel_lower_limit_ktrans_tissue_uptake", 1e-7),
+        "tissue_uptake_upper_limit_ktrans": _stage_override(config, "voxel_upper_limit_ktrans_tissue_uptake", 2.0),
+        "tissue_uptake_initial_value_ktrans": _stage_override(config, "voxel_initial_value_ktrans_tissue_uptake", 2e-4),
+        "tissue_uptake_lower_limit_vp": _stage_override(config, "voxel_lower_limit_vp_tissue_uptake", 1e-3),
+        "tissue_uptake_upper_limit_vp": _stage_override(config, "voxel_upper_limit_vp_tissue_uptake", 1.0),
+        "tissue_uptake_initial_value_vp": _stage_override(config, "voxel_initial_value_vp_tissue_uptake", 0.02),
+        "tissue_uptake_lower_limit_fp": _stage_override(config, "voxel_lower_limit_fp_tissue_uptake", 1e-3),
+        "tissue_uptake_upper_limit_fp": _stage_override(config, "voxel_upper_limit_fp_tissue_uptake", 20.0),
+        "tissue_uptake_initial_value_fp": _stage_override(config, "voxel_initial_value_fp_tissue_uptake", 0.35),
+        "tissue_uptake_lower_limit_tp": _stage_override(config, "voxel_lower_limit_tp_tissue_uptake", 0.0),
+        "tissue_uptake_upper_limit_tp": _stage_override(config, "voxel_upper_limit_tp_tissue_uptake", 1.5),
+        "tissue_uptake_initial_value_tp": _stage_override(config, "voxel_initial_value_tp_tissue_uptake", 0.12),
+        "tissue_uptake_max_nfev": _stage_override(config, "voxel_MaxFunEvals_tissue_uptake", 120),
+        "tissue_uptake_max_iter": _stage_override(config, "voxel_MaxIter_tissue_uptake", 120),
+        "tissue_uptake_robust": _stage_override(config, "voxel_Robust_tissue_uptake", None),
     }
+
+
+def _apply_model_specific_prefs(prefs: Dict[str, Any], model_name: str) -> Dict[str, Any]:
+    out = dict(prefs)
+    prefix = f"{model_name}_"
+    for key, raw in prefs.items():
+        if not key.startswith(prefix):
+            continue
+        base = key[len(prefix) :]
+        if raw is None:
+            continue
+        if base in {"max_iter", "max_nfev", "gpu_max_n_iterations"}:
+            try:
+                out[base] = int(float(raw))
+            except Exception:
+                continue
+        else:
+            parsed = _parse_numeric_token(raw)
+            out[base] = float(parsed) if parsed is not None else raw
+    return out
 
 
 def _stage_d_selected_models(config: DcePipelineConfig) -> Tuple[List[str], List[str]]:
@@ -1979,13 +2031,16 @@ def _fit_model_curve(
     timer_list = [float(v) for v in timer]
 
     if model_name == "tofts":
-        return np.asarray(model_tofts_fit(ct_list, cp_list, timer_list, prefs), dtype=np.float64)
+        prefs_local = _apply_model_specific_prefs(prefs, "tofts")
+        return np.asarray(model_tofts_fit(ct_list, cp_list, timer_list, prefs_local), dtype=np.float64)
     if model_name == "ex_tofts":
-        return np.asarray(model_extended_tofts_fit(ct_list, cp_list, timer_list, prefs), dtype=np.float64)
+        prefs_local = _apply_model_specific_prefs(prefs, "ex_tofts")
+        return np.asarray(model_extended_tofts_fit(ct_list, cp_list, timer_list, prefs_local), dtype=np.float64)
     if model_name == "patlak":
-        return np.asarray(model_patlak_linear(ct_list, cp_list, timer_list), dtype=np.float64)
+        prefs_local = _apply_model_specific_prefs(prefs, "patlak")
+        return np.asarray(model_patlak_fit(ct_list, cp_list, timer_list, prefs_local), dtype=np.float64)
     if model_name == "tissue_uptake":
-        prefs_local = dict(prefs)
+        prefs_local = _apply_model_specific_prefs(prefs, "tissue_uptake")
         # MATLAB CPU path seeds tissue-uptake fits with a quick Patlak estimate per voxel.
         try:
             patlak_estimate = model_patlak_linear(ct_list, cp_list, timer_list)
@@ -1999,11 +2054,26 @@ def _fit_model_curve(
                 lo_vp = float(prefs_local.get("lower_limit_vp", 1e-3))
                 hi_vp = float(prefs_local.get("upper_limit_vp", 1.0))
                 prefs_local["initial_value_vp"] = min(max(vp_guess, lo_vp), hi_vp)
+                # Use Patlak vp together with seeded ktrans/fp to initialize Tp.
+                k_seed = float(prefs_local.get("initial_value_ktrans", ktrans_guess))
+                fp_seed = float(prefs_local.get("initial_value_fp", 0.2))
+                fp_seed = max(fp_seed, k_seed * 1.25)
+                denom = fp_seed
+                if abs(fp_seed - k_seed) > 1e-12:
+                    ps_seed = (k_seed * fp_seed) / (fp_seed - k_seed)
+                    denom = fp_seed + ps_seed
+                if math.isfinite(denom) and abs(denom) > 1e-12:
+                    tp_guess = vp_guess / denom
+                    if math.isfinite(tp_guess) and tp_guess > 0.0:
+                        lo_tp = float(prefs_local.get("lower_limit_tp", 0.0))
+                        hi_tp = float(prefs_local.get("upper_limit_tp", 1e6))
+                        prefs_local["initial_value_tp"] = min(max(tp_guess, lo_tp), hi_tp)
         except Exception:
             pass
         return np.asarray(model_tissue_uptake_fit(ct_list, cp_list, timer_list, prefs_local), dtype=np.float64)
     if model_name == "2cxm":
-        return np.asarray(model_2cxm_fit(ct_list, cp_list, timer_list, prefs), dtype=np.float64)
+        prefs_local = _apply_model_specific_prefs(prefs, "2cxm")
+        return np.asarray(model_2cxm_fit(ct_list, cp_list, timer_list, prefs_local), dtype=np.float64)
     if model_name == "fxr":
         if r1o is None:
             raise ValueError("FXR fitting requires R1 baseline values")

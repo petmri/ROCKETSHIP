@@ -424,6 +424,92 @@ def model_patlak_linear(ct: Iterable[float], cp: Iterable[float], timer: Iterabl
     return [slope, intercept, sum_squared_error, -1.0, -1.0, -1.0, -1.0]
 
 
+def model_patlak_fit(
+    ct: Iterable[float],
+    cp: Iterable[float],
+    timer: Iterable[float],
+    prefs: Optional[Dict[str, float]] = None,
+) -> List[float]:
+    """Python inverse-fit counterpart of `dce/model_patlak.m`.
+
+    Mirrors MATLAB CPU behavior: linear Patlak estimate for start-point,
+    then nonlinear least-squares on the forward Patlak model.
+    """
+    ct_vec = [float(v) for v in ct]
+    cp_vec = [float(v) for v in cp]
+    t_vec = [float(v) for v in timer]
+
+    if not (len(ct_vec) == len(cp_vec) == len(t_vec)):
+        raise ValueError(
+            f"ct/cp/timer lengths differ: {len(ct_vec)} / {len(cp_vec)} / {len(t_vec)}"
+        )
+    if len(t_vec) == 0:
+        raise ValueError("ct/cp/timer must be non-empty")
+
+    settings = {
+        "lower_limit_ktrans": 1e-7,
+        "upper_limit_ktrans": 2.0,
+        "initial_value_ktrans": 2e-4,
+        "lower_limit_vp": 1e-3,
+        "upper_limit_vp": 1.0,
+        "initial_value_vp": 0.02,
+        "max_nfev": 2000,
+        "tol_fun": 1e-12,
+        "tol_x": 1e-6,
+        "robust": "off",
+    }
+    if prefs:
+        settings.update(prefs)
+
+    # Match MATLAB path: use linear Patlak estimate as nonlinear start point.
+    try:
+        estimate = model_patlak_linear(ct_vec, cp_vec, t_vec)
+        ktrans_start = float(estimate[0])
+        vp_start = float(estimate[1])
+        if math.isfinite(ktrans_start):
+            settings["initial_value_ktrans"] = ktrans_start
+        if math.isfinite(vp_start):
+            settings["initial_value_vp"] = vp_start
+    except Exception:
+        pass
+
+    def residual(params: List[float]) -> List[float]:
+        ktrans, vp = params
+        pred = model_patlak_cfit(ktrans, vp, cp_vec, t_vec)
+        return [pred[i] - ct_vec[i] for i in range(len(ct_vec))]
+
+    lb = [
+        float(settings["lower_limit_ktrans"]),
+        float(settings["lower_limit_vp"]),
+    ]
+    ub = [
+        float(settings["upper_limit_ktrans"]),
+        float(settings["upper_limit_vp"]),
+    ]
+
+    starts = [
+        [
+            float(settings["initial_value_ktrans"]),
+            float(settings["initial_value_vp"]),
+        ],
+        [
+            float(settings["initial_value_ktrans"]) * 10.0,
+            float(settings["initial_value_vp"]),
+        ],
+        [
+            float(settings["initial_value_ktrans"]) * 100.0,
+            float(settings["initial_value_vp"]),
+        ],
+    ]
+
+    lsq_kwargs = _least_squares_kwargs(settings, default_max_nfev=2000)
+    fit, sse = _best_fit_over_starts(residual, starts, lb, ub, lsq_kwargs)
+    ktrans = float(fit.x[0])
+    vp = float(fit.x[1])
+
+    return [ktrans, vp, sse, ktrans, ktrans, vp, vp]
+
+
 def model_tofts_fit(
     ct: Iterable[float],
     cp: Iterable[float],
@@ -700,21 +786,30 @@ def model_tissue_uptake_fit(
         float(settings["upper_limit_fp"]),
         float(settings["upper_limit_tp"]),
     ]
+    k_seed = float(settings["initial_value_ktrans"])
+    fp_seed = max(float(settings["initial_value_fp"]), k_seed * 1.25)
+    tp_seed = float(settings["initial_value_tp"])
+
     starts = [
         [
-            float(settings["initial_value_ktrans"]),
-            float(settings["initial_value_fp"]),
-            float(settings["initial_value_tp"]),
+            k_seed,
+            fp_seed,
+            tp_seed,
         ],
         [
-            float(settings["initial_value_ktrans"]) * 10.0,
-            float(settings["initial_value_fp"]),
-            float(settings["initial_value_tp"]),
+            k_seed * 2.0,
+            max(fp_seed * 1.5, k_seed * 1.6),
+            tp_seed,
         ],
         [
-            float(settings["initial_value_ktrans"]) * 100.0,
-            float(settings["initial_value_fp"]),
-            float(settings["initial_value_tp"]),
+            max(k_seed * 0.5, float(settings["lower_limit_ktrans"])),
+            max(fp_seed * 0.8, k_seed * 1.25),
+            min(tp_seed * 2.0, float(settings["upper_limit_tp"])),
+        ],
+        [
+            min(k_seed * 4.0, float(settings["upper_limit_ktrans"])),
+            max(fp_seed * 2.0, k_seed * 2.5),
+            tp_seed,
         ],
     ]
 

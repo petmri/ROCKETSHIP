@@ -40,6 +40,7 @@ Highest priority next
   - low-SNR
   - non-uniform timer
   - harsh bounds / low-iteration fit stress case
+- I want to add a benchmarking script that will do a full pipeline run for as many configurations as will run on a machine (matlab CPU, matlab GPUfit, python CPU, python CPUfit, python GPUfit) and compare run times. This should be python, have easy to use CLI interface, and well formatted output that present the results in an easy to read way with "white space" and carefully aligned numbers for easy comparison. 
 
 Secondary
 - Decide on nested and FXL_rr support vs explicit non-support.

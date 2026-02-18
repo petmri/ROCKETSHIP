@@ -288,9 +288,9 @@ elseif strcmp(model, 'tissue_uptake')
             constraints(1,i) = prefs.lower_limit_ktrans;
             constraints(2,i) = prefs.upper_limit_ktrans;
             constraints(3,i) = prefs.lower_limit_vp;
-            constraints(3,i) = prefs.upper_limit_vp;
-            constraints(3,i) = prefs.lower_limit_fp;
-            constraints(3,i) = prefs.upper_limit_fp;
+            constraints(4,i) = prefs.upper_limit_vp;
+            constraints(5,i) = prefs.lower_limit_fp;
+            constraints(6,i) = prefs.upper_limit_fp;
         end
         constraints_single = single(constraints);
         
@@ -966,9 +966,9 @@ elseif strcmp(model, '2cxm')
         one_parameter = parameters(3,:);
         one_parameter(states~=0) = NaN;  %vp
         parameters(3,:) = one_parameter;
-        one_parameter = parameters(3,:);
+        one_parameter = parameters(4,:);
         one_parameter(states~=0) = NaN;  %fp
-        parameters(3,:) = one_parameter;
+        parameters(4,:) = one_parameter;
         
         GG = [parameters' chi_squares'];
         % add zeros for the unknown + and - 95 CI

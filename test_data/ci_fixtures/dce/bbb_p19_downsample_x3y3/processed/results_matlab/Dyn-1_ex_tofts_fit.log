@@ -1,0 +1,63 @@
+************** User Input **************
+
+User selected part B results: 
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/B_Dyn-1fitted_R1info.mat
+User selected dce model: 
+Tofts w/ Vp
+
+User selected time smoothing model: 
+none
+
+User selected time smoothing window size: 
+     0
+
+User selected XY smooth size (sigma)
+     0
+
+Gpufit not detected. Defaulting to CPU.
+User selected number of CPU cores
+     1
+
+User selected ROI list
+ 
+User selected fit individual voxels
+     1
+
+User selected use neuroecon
+     0
+
+************** End User Input **************
+
+
+Starting Part D - Fitting Voxels/ROIs
+17-Feb-2026 14:42:31
+ 
+  
+Begin making maps for ex_tofts...
+Starting fitting for 2832 voxels...
+Gpufit not detected. Defaulting to CPU.
+Voxel fitting done
+Elapsed time is 732.881345 seconds.
+ 
+Voxel results saved to: 
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_ex_tofts_fit_Ktrans.nii
+File MD5 hash: db6f9e43459d434be9268e67b7661ae4
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_ex_tofts_fit_ve.nii
+File MD5 hash: ed05bf3cf4189d3f7706f4fe6d0e83af
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_ex_tofts_fit_vp.nii
+File MD5 hash: 695e0b80ff23e2f9072c73c91a7f41b9
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_ex_tofts_fit_sse.nii
+File MD5 hash: 9fabe8a21548b8b8ab3ecce4021a065a
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_ex_tofts_fit_ktrans_ci_low.nii
+File MD5 hash: 0b8e7fc5170950c17b0adcb671f3219f
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_ex_tofts_fit_ktrans_ci_high.nii
+File MD5 hash: 0f515cb9b107db52e2f2d268367aa64d
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_ex_tofts_fit_ve_ci_low.nii
+File MD5 hash: 401d5afabc562242fc6bbf5e661a90e3
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_ex_tofts_fit_ve_ci_high.nii
+File MD5 hash: 3d7b200045bbbfd4fad9c4b9f428dbff
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_ex_tofts_fit_vp_ci_low.nii
+File MD5 hash: f2b17f81dcecf99651dede9b2cb3ac26
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_ex_tofts_fit_vp_ci_high.nii
+File MD5 hash: 1a4f38f97dc8368c283de1e27e8ca16d
+Finished making maps for ex_tofts...

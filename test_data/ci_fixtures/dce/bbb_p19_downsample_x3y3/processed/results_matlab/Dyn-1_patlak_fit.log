@@ -1,0 +1,63 @@
+************** User Input **************
+
+User selected part B results: 
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/B_Dyn-1fitted_R1info.mat
+User selected dce model: 
+Patlak
+
+User selected time smoothing model: 
+none
+
+User selected time smoothing window size: 
+     0
+
+User selected XY smooth size (sigma)
+     0
+
+Gpufit not detected. Defaulting to CPU.
+User selected number of CPU cores
+     1
+
+User selected ROI list
+ 
+User selected fit individual voxels
+     1
+
+User selected use neuroecon
+     0
+
+************** End User Input **************
+
+
+Starting Part D - Fitting Voxels/ROIs
+17-Feb-2026 14:54:44
+ 
+  
+Begin making maps for patlak...
+Starting fitting for 2832 voxels...
+Gpufit not detected. Defaulting to CPU.
+Voxel fitting done
+Elapsed time is 319.013903 seconds.
+ 
+Voxel results saved to: 
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_patlak_fit_Ktrans.nii
+File MD5 hash: f9bc3059fe72bdd0584e585730a3ba0f
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_patlak_fit_vp.nii
+File MD5 hash: cc1ed32a350bad799de19b80f85de06c
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_patlak_fit_sse.nii
+File MD5 hash: 6a2d78285d1c4205c3acfd4b6b183a83
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_patlak_fit_ktrans_ci_low.nii
+File MD5 hash: 8f28d919dac784b556a337be290a5b2b
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_patlak_fit_ktrans_ci_high.nii
+File MD5 hash: 5fc6756dc0e8957b169e740151a8988c
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_patlak_fit_vp_ci_low.nii
+File MD5 hash: 29a896130ce470fee739c5c5a1570e78
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_patlak_fit_vp_ci_high.nii
+File MD5 hash: baddd94e937228f7ffc19aa26be0138a
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_ex_tofts_fit_ve_ci_high.nii
+File MD5 hash: 3d7b200045bbbfd4fad9c4b9f428dbff
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_ex_tofts_fit_vp_ci_low.nii
+File MD5 hash: f2b17f81dcecf99651dede9b2cb3ac26
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_ex_tofts_fit_vp_ci_high.nii
+File MD5 hash: 1a4f38f97dc8368c283de1e27e8ca16d
+Finished making maps for patlak...

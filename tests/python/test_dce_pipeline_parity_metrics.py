@@ -92,6 +92,97 @@ def _make_config(
     roi_path: Path | None = None,
 ) -> DcePipelineConfig:
     roi_use = paths["roi"] if roi_path is None else roi_path
+    stage_overrides = {
+        "rootname": "Dyn-1",
+        "stage_a_mode": "real",
+        "stage_b_mode": "real",
+        "stage_d_mode": "real",
+        "aif_curve_mode": "fitted",
+        "tr_ms": 8.29,
+        "fa_deg": 15.0,
+        "time_resolution_sec": 15.84,
+        "start_injection_min": 0.5,
+        "end_injection_min": 0.7,
+        "steady_state_start": 1,
+        "steady_state_end": 2,
+        "relaxivity": 3.6,
+        "hematocrit": 0.42,
+        "snr_filter": 5.0,
+        "time_smoothing": "none",
+        "time_smoothing_window": 0,
+        "voxel_MaxFunEvals": int(os.environ.get("ROCKETSHIP_PARITY_VOXEL_MAXFUNEVALS", "50")),
+        "voxel_MaxIter": int(os.environ.get("ROCKETSHIP_PARITY_VOXEL_MAXITER", "50")),
+    }
+
+    numeric_override_keys = {
+        "ROCKETSHIP_PARITY_VOXEL_LOWER_LIMIT_KTRANS": "voxel_lower_limit_ktrans",
+        "ROCKETSHIP_PARITY_VOXEL_UPPER_LIMIT_KTRANS": "voxel_upper_limit_ktrans",
+        "ROCKETSHIP_PARITY_VOXEL_INITIAL_VALUE_KTRANS": "voxel_initial_value_ktrans",
+        "ROCKETSHIP_PARITY_VOXEL_LOWER_LIMIT_VE": "voxel_lower_limit_ve",
+        "ROCKETSHIP_PARITY_VOXEL_UPPER_LIMIT_VE": "voxel_upper_limit_ve",
+        "ROCKETSHIP_PARITY_VOXEL_INITIAL_VALUE_VE": "voxel_initial_value_ve",
+        "ROCKETSHIP_PARITY_VOXEL_LOWER_LIMIT_VP": "voxel_lower_limit_vp",
+        "ROCKETSHIP_PARITY_VOXEL_UPPER_LIMIT_VP": "voxel_upper_limit_vp",
+        "ROCKETSHIP_PARITY_VOXEL_INITIAL_VALUE_VP": "voxel_initial_value_vp",
+        "ROCKETSHIP_PARITY_VOXEL_LOWER_LIMIT_FP": "voxel_lower_limit_fp",
+        "ROCKETSHIP_PARITY_VOXEL_UPPER_LIMIT_FP": "voxel_upper_limit_fp",
+        "ROCKETSHIP_PARITY_VOXEL_INITIAL_VALUE_FP": "voxel_initial_value_fp",
+        "ROCKETSHIP_PARITY_VOXEL_LOWER_LIMIT_TP": "voxel_lower_limit_tp",
+        "ROCKETSHIP_PARITY_VOXEL_UPPER_LIMIT_TP": "voxel_upper_limit_tp",
+        "ROCKETSHIP_PARITY_VOXEL_INITIAL_VALUE_TP": "voxel_initial_value_tp",
+        "ROCKETSHIP_PARITY_GPU_TOLERANCE": "gpu_tolerance",
+        "ROCKETSHIP_PARITY_GPU_MAX_N_ITERATIONS": "gpu_max_n_iterations",
+        # Model-specific tuning (applies only to the named model in pipeline).
+        "ROCKETSHIP_PARITY_2CXM_LOWER_LIMIT_KTRANS": "voxel_lower_limit_ktrans_2cxm",
+        "ROCKETSHIP_PARITY_2CXM_UPPER_LIMIT_KTRANS": "voxel_upper_limit_ktrans_2cxm",
+        "ROCKETSHIP_PARITY_2CXM_INITIAL_VALUE_KTRANS": "voxel_initial_value_ktrans_2cxm",
+        "ROCKETSHIP_PARITY_2CXM_LOWER_LIMIT_VE": "voxel_lower_limit_ve_2cxm",
+        "ROCKETSHIP_PARITY_2CXM_UPPER_LIMIT_VE": "voxel_upper_limit_ve_2cxm",
+        "ROCKETSHIP_PARITY_2CXM_INITIAL_VALUE_VE": "voxel_initial_value_ve_2cxm",
+        "ROCKETSHIP_PARITY_2CXM_LOWER_LIMIT_VP": "voxel_lower_limit_vp_2cxm",
+        "ROCKETSHIP_PARITY_2CXM_UPPER_LIMIT_VP": "voxel_upper_limit_vp_2cxm",
+        "ROCKETSHIP_PARITY_2CXM_INITIAL_VALUE_VP": "voxel_initial_value_vp_2cxm",
+        "ROCKETSHIP_PARITY_2CXM_LOWER_LIMIT_FP": "voxel_lower_limit_fp_2cxm",
+        "ROCKETSHIP_PARITY_2CXM_UPPER_LIMIT_FP": "voxel_upper_limit_fp_2cxm",
+        "ROCKETSHIP_PARITY_2CXM_INITIAL_VALUE_FP": "voxel_initial_value_fp_2cxm",
+        "ROCKETSHIP_PARITY_2CXM_MAXFUNEVALS": "voxel_MaxFunEvals_2cxm",
+        "ROCKETSHIP_PARITY_2CXM_MAXITER": "voxel_MaxIter_2cxm",
+        "ROCKETSHIP_PARITY_TISSUE_LOWER_LIMIT_KTRANS": "voxel_lower_limit_ktrans_tissue_uptake",
+        "ROCKETSHIP_PARITY_TISSUE_UPPER_LIMIT_KTRANS": "voxel_upper_limit_ktrans_tissue_uptake",
+        "ROCKETSHIP_PARITY_TISSUE_INITIAL_VALUE_KTRANS": "voxel_initial_value_ktrans_tissue_uptake",
+        "ROCKETSHIP_PARITY_TISSUE_LOWER_LIMIT_VP": "voxel_lower_limit_vp_tissue_uptake",
+        "ROCKETSHIP_PARITY_TISSUE_UPPER_LIMIT_VP": "voxel_upper_limit_vp_tissue_uptake",
+        "ROCKETSHIP_PARITY_TISSUE_INITIAL_VALUE_VP": "voxel_initial_value_vp_tissue_uptake",
+        "ROCKETSHIP_PARITY_TISSUE_LOWER_LIMIT_FP": "voxel_lower_limit_fp_tissue_uptake",
+        "ROCKETSHIP_PARITY_TISSUE_UPPER_LIMIT_FP": "voxel_upper_limit_fp_tissue_uptake",
+        "ROCKETSHIP_PARITY_TISSUE_INITIAL_VALUE_FP": "voxel_initial_value_fp_tissue_uptake",
+        "ROCKETSHIP_PARITY_TISSUE_LOWER_LIMIT_TP": "voxel_lower_limit_tp_tissue_uptake",
+        "ROCKETSHIP_PARITY_TISSUE_UPPER_LIMIT_TP": "voxel_upper_limit_tp_tissue_uptake",
+        "ROCKETSHIP_PARITY_TISSUE_INITIAL_VALUE_TP": "voxel_initial_value_tp_tissue_uptake",
+        "ROCKETSHIP_PARITY_TISSUE_MAXFUNEVALS": "voxel_MaxFunEvals_tissue_uptake",
+        "ROCKETSHIP_PARITY_TISSUE_MAXITER": "voxel_MaxIter_tissue_uptake",
+    }
+    for env_key, override_key in numeric_override_keys.items():
+        raw = os.environ.get(env_key, "").strip()
+        if not raw:
+            continue
+        try:
+            value = float(raw)
+            if value.is_integer():
+                value = int(value)
+            stage_overrides[override_key] = value
+        except ValueError:
+            pass
+
+    text_override_keys = {
+        "ROCKETSHIP_PARITY_2CXM_ROBUST": "voxel_Robust_2cxm",
+        "ROCKETSHIP_PARITY_TISSUE_ROBUST": "voxel_Robust_tissue_uptake",
+    }
+    for env_key, override_key in text_override_keys.items():
+        raw = os.environ.get(env_key, "").strip()
+        if raw:
+            stage_overrides[override_key] = raw
+
     return DcePipelineConfig(
         subject_source_path=paths["root"],
         subject_tp_path=paths["processed"],
@@ -105,26 +196,7 @@ def _make_config(
         t1map_files=[paths["t1map"]],
         noise_files=[paths["noise"]],
         model_flags=_model_flags(models),
-        stage_overrides={
-            "rootname": "Dyn-1",
-            "stage_a_mode": "real",
-            "stage_b_mode": "real",
-            "stage_d_mode": "real",
-            "aif_curve_mode": "fitted",
-            "tr_ms": 8.29,
-            "fa_deg": 15.0,
-            "time_resolution_sec": 15.84,
-            "start_injection_min": 0.5,
-            "end_injection_min": 0.7,
-            "steady_state_start": 1,
-            "steady_state_end": 2,
-            "relaxivity": 3.6,
-            "hematocrit": 0.42,
-            "snr_filter": 5.0,
-            "time_smoothing": "none",
-            "time_smoothing_window": 0,
-            "voxel_MaxFunEvals": 50,
-        },
+        stage_overrides=stage_overrides,
     )
 
 

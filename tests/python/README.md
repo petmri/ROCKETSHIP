@@ -237,6 +237,22 @@ python tests/python/run_dce_parity.py --suite multi-model --show-warnings
 
 The runner suppresses deprecation warnings by default to keep parity output readable.
 
+Synthetic stability sweeps for unstable models (no MATLAB required):
+
+```bash
+cd /path/to/ROCKETSHIP
+python tests/python/tune_dce_unstable_models.py --model both --curves 120 --noise-std "0,2e-4,5e-4"
+```
+
+Model-specific parity tuning env vars (applied only to the named model):
+- `ROCKETSHIP_PARITY_TISSUE_*` for `tissue_uptake`
+- `ROCKETSHIP_PARITY_2CXM_*` for `2cxm`
+
+Examples:
+- bounds/init: `..._LOWER_LIMIT_*`, `..._UPPER_LIMIT_*`, `..._INITIAL_VALUE_*`
+- optimizer: `ROCKETSHIP_PARITY_TISSUE_MAXFUNEVALS`, `ROCKETSHIP_PARITY_TISSUE_MAXITER`, `ROCKETSHIP_PARITY_TISSUE_ROBUST`
+- optimizer: `ROCKETSHIP_PARITY_2CXM_MAXFUNEVALS`, `ROCKETSHIP_PARITY_2CXM_MAXITER`, `ROCKETSHIP_PARITY_2CXM_ROBUST`
+
 This check is intended to expose remaining model parity gaps; tune thresholds with env vars below as needed during bring-up.
 
 Tune parity thresholds via environment variables:

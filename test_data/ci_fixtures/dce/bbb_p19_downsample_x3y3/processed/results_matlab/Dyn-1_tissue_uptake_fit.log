@@ -1,0 +1,63 @@
+************** User Input **************
+
+User selected part B results: 
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/B_Dyn-1fitted_R1info.mat
+User selected dce model: 
+Tissue Uptake
+
+User selected time smoothing model: 
+none
+
+User selected time smoothing window size: 
+     0
+
+User selected XY smooth size (sigma)
+     0
+
+Gpufit not detected. Defaulting to CPU.
+User selected number of CPU cores
+     1
+
+User selected ROI list
+ 
+User selected fit individual voxels
+     1
+
+User selected use neuroecon
+     0
+
+************** End User Input **************
+
+
+Starting Part D - Fitting Voxels/ROIs
+17-Feb-2026 15:00:03
+ 
+  
+Begin making maps for tissue_uptake...
+Starting fitting for 2832 voxels...
+Gpufit not detected. Defaulting to CPU.
+Voxel fitting done
+Elapsed time is 1332.226831 seconds.
+ 
+Voxel results saved to: 
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_tissue_uptake_fit_Ktrans.nii
+File MD5 hash: e8fb80c59990d3533de41644b6a01fb2
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_tissue_uptake_fit_fp.nii
+File MD5 hash: 7ae5ea170cadafb0a2abf7a29fda0bc5
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_tissue_uptake_fit_vp.nii
+File MD5 hash: 077a2c0fff3821b207f28c1a9d5f8a37
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_tissue_uptake_fit_sse.nii
+File MD5 hash: 9941bb5159c5a7a07034584509a1dee9
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_tissue_uptake_fit_ktrans_ci_low.nii
+File MD5 hash: d4f24f6aa80be47b58e9273deeaaf14e
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_tissue_uptake_fit_ktrans_ci_high.nii
+File MD5 hash: f6a5be208f63752e8fafc98b5daca589
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_tissue_uptake_fit_fp_ci_low.nii
+File MD5 hash: d1533002357ba67b34040bde42a52717
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_tissue_uptake_fit_fp_ci_high.nii
+File MD5 hash: 0fa5f598a30004df71bd462f8173f8e5
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_tissue_uptake_fit_vp_ci_low.nii
+File MD5 hash: d4483e6034de4446aa1f9a809e9596df
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_tissue_uptake_fit_vp_ci_high.nii
+File MD5 hash: 641d8aeaccdf21e7258d2da901d603f8
+Finished making maps for tissue_uptake...

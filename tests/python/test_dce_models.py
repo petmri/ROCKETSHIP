@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import random
 import sys
 import unittest
 
@@ -18,6 +19,7 @@ from rocketship import (  # noqa: E402
     model_fxr_cfit,
     model_fxr_fit,
     model_patlak_cfit,
+    model_patlak_fit,
     model_patlak_linear,
     model_tissue_uptake_cfit,
     model_tissue_uptake_fit,
@@ -224,6 +226,23 @@ class TestDceModels(unittest.TestCase):
                 msg=f"Mismatch: actual={a} expected={e}",
             )
 
+    def test_patlak_fit_recovers_forward_params_and_improves_sse(self) -> None:
+        baseline = json.loads((REPO_ROOT / "tests/contracts/baselines/matlab_reference_v1.json").read_text())
+
+        timer = baseline["dce"]["forward"]["timer"]
+        cp = baseline["dce"]["forward"]["Cp"]
+        ct = baseline["dce"]["forward"]["patlak"]
+        params = baseline["dce"]["params"]
+        ktrans_true = float(params["ktrans"])
+        vp_true = float(params["vp"])
+
+        fit_nonlinear = model_patlak_fit(ct, cp, timer)
+        fit_linear = model_patlak_linear(ct, cp, timer)
+
+        self.assertTrue(_within_tol(float(fit_nonlinear[0]), ktrans_true, atol=5e-4, rtol=0.05))
+        self.assertTrue(_within_tol(float(fit_nonlinear[1]), vp_true, atol=5e-3, rtol=0.1))
+        self.assertLessEqual(float(fit_nonlinear[2]), float(fit_linear[2]) + 1e-12)
+
     def test_tofts_fit_inverse_matches_matlab_baseline_profile(self) -> None:
         baseline = json.loads((REPO_ROOT / "tests/contracts/baselines/matlab_reference_v1.json").read_text())
         tolerances = json.loads((REPO_ROOT / "tests/contracts/tolerance_profiles.json").read_text())
@@ -327,6 +346,45 @@ class TestDceModels(unittest.TestCase):
                 _within_tol(float(a), float(e), float(tol["atol"]), float(tol["rtol"])),
                 msg=f"Mismatch: actual={a} expected={e}",
             )
+
+    def test_tissue_uptake_fit_recovers_synthetic_no_and_low_noise(self) -> None:
+        timer = [0.0, 0.05, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0, 1.4, 1.8, 2.2]
+        cp = [0.0, 0.4, 0.9, 1.2, 1.0, 0.82, 0.63, 0.49, 0.35, 0.25, 0.18]
+        ktrans_true = 0.045
+        fp_true = 0.36
+        tp_true = 0.18
+
+        clean = model_tissue_uptake_cfit(ktrans_true, fp_true, tp_true, cp, timer)
+        vp_true = (fp_true + (ktrans_true * fp_true / (fp_true - ktrans_true))) * tp_true
+
+        rng = random.Random(7)
+        for noise_std in (0.0, 2.5e-4):
+            noisy = [float(v + rng.gauss(0.0, noise_std)) for v in clean]
+            fit = model_tissue_uptake_fit(noisy, cp, timer)
+
+            self.assertTrue(_within_tol(float(fit[0]), ktrans_true, atol=2e-3, rtol=0.1))
+            self.assertTrue(_within_tol(float(fit[1]), fp_true, atol=3e-2, rtol=0.15))
+            self.assertTrue(_within_tol(float(fit[2]), vp_true, atol=2e-2, rtol=0.2))
+
+    def test_twocxm_fit_recovers_synthetic_no_and_low_noise(self) -> None:
+        timer = [0.0, 0.05, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0, 1.4, 1.8, 2.2]
+        cp = [0.0, 0.4, 0.9, 1.2, 1.0, 0.82, 0.63, 0.49, 0.35, 0.25, 0.18]
+        ktrans_true = 0.03
+        ve_true = 0.24
+        vp_true = 0.045
+        fp_true = 0.31
+
+        clean = model_2cxm_cfit(ktrans_true, ve_true, vp_true, fp_true, cp, timer)
+
+        rng = random.Random(17)
+        for noise_std in (0.0, 2.5e-4):
+            noisy = [float(v + rng.gauss(0.0, noise_std)) for v in clean]
+            fit = model_2cxm_fit(noisy, cp, timer)
+
+            self.assertTrue(_within_tol(float(fit[0]), ktrans_true, atol=4e-3, rtol=0.2))
+            self.assertTrue(_within_tol(float(fit[1]), ve_true, atol=3e-2, rtol=0.2))
+            self.assertTrue(_within_tol(float(fit[2]), vp_true, atol=1.5e-2, rtol=0.25))
+            self.assertTrue(_within_tol(float(fit[3]), fp_true, atol=3e-2, rtol=0.2))
 
 
 if __name__ == "__main__":
