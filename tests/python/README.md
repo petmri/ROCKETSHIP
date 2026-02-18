@@ -25,8 +25,29 @@ python3 -m venv .venv
 ## Script
 - `compare_with_matlab_baseline.py`
 - `generate_python_results.py`
+- `benchmark_dce_pipeline.py` (full-pipeline runtime benchmark across MATLAB/Python backends)
 - `run_dce_python_cli.py` (repo root wrapper for in-memory A->B->D pipeline)
 - `run_dce_python_gui.py` (repo root wrapper for PySide6 GUI)
+
+## Full-pipeline benchmark (fast fixture)
+Benchmark as many backend configurations as are available on the machine:
+- `matlab_cpu`, `matlab_gpufit`, `python_cpu`, `python_cpufit`, `python_gpufit`
+- unavailable configs are reported as `SKIP`
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python tests/python/benchmark_dce_pipeline.py
+```
+
+Useful options:
+
+```bash
+.venv/bin/python tests/python/benchmark_dce_pipeline.py \
+  --repeats 3 \
+  --models patlak \
+  --configs matlab_cpu,python_cpu,python_cpufit,python_gpufit \
+  --output-json /tmp/dce_bench_fast.json
+```
 
 ## First model port
 - Source: `python/dce_models.py`
