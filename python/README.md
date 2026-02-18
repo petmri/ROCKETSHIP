@@ -29,7 +29,7 @@ python3 install_python_acceleration.py
 What this script does:
 - creates/reuses `.venv` (use `--recreate-venv` to rebuild)
 - installs Python requirements (including GUI by default)
-- downloads latest prerelease package from `ironictoo/Gpufit`
+- downloads latest stable release package from `ironictoo/Gpufit`
 - auto-detects host platform/arch and picks matching release asset
 - detects local CUDA version (when available) and prefers the closest matching CUDA asset for your host
 - falls back to CPU asset IDs when CUDA builds are not a good local match

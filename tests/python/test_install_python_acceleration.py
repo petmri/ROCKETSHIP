@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import tempfile
 import subprocess
 import sys
 import unittest
@@ -59,7 +60,12 @@ class TestInstallPythonAcceleration(unittest.TestCase):
 
     def test_detect_local_cuda_version_from_environment(self) -> None:
         with patch.dict(os.environ, {"CUDA_VERSION": "12.4"}, clear=False):
-            version, source = installer._detect_local_cuda_version()
+            with patch("install_python_acceleration._detect_driver_cuda_capability", return_value=(None, "nvidia-smi")):
+                with patch(
+                    "install_python_acceleration._detect_toolkit_cuda_version",
+                    return_value=((12, 4), "CUDA_VERSION"),
+                ):
+                    version, source = installer._detect_local_cuda_version()
         self.assertEqual(version, (12, 4))
         self.assertIn("CUDA_VERSION", source)
 
@@ -102,20 +108,49 @@ class TestInstallPythonAcceleration(unittest.TestCase):
         self.assertEqual(version, (12, 4))
         self.assertIn("capped by driver", source)
 
-    def test_find_release_prefers_dev_latest_prerelease_tag(self) -> None:
+    def test_find_release_defaults_to_latest_stable_tag(self) -> None:
         releases_payload = [
             {"tag_name": "nightly-20260216", "prerelease": True, "draft": False},
+            {"tag_name": "v1.4.1", "prerelease": False, "draft": False},
             {"tag_name": "dev-20260216-abcdef12", "prerelease": True, "draft": False},
-            {"tag_name": "dev-latest", "prerelease": True, "draft": False},
+            {"tag_name": "v1.4.0", "prerelease": False, "draft": False},
         ]
         with patch("install_python_acceleration._github_json", return_value=releases_payload):
             release = installer._find_release(
                 repo="ironictoo/Gpufit",
                 release_tag=None,
-                prefer_prerelease=True,
+                prefer_prerelease=False,
                 token=None,
             )
-        self.assertEqual(release["tag_name"], "dev-latest")
+        self.assertEqual(release["tag_name"], "v1.4.1")
+
+    def test_parse_matlab_symbol_probe_output(self) -> None:
+        sample = "\n".join(
+            [
+                "noise",
+                "ROCKETSHIP_MATLAB_SYMBOL:GpufitCudaAvailableMex=1",
+                "ROCKETSHIP_MATLAB_SYMBOL:gpufit_constrained=0",
+                "ROCKETSHIP_MATLAB_SYMBOL:cpufit=1",
+            ]
+        )
+        parsed = installer._parse_matlab_symbol_probe_output(sample)
+        self.assertTrue(parsed["GpufitCudaAvailableMex"])
+        self.assertFalse(parsed["gpufit_constrained"])
+        self.assertTrue(parsed["cpufit"])
+
+    def test_collect_matlab_bundle_files(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            matlab_dir = root / "matlab"
+            matlab_dir.mkdir(parents=True, exist_ok=True)
+            (matlab_dir / "CpufitMex.mexa64").write_bytes(b"x")
+            (matlab_dir / "cpufit.m").write_text("function cpufit\n", encoding="utf-8")
+            (root / "python" / "ignore.txt").parent.mkdir(parents=True, exist_ok=True)
+            (root / "python" / "ignore.txt").write_text("y", encoding="utf-8")
+
+            files = installer._collect_matlab_bundle_files(root)
+            names = sorted(p.name for p in files)
+            self.assertEqual(names, ["CpufitMex.mexa64", "cpufit.m"])
 
 
 if __name__ == "__main__":

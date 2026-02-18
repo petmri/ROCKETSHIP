@@ -24,6 +24,9 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 GITHUB_API_BASE = "https://api.github.com"
 DEFAULT_GPUFIT_REPO = "ironictoo/Gpufit"
+MATLAB_PROBE_PREFIX = "ROCKETSHIP_MATLAB_SYMBOL:"
+MATLAB_GPUFIT_SYMBOLS = ("GpufitCudaAvailableMex", "GpufitConstrainedMex", "GpufitMex", "gpufit_constrained", "gpufit")
+MATLAB_CPUFIT_SYMBOLS = ("CpufitMex", "cpufit")
 
 
 def _log(message: str) -> None:
@@ -46,6 +49,132 @@ def _venv_root_from_python(python_path: Path) -> Path:
     if parent.name in {"bin", "Scripts"}:
         return parent.parent
     return parent
+
+
+def _print_post_install_next_steps(repo_root: Path, venv_python: Path) -> None:
+    venv_root = _venv_root_from_python(venv_python)
+    if os.name == "nt":
+        activate_cmd = f"{venv_root}\\Scripts\\activate"
+    else:
+        activate_cmd = f"source {venv_root}/bin/activate"
+    print("\n\nInstallation was successful!")
+    print("Next steps:")
+    print(f"  1) Activate env: {activate_cmd}")
+    print("  2) Run Benchmarks: python tests/python/benchmark_dce_pipeline.py")
+    print("  3) Run Python CLI: python run_dce_python_cli.py --help")
+    print("  4) Run MATLAB CLI: matlab -batch \"cd(pwd); run_dce_cli('<subject_source_path>','<subject_tp_path>');\"")
+
+
+def _probe_python_install_health(venv_python: Path) -> Dict[str, object]:
+    code = (
+        "import json\n"
+        "out = {}\n"
+        "try:\n"
+        "    import pycpufit.cpufit as cf\n"
+        "    out['pycpufit'] = True\n"
+        "    out['pycpufit_path'] = cf.__file__\n"
+        "except Exception as e:\n"
+        "    out['pycpufit'] = False\n"
+        "    out['pycpufit_error'] = str(e)\n"
+        "try:\n"
+        "    import pygpufit.gpufit as gf\n"
+        "    out['pygpufit'] = True\n"
+        "    out['pygpufit_path'] = gf.__file__\n"
+        "    out['cuda_available'] = bool(gf.cuda_available())\n"
+        "except Exception as e:\n"
+        "    out['pygpufit'] = False\n"
+        "    out['pygpufit_error'] = str(e)\n"
+        "print(json.dumps(out))\n"
+    )
+    result = subprocess.run([str(venv_python), "-c", code], check=False, capture_output=True, text=True)
+    if result.returncode != 0:
+        return {
+            "status": "FAIL",
+            "detail": (result.stderr or result.stdout or "python health probe failed").strip(),
+        }
+    try:
+        payload = json.loads((result.stdout or "").strip())
+    except Exception:
+        return {"status": "FAIL", "detail": "python health probe output parse failed"}
+
+    pycpufit_ok = bool(payload.get("pycpufit", False))
+    pygpufit_ok = bool(payload.get("pygpufit", False))
+    if not pycpufit_ok:
+        return {"status": "FAIL", "detail": f"pycpufit import error: {payload.get('pycpufit_error', 'unknown')}"}
+    if not pygpufit_ok:
+        return {"status": "FAIL", "detail": f"pygpufit import error: {payload.get('pygpufit_error', 'unknown')}"}
+
+    return {
+        "status": "PASS",
+        "detail": f"pycpufit+pygpufit import ok (cuda_available={bool(payload.get('cuda_available', False))})",
+    }
+
+
+def _probe_matlab_runtime_gpufit(repo_root: Path, matlab_cmd: str) -> Dict[str, str]:
+    if shutil.which(matlab_cmd) is None:
+        return {"status": "SKIP", "detail": f"'{matlab_cmd}' not found in PATH"}
+
+    repo_escaped = str(repo_root).replace("'", "''")
+    marker = "ROCKETSHIP_MATLAB_RUNTIME="
+    batch_expr = (
+        f"cd('{repo_escaped}'); "
+        "addpath(fullfile(pwd,'external_programs')); "
+        "if ~exist('GpufitCudaAvailableMex','file'), "
+        f"fprintf('{marker}MISS\\n'); "
+        "else, "
+        "try, avail=GpufitCudaAvailableMex; "
+        f"fprintf('{marker}OK:%d\\n', double(avail)); "
+        "catch ME, msg=ME.message; msg=strrep(msg, char(10), ' | '); "
+        f"fprintf('{marker}ERR:%s\\n', msg); "
+        "end; "
+        "end;"
+    )
+    result = subprocess.run(
+        [matlab_cmd, "-noFigureWindows", "-batch", batch_expr],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    combined = (result.stdout or "") + "\n" + (result.stderr or "")
+    line_value: Optional[str] = None
+    for line in combined.splitlines():
+        if line.startswith(marker):
+            line_value = line[len(marker) :].strip()
+            break
+
+    if line_value is None:
+        tail = " | ".join([ln.strip() for ln in combined.splitlines() if ln.strip()][-3:])
+        return {"status": "FAIL", "detail": f"runtime probe marker missing ({tail or 'no MATLAB output'})"}
+    if line_value == "MISS":
+        return {"status": "SKIP", "detail": "GpufitCudaAvailableMex not present on MATLAB path"}
+    if line_value.startswith("OK:"):
+        avail = line_value.split(":", 1)[1].strip()
+        return {"status": "PASS", "detail": f"GpufitCudaAvailableMex loaded (cuda_available={avail})"}
+    if line_value.startswith("ERR:"):
+        return {"status": "FAIL", "detail": line_value.split(":", 1)[1].strip()}
+    return {"status": "FAIL", "detail": f"unexpected runtime probe output: {line_value}"}
+
+
+def _print_post_install_health_check(
+    python_health: Dict[str, object],
+    matlab_symbol_status: Dict[str, str],
+    matlab_runtime_status: Dict[str, str],
+) -> None:
+    rows = [
+        ("Python acceleration imports", str(python_health.get("status", "FAIL")), str(python_health.get("detail", ""))),
+        ("MATLAB symbol presence", str(matlab_symbol_status.get("status", "SKIP")), str(matlab_symbol_status.get("detail", ""))),
+        ("MATLAB MEX runtime load", str(matlab_runtime_status.get("status", "SKIP")), str(matlab_runtime_status.get("detail", ""))),
+    ]
+
+    header_left = "Check"
+    header_mid = "Status"
+    left_w = max(len(header_left), *(len(r[0]) for r in rows))
+    mid_w = max(len(header_mid), *(len(r[1]) for r in rows))
+    print("\nPost-install health check")
+    print(f"  {header_left:<{left_w}}  {header_mid:<{mid_w}}  Details")
+    print(f"  {'-' * left_w}  {'-' * mid_w}  {'-' * 40}")
+    for check, status, detail in rows:
+        print(f"  {check:<{left_w}}  {status:<{mid_w}}  {detail}")
 
 
 def _github_json(url: str, token: Optional[str]) -> object:
@@ -175,7 +304,12 @@ def _find_release(
             "No prerelease release found. Use --release-tag to target a specific release."
         )
 
-    return releases[0]
+    stable_releases = [r for r in releases if not bool(r.get("prerelease", False))]
+    if stable_releases:
+        return stable_releases[0]
+    raise RuntimeError(
+        "No stable (non-prerelease) release found. Use --release-tag to target a specific release."
+    )
 
 
 def _asset_id_candidates_for_host() -> Tuple[str, List[str]]:
@@ -452,6 +586,95 @@ def _install_acceleration_packages(venv_python: Path, package_root: Path) -> Non
     _run([*install_base, str(gpufit_target)])
 
 
+def _collect_matlab_bundle_files(package_root: Path) -> List[Path]:
+    matlab_dir = package_root / "matlab"
+    if not matlab_dir.is_dir():
+        return []
+    matlab_files = sorted([p for p in matlab_dir.rglob("*") if p.is_file()])
+    # Remove README
+    matlab_files = [p for p in matlab_files if p.name.lower() != "readme.txt"]
+    return matlab_files
+
+
+def _install_matlab_bundle_files(package_root: Path, repo_root: Path) -> List[Path]:
+    bundle_files = _collect_matlab_bundle_files(package_root)
+    if not bundle_files:
+        _log("No MATLAB files found in bundle; skipping MATLAB MEX install")
+        return []
+
+    target_dir = repo_root / "external_programs"
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    installed: List[Path] = []
+    for src in bundle_files:
+        dst = target_dir / src.name
+        if dst.exists() and dst.is_file():
+            try:
+                if _sha256(dst) == _sha256(src):
+                    continue
+            except Exception:
+                pass
+        shutil.copy2(src, dst)
+        installed.append(dst)
+
+    _log(f"Installed {len(installed)} MATLAB file(s) into {target_dir}")
+    return installed
+
+
+def _parse_matlab_symbol_probe_output(output: str) -> Dict[str, bool]:
+    symbols: Dict[str, bool] = {}
+    for line in output.splitlines():
+        line = line.strip()
+        if not line.startswith(MATLAB_PROBE_PREFIX):
+            continue
+        payload = line[len(MATLAB_PROBE_PREFIX) :]
+        if "=" not in payload:
+            continue
+        name, value = payload.split("=", 1)
+        name = name.strip()
+        value = value.strip()
+        if not name:
+            continue
+        symbols[name] = value in {"1", "true", "True"}
+    return symbols
+
+
+def _probe_matlab_symbols(repo_root: Path, matlab_cmd: str) -> Dict[str, bool]:
+    if shutil.which(matlab_cmd) is None:
+        return {}
+
+    all_symbols = list(MATLAB_GPUFIT_SYMBOLS) + list(MATLAB_CPUFIT_SYMBOLS)
+    symbol_list = " ".join([f"'{s}'" for s in all_symbols])
+    repo_escaped = str(repo_root).replace("'", "''")
+    batch_expr = (
+        f"cd('{repo_escaped}'); "
+        "addpath(fullfile(pwd,'external_programs')); "
+        f"syms={{ {symbol_list} }}; "
+        "for k=1:numel(syms), fprintf('"
+        + MATLAB_PROBE_PREFIX
+        + "%s=%d\\n', syms{k}, double(exist(syms{k},'file')>0)); end;"
+    )
+
+    result = subprocess.run(
+        [matlab_cmd, "-batch", batch_expr],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    combined = (result.stdout or "") + "\n" + (result.stderr or "")
+    symbols = _parse_matlab_symbol_probe_output(combined)
+    return symbols
+
+
+def _log_matlab_symbol_status(symbols: Dict[str, bool]) -> None:
+    if not symbols:
+        _log("MATLAB symbol probe unavailable")
+        return
+    for name in list(MATLAB_GPUFIT_SYMBOLS) + list(MATLAB_CPUFIT_SYMBOLS):
+        status = bool(symbols.get(name, False))
+        _log(f"MATLAB symbol {name}: {'found' if status else 'missing'}")
+
+
 def _verify_install(venv_python: Path) -> None:
     code = (
         "import pycpufit.cpufit as cf; "
@@ -503,7 +726,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Set up ROCKETSHIP Python environment and install pyCpufit/pyGpufit "
-            "from ironictoo/Gpufit release assets."
+            "from ironictoo/Gpufit release assets, plus optional MATLAB MEX files."
         )
     )
     parser.add_argument(
@@ -514,7 +737,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--release-tag",
         default=None,
-        help="Install from a specific GitHub release tag (default: latest prerelease).",
+        help=(
+            "Release tag to install. Practical choices: omit this flag for latest stable tag, "
+            "or set '--release-tag dev-latest' for the dev channel. "
+            "Syntax is the exact tag string, for example '--release-tag v1.4.1' or '--release-tag dev-latest'."
+        ),
     )
     parser.add_argument(
         "--asset-id",
@@ -544,6 +771,27 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip SHA256 verification even if SHA256SUMS.txt is present.",
     )
+    parser.add_argument(
+        "--skip-matlab-mex",
+        action="store_true",
+        help="Skip installation of MATLAB files from the release bundle.",
+    )
+    parser.add_argument(
+        "--matlab-cmd",
+        default="matlab",
+        help="MATLAB command used for post-install symbol probing (default: matlab).",
+    )
+    parser.add_argument(
+        "--require-matlab-gpufit",
+        action="store_true",
+        default=True,
+        help="Fail install if MATLAB Gpufit symbols are missing after install/probe (default: on).",
+    )
+    parser.add_argument(
+        "--allow-missing-matlab-gpufit",
+        action="store_true",
+        help="Do not fail when MATLAB Gpufit symbols are missing (temporary escape hatch).",
+    )
     return parser.parse_args()
 
 
@@ -559,7 +807,7 @@ def main() -> int:
         release = _find_release(
             repo=args.repo,
             release_tag=args.release_tag,
-            prefer_prerelease=(args.release_tag is None),
+            prefer_prerelease=False,
             token=token,
         )
         release_tag = str(release.get("tag_name", "unknown"))
@@ -643,10 +891,48 @@ def main() -> int:
             _log(f"Using extracted package root: {package_root}")
 
             _install_acceleration_packages(python_in_venv, package_root)
+            if not args.skip_matlab_mex:
+                _install_matlab_bundle_files(package_root, repo_root)
 
         _verify_install(python_in_venv)
+
+        matlab_symbols: Dict[str, bool] = {}
+        if args.skip_matlab_mex:
+            _log("MATLAB MEX install skipped by user")
+        else:
+            matlab_symbols = _probe_matlab_symbols(repo_root, args.matlab_cmd)
+            _log_matlab_symbol_status(matlab_symbols)
+            require_matlab_gpufit = bool(args.require_matlab_gpufit) and (not bool(args.allow_missing_matlab_gpufit))
+            if require_matlab_gpufit:
+                missing = [name for name in MATLAB_GPUFIT_SYMBOLS if not bool(matlab_symbols.get(name, False))]
+                if missing:
+                    raise RuntimeError(
+                        "Required MATLAB Gpufit symbols were not detected in external_programs: "
+                        + ", ".join(missing)
+                        + ". Update the release bundle to include MATLAB GPUfit MEX wrappers/binaries, "
+                        "or rerun with --allow-missing-matlab-gpufit for temporary bypass."
+                    )
+
+        python_health = _probe_python_install_health(python_in_venv)
+
+        if args.skip_matlab_mex:
+            matlab_symbol_status = {"status": "SKIP", "detail": "MATLAB MEX install skipped"}
+            matlab_runtime_status = {"status": "SKIP", "detail": "MATLAB MEX install skipped"}
+        elif shutil.which(args.matlab_cmd) is None:
+            matlab_symbol_status = {"status": "SKIP", "detail": f"'{args.matlab_cmd}' not found in PATH"}
+            matlab_runtime_status = {"status": "SKIP", "detail": f"'{args.matlab_cmd}' not found in PATH"}
+        else:
+            missing_symbols = [name for name in MATLAB_GPUFIT_SYMBOLS if not bool(matlab_symbols.get(name, False))]
+            if missing_symbols:
+                matlab_symbol_status = {"status": "FAIL", "detail": "missing: " + ", ".join(missing_symbols)}
+            else:
+                matlab_symbol_status = {"status": "PASS", "detail": "all required MATLAB Gpufit symbols found"}
+            matlab_runtime_status = _probe_matlab_runtime_gpufit(repo_root, args.matlab_cmd)
+
         _log("Installation complete.")
         _log(f"Virtual environment: {_venv_root_from_python(python_in_venv)}")
+        _print_post_install_health_check(python_health, matlab_symbol_status, matlab_runtime_status)
+        _print_post_install_next_steps(repo_root, python_in_venv)
         return 0
 
     except Exception as exc:

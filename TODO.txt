@@ -27,6 +27,9 @@ Recently completed
   - required-by-default models: `tofts`, `ex_tofts`, `patlak`
   - unstable-model checks remain diagnostic by default (`tissue_uptake`, `2cxm`, plus optional CPU-vs-MATLAB checks)
   - added env controls to promote all models/checks back to strict gating when needed (`ROCKETSHIP_PARITY_REQUIRE_ALL_MODELS=1`)
+- Added GPUfit support for all models, performance better than matlab
+- Added CPUfit support for all models, performance similar to GPUfit
+- Installer for GPU/CPUfit for both python and matlab
 
 Highest priority next
 - Complete script-level option parity audit:
@@ -40,7 +43,6 @@ Highest priority next
   - low-SNR
   - non-uniform timer
   - harsh bounds / low-iteration fit stress case
-- I want to add a benchmarking script that will do a full pipeline run for as many configurations as will run on a machine (matlab CPU, matlab GPUfit, python CPU, python CPUfit, python GPUfit) and compare run times. This should be python, have easy to use CLI interface, and well formatted output that present the results in an easy to read way with "white space" and carefully aligned numbers for easy comparison. 
 
 Secondary
 - Decide on nested and FXL_rr support vs explicit non-support.
@@ -48,12 +50,3 @@ Secondary
 - GUI distribution plan for non-programmers:
   - evaluate packaged app targets (macOS app bundle, Windows installer)
   - keep venv/dev launch path as baseline during early iterations
-- GPUfit optional install/distribution plan:
-  - expand binary coverage matrix across CUDA/runtime combinations
-  - add a machine-readable release manifest to avoid filename-parsing heuristics
-  - add CI smoke install checks against release artifacts
-- Performance pass after parity lock:
-  - profile Stage D hotspots
-  - investigate Python runtime gap vs MATLAB on full volume for non-accelerated models
-  - extend acceleration beyond tofts/patlak where safe
-  - benchmark and tune cpufit/gpufit tolerance and iteration settings vs parity stability

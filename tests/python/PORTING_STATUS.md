@@ -142,7 +142,7 @@ Confirmed in-scope requirements to retain:
 - Installer/acceleration setup status:
   - installer script: `/Users/samuelbarnes/code/ROCKETSHIP/install_python_acceleration.py`
   - installs pyCpufit/pyGpufit with `--no-deps` to avoid NumPy/SciPy resolver churn
-  - prefers `dev-latest` prerelease channel by default when no explicit release tag is provided
+  - prefers latest stable (non-prerelease) release by default when no explicit release tag is provided
   - auto-detects local CUDA version (`CUDA_VERSION`, `nvcc`, `nvidia-smi`) and selects the closest compatible host asset
   - if local CUDA is older than all available CUDA assets and CPU asset exists, installer prefers CPU asset first
 - Checkpoint support:

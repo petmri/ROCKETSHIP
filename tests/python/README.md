@@ -22,6 +22,30 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 ```
 
+## Acceleration installer (Python + MATLAB MEX)
+
+Install/update acceleration packages from release bundles:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python install_python_acceleration.py
+```
+
+Current installer contract:
+- Installs Python `pyCpufit` + `pyGpufit` from release assets.
+- Installs MATLAB files from bundle `matlab/` into `external_programs/`.
+- Probes MATLAB for required GPUfit symbols:
+  - `GpufitCudaAvailableMex`
+  - `gpufit_constrained`
+  - `gpufit_constraints`
+- Fails by default if those MATLAB GPUfit symbols are missing in the release bundle.
+
+Temporary bypass (until release bundles are updated):
+
+```bash
+.venv/bin/python install_python_acceleration.py --allow-missing-matlab-gpufit
+```
+
 ## Script
 - `compare_with_matlab_baseline.py`
 - `generate_python_results.py`
