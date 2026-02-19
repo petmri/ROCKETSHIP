@@ -121,6 +121,12 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 Notes:
 - Fast OSIPI mode includes dedicated CPUfit/GPUfit backend pass/fail checks.
 - CPUfit/GPUfit checks auto-skip on platforms where the corresponding backend is unavailable.
+- Fast backend checks are split into:
+  - `tests/python/test_osipi_pycpufit.py`
+  - `tests/python/test_osipi_pygpufit.py`
+- Fast backend model checks cover `tofts`, `ex_tofts`, `patlak`, `2cxm`, and `tissue_uptake` as hard pass/fail tests.
+- Run only fast OSIPI backend checks:
+  - `.venv/bin/python -m pytest tests/python/test_osipi_pycpufit.py tests/python/test_osipi_pygpufit.py -m fast -v`
 - Slow OSIPI mode adds full reference fitting runs, including `2cxm` and `2cum`.
 
 Enable long-running OSIPI fit tests (default behavior is to skip them):
