@@ -391,7 +391,7 @@ def _compute_table_rows() -> list[dict[str, Any]]:
         ktrans_per_sec = float(fit[0])
         ve_errors.append(abs(float(fit[1]) - float(row["ve"])))
         vp_errors.append(abs(float(fit[2]) - float(row["vp"])))
-        fp_errors.append(abs(float(fit[3]) * 60.0 - float(row["fp"])))
+        fp_errors.append(abs(float(fit[3]) * 60.0 * 100.0 - float(row["fp"])))
         ps_errors.append(abs(_ps_per_min_from_ktrans_fp_per_sec(ktrans_per_sec, float(fit[3])) - float(row["ps"])))
 
     _add_row(
@@ -468,7 +468,7 @@ def _compute_table_rows() -> list[dict[str, Any]]:
         ktrans_per_sec = float(fit[0])
         ve_errors.append(abs(float(fit[1]) - float(row["ve"])))
         vp_errors.append(abs(float(fit[2]) - float(row["vp"])))
-        fp_errors.append(abs(float(fit[3]) * 60.0 - float(row["fp"])))
+        fp_errors.append(abs(float(fit[3]) * 60.0 * 100.0 - float(row["fp"])))
         ps_errors.append(abs(_ps_per_min_from_ktrans_fp_per_sec(ktrans_per_sec, float(fit[3])) - float(row["ps"])))
 
     _add_row(
@@ -548,7 +548,7 @@ def _compute_table_rows() -> list[dict[str, Any]]:
         ktrans_per_sec = float(fit[0])
         fp_per_sec = float(fit[1])
         vp_errors.append(abs(float(fit[2]) - float(row["vp"])))
-        fp_errors.append(abs(fp_per_sec * 60.0 - float(row["fp"])))
+        fp_errors.append(abs(fp_per_sec * 60.0 * 100.0 - float(row["fp"])))
         ps_errors.append(abs(_ps_per_min_from_ktrans_fp_per_sec(ktrans_per_sec, fp_per_sec) - float(row["ps"])))
 
     _add_row(
@@ -613,7 +613,7 @@ def _compute_table_rows() -> list[dict[str, Any]]:
         ktrans_per_sec = float(fit[0])
         fp_per_sec = float(fit[1])
         vp_errors.append(abs(float(fit[2]) - float(row["vp"])))
-        fp_errors.append(abs(fp_per_sec * 60.0 - float(row["fp"])))
+        fp_errors.append(abs(fp_per_sec * 60.0 * 100.0 - float(row["fp"])))
         ps_errors.append(abs(_ps_per_min_from_ktrans_fp_per_sec(ktrans_per_sec, fp_per_sec) - float(row["ps"])))
 
     _add_row(

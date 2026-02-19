@@ -36,6 +36,10 @@ Recently completed
   - moved `test_data` into `tests/data`
   - moved data-generation scripts into `tests/data/scripts`
   - moved `tests/osipi` into `tests/data/osipi`
+- Improved pure-Python OSIPI reliability + performance:
+  - unified `2cxm` to a single OSIPI-style fit path (quadratic resampling + bounded curve fit)
+  - optimized pure-Python forward-model integration for `tofts`, `ex_tofts`, `patlak`, `tissue_uptake`, and `2cxm`
+  - corrected OSIPI `fp` unit conversion handling to `ml/100ml/min` in reliability checks, fast-backend checks, and summary generation
 
 Highest priority next
 - Make some tests with detailed CLI outputs, give consistent naming scheme to id them (run_*, or something else)

@@ -263,7 +263,7 @@ def assert_fast_backend_model_case(model_name: str, acceleration_backend: str) -
             "vp",
         )
         _assert_close(
-            fp_per_sec * 60.0,
+            fp_per_sec * 60.0 * 100.0,
             float(row["fp"]),
             _peer_max_abs_error("DCEmodels", method, "fp") + 1e-6,
             label,
@@ -289,7 +289,7 @@ def assert_fast_backend_model_case(model_name: str, acceleration_backend: str) -
             "vp",
         )
         _assert_close(
-            fp_per_sec * 60.0,
+            fp_per_sec * 60.0 * 100.0,
             float(row["fp"]),
             _peer_max_abs_error("DCEmodels", method, "fp") + 1e-6,
             label,
