@@ -79,6 +79,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     group.addoption("--parity-required-models", "--req-models", action="store", default="tofts,ex_tofts,patlak")
     group.addoption("--parity-cpu-optional-models", "--cpu-opt-models", action="store", default="patlak")
     group.addoption("--parity-require-all-models", "--all-models", action="store_true", default=False)
+    group.addoption(
+        "--run-osipi-slow",
+        "--osipi-slow",
+        action="store_true",
+        default=False,
+        help="Enable long-running OSIPI reliability fits. Alias: --osipi-slow",
+    )
 
 
 @pytest.fixture(scope="session")
@@ -107,6 +114,11 @@ def run_full_parity(request: pytest.FixtureRequest) -> bool:
 @pytest.fixture(scope="session")
 def run_multi_model_backend_parity(request: pytest.FixtureRequest) -> bool:
     return bool(request.config.getoption("--run-multi-model-backend-parity"))
+
+
+@pytest.fixture(scope="session")
+def run_osipi_slow(request: pytest.FixtureRequest) -> bool:
+    return bool(request.config.getoption("--run-osipi-slow"))
 
 
 @pytest.fixture(scope="session")

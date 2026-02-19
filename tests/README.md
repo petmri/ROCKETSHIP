@@ -13,6 +13,7 @@ This test suite is scoped to **core algorithms** and intentionally avoids GUI be
 - `tests/matlab/helpers/`: shared MATLAB helpers for path setup, fixtures, and assertions.
 - `tests/contracts/`: cross-language parity contracts and tolerance profiles.
 - `tests/contracts/baselines/`: generated MATLAB baseline outputs used by future Python parity checks.
+- `tests/osipi/`: imported OSIPI reference datasets, provenance docs, and peer-result tolerance summaries used by OSIPI-labeled Python tests.
 
 ## Running MATLAB tests
 From MATLAB:

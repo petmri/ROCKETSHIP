@@ -30,8 +30,18 @@ Recently completed
 - Added GPUfit support for all models, performance better than matlab
 - Added CPUfit support for all models, performance similar to GPUfit
 - Installer for GPU/CPUfit for both python and matlab
+- Migrated all tests to pyTest
+- Imported OSIPI data and built tests around that
 
 Highest priority next
+- Move test_data into tests/data
+- Move data generating scripts into tests/data
+- Move tests/osipi into tests/data/osipi
+- Make some tests with detailed CLI outputs, give consistent naming scheme to id them (run_*, or something else)
+  - Fix run_dce_parity to output correlation and MSE again (see old version)
+  - Rename benchmark to new naming scheme
+- Fix 2cxm and uptake, confirm forward model, look at OSIPI code for fix 
+  - when finished delete tune_dce_unstable_models
 - Complete script-level option parity audit:
   - map every MATLAB script_preferences.txt key to Python config/stage_overrides
   - mark each key as supported, intentionally dropped, or pending

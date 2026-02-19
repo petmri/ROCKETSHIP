@@ -111,6 +111,25 @@ Targeted Phase-1 reliability tests:
   tests/python/test_dce_pipeline_contracts.py -v
 ```
 
+OSIPI-labeled reliability tests (additive; does not replace existing tests):
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python -m pytest tests/python -m osipi -v
+```
+
+Notes:
+- Fast OSIPI mode includes dedicated CPUfit/GPUfit backend pass/fail checks.
+- CPUfit/GPUfit checks auto-skip on platforms where the corresponding backend is unavailable.
+- Slow OSIPI mode adds full reference fitting runs, including `2cxm` and `2cum`.
+
+Enable long-running OSIPI fit tests (default behavior is to skip them):
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python -m pytest tests/python -m osipi -v --osipi-slow
+```
+
 Coverage run (terminal summary + XML):
 
 ```bash
