@@ -79,7 +79,9 @@ Replace the Python test stack’s `unittest` execution and style with idiomatic 
 ### Phase 6 — Stabilization + Signoff
 - [x] Run fast suite (`-m "not parity and not slow"`).
 - [ ] Run parity suite (`-m parity` with required options).
+  - Current status: downsample + multi-model parity pass; full-volume parity is blocked until `test_data/BBB data p19/processed/results_matlab/*tofts*.nii` baselines are generated.
 - [ ] Run portability-targeted suite (`-m portability`).
+  - Current status: no tests currently marked `portability` (0 selected).
 - [x] Resolve flakes and finalize thresholds.
 - [ ] Merge into `dev` once all gates pass.
 
