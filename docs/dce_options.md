@@ -79,6 +79,13 @@ For options in `stage_overrides`:
 ### Stage D fit controls
 - `time_smoothing`, `time_smoothing_window`
 - `fxr_fw`
+- `time_unit` / `timer_unit` (optional direct-fit hint): `minutes|seconds`
+  - No implicit or runtime-selectable algorithm switching.
+  - `model_2cxm_fit` uses the OSIPI LEK-style resampled fit path.
+  - `model_tissue_uptake_fit` uses the standard least-squares fit path.
+  - For `model_tissue_uptake_fit` and `model_2cxm_fit`, internal fitting is always done in minutes with rate constants in 1/min.
+  - Input preferences for rate limits/initial values are interpreted in the same units as the input timer, then converted internally.
+  - Returned rate parameters (`ktrans`, `fp`) are converted back to match the input timer unit.
 
 ### Voxel fit bounds / initial values
 - `voxel_lower_limit_ktrans`, `voxel_upper_limit_ktrans`, `voxel_initial_value_ktrans`

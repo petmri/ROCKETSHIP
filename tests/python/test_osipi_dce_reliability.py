@@ -165,12 +165,12 @@ def test_osipi_2cxm_reliability_delay0_against_reference_values(run_osipi_slow: 
         ktrans_per_sec = float(fit[0])
         ve = float(fit[1])
         vp = float(fit[2])
-        fp_per_min = float(fit[3]) * 60.0
+        fp_per_100ml_per_min = float(fit[3]) * 60.0 * 100.0
         ps_per_min = _ps_per_min_from_ktrans_fp_per_sec(ktrans_per_sec, float(fit[3]))
 
         _assert_close(ve, float(row["ve"]), ve_tol, row["label"], "ve")
         _assert_close(vp, float(row["vp"]), vp_tol, row["label"], "vp")
-        _assert_close(fp_per_min, float(row["fp"]), fp_tol, row["label"], "fp")
+        _assert_close(fp_per_100ml_per_min, float(row["fp"]), fp_tol, row["label"], "fp")
         _assert_close(ps_per_min, float(row["ps"]), ps_tol, row["label"], "ps")
 
 
@@ -191,9 +191,9 @@ def test_osipi_2cum_reliability_delay0_against_reference_values(run_osipi_slow: 
         ktrans_per_sec = float(fit[0])
         fp_per_sec = float(fit[1])
         vp = float(fit[2])
-        fp_per_min = fp_per_sec * 60.0
+        fp_per_100ml_per_min = fp_per_sec * 60.0 * 100.0
         ps_per_min = _ps_per_min_from_ktrans_fp_per_sec(ktrans_per_sec, fp_per_sec)
 
         _assert_close(vp, float(row["vp"]), vp_tol, row["label"], "vp")
-        _assert_close(fp_per_min, float(row["fp"]), fp_tol, row["label"], "fp")
+        _assert_close(fp_per_100ml_per_min, float(row["fp"]), fp_tol, row["label"], "fp")
         _assert_close(ps_per_min, float(row["ps"]), ps_tol, row["label"], "ps")

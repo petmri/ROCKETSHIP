@@ -384,22 +384,100 @@ def test_tissue_uptake_fit_recovers_synthetic_no_and_low_noise() -> None:
 
 
 @pytest.mark.unit
-def test_twocxm_fit_recovers_synthetic_no_and_low_noise() -> None:
-    timer = [0.0, 0.05, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0, 1.4, 1.8, 2.2]
+def test_tissue_uptake_fit_is_unit_consistent_for_timer_and_prefs() -> None:
+    timer_min = [0.0, 0.05, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0, 1.4, 1.8, 2.2]
+    timer_sec = [t * 60.0 for t in timer_min]
     cp = [0.0, 0.4, 0.9, 1.2, 1.0, 0.82, 0.63, 0.49, 0.35, 0.25, 0.18]
-    ktrans_true = 0.03
-    ve_true = 0.24
-    vp_true = 0.045
-    fp_true = 0.31
+    ct = model_tissue_uptake_cfit(0.045, 0.36, 0.18, cp, timer_min)
 
-    clean = model_2cxm_cfit(ktrans_true, ve_true, vp_true, fp_true, cp, timer)
+    prefs_min = {
+        "time_unit": "minutes",
+        "initial_value_ktrans": 0.04,
+        "initial_value_fp": 0.34,
+        "initial_value_tp": 0.16,
+        "lower_limit_ktrans": 1e-7,
+        "upper_limit_ktrans": 2.0,
+        "lower_limit_fp": 1e-3,
+        "upper_limit_fp": 100.0,
+        "lower_limit_tp": 0.0,
+        "upper_limit_tp": 1e6,
+    }
+    prefs_sec = {
+        "time_unit": "seconds",
+        "initial_value_ktrans": prefs_min["initial_value_ktrans"] / 60.0,
+        "initial_value_fp": prefs_min["initial_value_fp"] / 60.0,
+        "initial_value_tp": prefs_min["initial_value_tp"] * 60.0,
+        "lower_limit_ktrans": prefs_min["lower_limit_ktrans"] / 60.0,
+        "upper_limit_ktrans": prefs_min["upper_limit_ktrans"] / 60.0,
+        "lower_limit_fp": prefs_min["lower_limit_fp"] / 60.0,
+        "upper_limit_fp": prefs_min["upper_limit_fp"] / 60.0,
+        "lower_limit_tp": prefs_min["lower_limit_tp"] * 60.0,
+        "upper_limit_tp": prefs_min["upper_limit_tp"] * 60.0,
+    }
 
-    rng = random.Random(17)
-    for noise_std in (0.0, 2.5e-4):
-        noisy = [float(v + rng.gauss(0.0, noise_std)) for v in clean]
-        fit = model_2cxm_fit(noisy, cp, timer)
+    fit_min = model_tissue_uptake_fit(ct, cp, timer_min, prefs_min)
+    fit_sec = model_tissue_uptake_fit(ct, cp, timer_sec, prefs_sec)
 
-        assert _within_tol(float(fit[0]), ktrans_true, atol=4e-3, rtol=0.2)
-        assert _within_tol(float(fit[1]), ve_true, atol=3e-2, rtol=0.2)
-        assert _within_tol(float(fit[2]), vp_true, atol=1.5e-2, rtol=0.25)
-        assert _within_tol(float(fit[3]), fp_true, atol=3e-2, rtol=0.2)
+    assert _within_tol(float(fit_sec[0]) * 60.0, float(fit_min[0]), atol=5e-4, rtol=0.05)
+    assert _within_tol(float(fit_sec[1]) * 60.0, float(fit_min[1]), atol=5e-3, rtol=0.05)
+    assert _within_tol(float(fit_sec[2]), float(fit_min[2]), atol=5e-3, rtol=0.05)
+
+
+@pytest.mark.unit
+def test_twocxm_fit_is_unit_consistent_for_timer_and_prefs() -> None:
+    timer_min = [0.0, 0.05, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0, 1.4, 1.8, 2.2]
+    timer_sec = [t * 60.0 for t in timer_min]
+    cp = [0.0, 0.4, 0.9, 1.2, 1.0, 0.82, 0.63, 0.49, 0.35, 0.25, 0.18]
+    ct = model_2cxm_cfit(0.03, 0.24, 0.045, 0.31, cp, timer_min)
+
+    prefs_min = {
+        "time_unit": "minutes",
+        "initial_value_ktrans": 0.03,
+        "initial_value_ve": 0.2,
+        "initial_value_vp": 0.04,
+        "initial_value_fp": 0.3,
+        "lower_limit_ktrans": 1e-7,
+        "upper_limit_ktrans": 2.0,
+        "lower_limit_ve": 0.02,
+        "upper_limit_ve": 1.0,
+        "lower_limit_vp": 1e-3,
+        "upper_limit_vp": 1.0,
+        "lower_limit_fp": 1e-3,
+        "upper_limit_fp": 100.0,
+    }
+    prefs_sec = {
+        "time_unit": "seconds",
+        "initial_value_ktrans": prefs_min["initial_value_ktrans"] / 60.0,
+        "initial_value_ve": prefs_min["initial_value_ve"],
+        "initial_value_vp": prefs_min["initial_value_vp"],
+        "initial_value_fp": prefs_min["initial_value_fp"] / 60.0,
+        "lower_limit_ktrans": prefs_min["lower_limit_ktrans"] / 60.0,
+        "upper_limit_ktrans": prefs_min["upper_limit_ktrans"] / 60.0,
+        "lower_limit_ve": prefs_min["lower_limit_ve"],
+        "upper_limit_ve": prefs_min["upper_limit_ve"],
+        "lower_limit_vp": prefs_min["lower_limit_vp"],
+        "upper_limit_vp": prefs_min["upper_limit_vp"],
+        "lower_limit_fp": prefs_min["lower_limit_fp"] / 60.0,
+        "upper_limit_fp": prefs_min["upper_limit_fp"] / 60.0,
+    }
+
+    fit_min = model_2cxm_fit(ct, cp, timer_min, prefs_min)
+    fit_sec = model_2cxm_fit(ct, cp, timer_sec, prefs_sec)
+
+    assert _within_tol(float(fit_sec[0]) * 60.0, float(fit_min[0]), atol=5e-4, rtol=0.05)
+    assert _within_tol(float(fit_sec[1]), float(fit_min[1]), atol=5e-3, rtol=0.05)
+    assert _within_tol(float(fit_sec[2]), float(fit_min[2]), atol=5e-3, rtol=0.05)
+    assert _within_tol(float(fit_sec[3]) * 60.0, float(fit_min[3]), atol=5e-3, rtol=0.05)
+
+
+@pytest.mark.unit
+def test_model_fit_rejects_algorithm_override_prefs() -> None:
+    timer = [0.0, 0.1, 0.2, 0.3]
+    cp = [0.0, 0.4, 0.2, 0.1]
+    ct = [0.0, 0.01, 0.015, 0.017]
+
+    with pytest.raises(ValueError, match="does not support 'fit_algorithm'"):
+        model_2cxm_fit(ct, cp, timer, {"fit_algorithm": "legacy"})
+
+    with pytest.raises(ValueError, match="does not support 'fit_algorithm'"):
+        model_tissue_uptake_fit(ct, cp, timer, {"fit_algorithm": "osipi_quick"})
