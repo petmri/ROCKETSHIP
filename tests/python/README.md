@@ -100,15 +100,15 @@ Useful options:
 Run Python reliability suite (no MATLAB required; parity-gated tests remain skipped unless explicitly enabled):
 
 ```bash
-.venv/bin/python -m unittest discover -s tests/python -p 'test_*.py'
+.venv/bin/python -m pytest tests/python -q
 ```
 
 Targeted Phase-1 reliability tests:
 
 ```bash
-.venv/bin/python -m unittest \
-  tests.python.test_install_python_acceleration \
-  tests.python.test_dce_pipeline_contracts -v
+.venv/bin/python -m pytest \
+  tests/python/test_install_python_acceleration.py \
+  tests/python/test_dce_pipeline_contracts.py -v
 ```
 
 ## What it does
@@ -237,16 +237,18 @@ Run downsampled full-pipeline Tofts parity test (Python vs MATLAB maps for `Ktra
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
-ROCKETSHIP_RUN_PIPELINE_PARITY=1 .venv/bin/python -m unittest \
-  tests.python.test_dce_pipeline_parity_metrics.TestDcePipelineParityMetrics.test_downsample_bbb_p19_tofts_ktrans
+.venv/bin/python -m pytest \
+  tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_tofts_ktrans \
+  --run-parity
 ```
 
 Optional full-volume parity test (slower; reserve for occasional thorough checks):
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
-ROCKETSHIP_RUN_PIPELINE_PARITY=1 ROCKETSHIP_RUN_FULL_VOLUME_PARITY=1 .venv/bin/python -m unittest \
-  tests.python.test_dce_pipeline_parity_metrics.TestDcePipelineParityMetrics.test_full_bbb_p19_tofts_ktrans
+.venv/bin/python -m pytest \
+  tests/python/test_dce_pipeline_parity_metrics.py::test_full_bbb_p19_tofts_ktrans \
+  --run-parity --run-full-parity
 ```
 
 Optional multi-model backend parity (CPU-only vs auto backend vs MATLAB maps).
@@ -254,10 +256,9 @@ This is opt-in because it is heavier than the Tofts-only check:
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
-ROCKETSHIP_RUN_PIPELINE_PARITY=1 \
-ROCKETSHIP_RUN_MULTI_MODEL_BACKEND_PARITY=1 \
-.venv/bin/python -m unittest \
-  tests.python.test_dce_pipeline_parity_metrics.TestDcePipelineParityMetrics.test_downsample_bbb_p19_models_cpu_and_auto
+.venv/bin/python -m pytest \
+  tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_models_cpu_and_auto \
+  --run-parity --run-multi-model-backend-parity
 ```
 
 Default multi-model behavior:
@@ -339,5 +340,5 @@ Run settings/feature coverage tests (constraints, initial guesses, blood T1 over
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python -m unittest tests.python.test_dce_pipeline_settings_matrix -v
+.venv/bin/python -m pytest tests/python/test_dce_pipeline_settings_matrix.py -v
 ```

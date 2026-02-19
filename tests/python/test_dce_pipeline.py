@@ -7,8 +7,9 @@ import numpy as np
 from pathlib import Path
 import sys
 import tempfile
-import unittest
 from unittest.mock import patch
+
+import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -155,7 +156,8 @@ def _make_stage_a_payload() -> dict:
     }
 
 
-class TestDcePipeline(unittest.TestCase):
+@pytest.mark.integration
+class TestDcePipeline:
     def test_pipeline_emits_progress_events(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))
@@ -163,15 +165,15 @@ class TestDcePipeline(unittest.TestCase):
             run_dce_pipeline(config, event_callback=events.append)
 
             event_types = [str(e.get("type", "")) for e in events]
-            self.assertIn("run_start", event_types)
-            self.assertIn("run_done", event_types)
-            self.assertIn("stage_start", event_types)
-            self.assertIn("stage_done", event_types)
+            assert "run_start" in event_types
+            assert "run_done" in event_types
+            assert "stage_start" in event_types
+            assert "stage_done" in event_types
 
             stage_start = [e for e in events if e.get("type") == "stage_start"]
             stage_done = [e for e in events if e.get("type") == "stage_done"]
-            self.assertEqual([e.get("stage") for e in stage_start], ["A", "B", "D"])
-            self.assertEqual([e.get("stage") for e in stage_done], ["A", "B", "D"])
+            assert [e.get("stage") for e in stage_start] == ["A", "B", "D"]
+            assert [e.get("stage") for e in stage_done] == ["A", "B", "D"]
 
     def test_pipeline_writes_summary_and_stage_checkpoints(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -179,17 +181,17 @@ class TestDcePipeline(unittest.TestCase):
             result = run_dce_pipeline(config)
 
             summary_path = Path(result["meta"]["summary_path"])
-            self.assertTrue(summary_path.exists(), "Expected summary json to be written")
+            assert summary_path.exists(), "Expected summary json to be written"
 
             for stage in ("a_out.json", "b_out.json", "d_out.json"):
-                self.assertTrue((config.checkpoint_dir / stage).exists(), f"Missing checkpoint file: {stage}")
+                assert (config.checkpoint_dir / stage).exists(), f"Missing checkpoint file: {stage}"
 
             summary_payload = json.loads(summary_path.read_text())
-            self.assertIn("stages", summary_payload)
-            self.assertIn("A", summary_payload["stages"])
-            self.assertIn("B", summary_payload["stages"])
-            self.assertIn("D", summary_payload["stages"])
-            self.assertEqual(summary_payload["stages"]["B"]["impl"], "scaffold")
+            assert "stages" in summary_payload
+            assert "A" in summary_payload["stages"]
+            assert "B" in summary_payload["stages"]
+            assert "D" in summary_payload["stages"]
+            assert summary_payload["stages"]["B"]["impl"] == "scaffold"
 
     def test_pipeline_rejects_imagej_roi_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -198,7 +200,7 @@ class TestDcePipeline(unittest.TestCase):
             bad_roi.write_text("roi")
             config.roi_files = [bad_roi]
 
-            with self.assertRaisesRegex(ValueError, r"ImageJ ROI"):
+            with pytest.raises(ValueError, match=r"ImageJ ROI"):
                 run_dce_pipeline(config)
 
     def test_backend_auto_falls_back_to_cpu_when_gpufit_unavailable(self) -> None:
@@ -219,7 +221,7 @@ class TestDcePipeline(unittest.TestCase):
                 },
             ):
                 result = run_dce_pipeline(config)
-            self.assertEqual(result["stages"]["D"]["selected_backend"], "cpu")
+            assert result["stages"]["D"]["selected_backend"] == "cpu"
 
     def test_backend_gpufit_raises_when_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -238,7 +240,7 @@ class TestDcePipeline(unittest.TestCase):
                     "pycpufit_error": "missing",
                 },
             ):
-                with self.assertRaisesRegex(RuntimeError, r"GPUfit backend requested"):
+                with pytest.raises(RuntimeError, match=r"GPUfit backend requested"):
                     run_dce_pipeline(config)
 
     def test_backend_auto_uses_cpufit_when_cuda_unavailable(self) -> None:
@@ -259,8 +261,8 @@ class TestDcePipeline(unittest.TestCase):
                 },
             ):
                 result = run_dce_pipeline(config)
-            self.assertEqual(result["stages"]["D"]["selected_backend"], "gpufit")
-            self.assertEqual(result["stages"]["D"]["acceleration_backend"], "cpufit_cpu")
+            assert result["stages"]["D"]["selected_backend"] == "gpufit"
+            assert result["stages"]["D"]["acceleration_backend"] == "cpufit_cpu"
 
     def test_backend_auto_prefers_gpufit_cuda_when_available(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -280,8 +282,8 @@ class TestDcePipeline(unittest.TestCase):
                 },
             ):
                 result = run_dce_pipeline(config)
-            self.assertEqual(result["stages"]["D"]["selected_backend"], "gpufit")
-            self.assertEqual(result["stages"]["D"]["acceleration_backend"], "gpufit_cuda")
+            assert result["stages"]["D"]["selected_backend"] == "gpufit"
+            assert result["stages"]["D"]["acceleration_backend"] == "gpufit_cuda"
 
     def test_stage_d_gpu_failure_falls_back_to_cpufit_before_cpu(self) -> None:
         ct = np.asarray(
@@ -327,9 +329,9 @@ class TestDcePipeline(unittest.TestCase):
                     acceleration_backend="gpufit_cuda",
                 )
 
-        self.assertEqual(calls, ["gpufit_cuda", "cpufit_cpu"])
-        self.assertEqual(out.shape, (ct.shape[1], 7))
-        self.assertTrue(np.allclose(out, 42.0))
+        assert calls == ["gpufit_cuda", "cpufit_cpu"]
+        assert out.shape == (ct.shape[1], 7)
+        assert np.allclose(out, 42.0)
 
     def test_stage_d_gpu_failure_without_cpufit_falls_back_to_cpu(self) -> None:
         ct = np.asarray(
@@ -377,11 +379,11 @@ class TestDcePipeline(unittest.TestCase):
                         acceleration_backend="gpufit_cuda",
                     )
 
-        self.assertEqual(accel_calls, ["gpufit_cuda"])
-        self.assertEqual(len(cpu_calls), ct.shape[1])
-        self.assertEqual(out.shape, (ct.shape[1], 7))
-        self.assertTrue(np.allclose(out[:, 0], 0.2))
-        self.assertTrue(np.allclose(out[:, 1], 0.3))
+        assert accel_calls == ["gpufit_cuda"]
+        assert len(cpu_calls) == ct.shape[1]
+        assert out.shape == (ct.shape[1], 7)
+        assert np.allclose(out[:, 0], 0.2)
+        assert np.allclose(out[:, 1], 0.3)
 
     def test_stage_d_cpufit_failure_falls_back_to_gpufit(self) -> None:
         ct = np.asarray(
@@ -427,9 +429,9 @@ class TestDcePipeline(unittest.TestCase):
                     acceleration_backend="cpufit_cpu",
                 )
 
-        self.assertEqual(calls, ["cpufit_cpu", "gpufit_cpu_fallback"])
-        self.assertEqual(out.shape, (ct.shape[1], 10))
-        self.assertTrue(np.allclose(out, 9.0))
+        assert calls == ["cpufit_cpu", "gpufit_cpu_fallback"]
+        assert out.shape == (ct.shape[1], 10)
+        assert np.allclose(out, 9.0)
 
     def test_stage_d_accelerated_outputs_for_supported_models(self) -> None:
         ct = np.asarray(
@@ -500,27 +502,28 @@ class TestDcePipeline(unittest.TestCase):
         ]
 
         for model_name, model_id, expected_init, expected_bounds, expected_row0 in cases:
-            with self.subTest(model=model_name):
-                _FakeAccelModule.last_call = None
-                with patch("dce_pipeline._load_fit_module_for_acceleration", return_value=_FakeAccelModule):
-                    out = _fit_stage_d_model_accelerated(
-                        model_name=model_name,
-                        ct=ct,
-                        cp_use=cp,
-                        timer=timer,
-                        prefs=prefs,
-                        acceleration_backend="cpufit_cpu",
-                    )
-
-                self.assertIsNotNone(out)
-                self.assertEqual(out.shape, (ct.shape[1], len(MODEL_LAYOUTS[model_name]["param_names"])))
-                self.assertTrue(np.allclose(np.asarray(out)[0, :], np.asarray(expected_row0, dtype=np.float64)))
-                self.assertIsNotNone(_FakeAccelModule.last_call)
-                self.assertEqual(_FakeAccelModule.last_call["model_id"], model_id)
-                self.assertTrue(
-                    np.allclose(_FakeAccelModule.last_call["initial_parameters"][0, :], np.asarray(expected_init))
+            _FakeAccelModule.last_call = None
+            with patch("dce_pipeline._load_fit_module_for_acceleration", return_value=_FakeAccelModule):
+                out = _fit_stage_d_model_accelerated(
+                    model_name=model_name,
+                    ct=ct,
+                    cp_use=cp,
+                    timer=timer,
+                    prefs=prefs,
+                    acceleration_backend="cpufit_cpu",
                 )
-                self.assertTrue(np.allclose(_FakeAccelModule.last_call["constraints"][0, :], np.asarray(expected_bounds)))
+
+            assert out is not None, f"{model_name}: expected accelerated output"
+            assert out.shape == (ct.shape[1], len(MODEL_LAYOUTS[model_name]["param_names"])), (
+                f"{model_name}: unexpected output shape"
+            )
+            assert np.allclose(np.asarray(out)[0, :], np.asarray(expected_row0, dtype=np.float64)), (
+                f"{model_name}: unexpected output row"
+            )
+            assert _FakeAccelModule.last_call is not None, f"{model_name}: accelerator call missing"
+            assert _FakeAccelModule.last_call["model_id"] == model_id
+            assert np.allclose(_FakeAccelModule.last_call["initial_parameters"][0, :], np.asarray(expected_init))
+            assert np.allclose(_FakeAccelModule.last_call["constraints"][0, :], np.asarray(expected_bounds))
 
     def test_stage_d_uses_acceleration_for_new_models(self) -> None:
         ct = np.asarray(
@@ -536,29 +539,28 @@ class TestDcePipeline(unittest.TestCase):
         timer = np.asarray([0.0, 0.1, 0.2, 0.3], dtype=np.float64)
 
         for model_name in ("ex_tofts", "tissue_uptake", "2cxm"):
-            with self.subTest(model=model_name):
-                row_len = len(MODEL_LAYOUTS[model_name]["param_names"])
-                sentinel = np.full((ct.shape[1], row_len), 77.0, dtype=np.float64)
-                with patch("dce_pipeline._fit_stage_d_model_accelerated", return_value=sentinel) as mocked_accel:
-                    out = _fit_stage_d_model(
-                        model_name=model_name,
-                        ct=ct,
-                        cp_use=cp,
-                        timer=timer,
-                        prefs={},
-                        r1o=None,
-                        relaxivity=3.6,
-                        fw=0.8,
-                        stlv_use=None,
-                        sttum=None,
-                        start_injection_min=0.0,
-                        sss=None,
-                        ssstum=None,
-                        acceleration_backend="cpufit_cpu",
-                    )
-                mocked_accel.assert_called_once()
-                self.assertEqual(out.shape, (ct.shape[1], row_len))
-                self.assertTrue(np.allclose(out, 77.0))
+            row_len = len(MODEL_LAYOUTS[model_name]["param_names"])
+            sentinel = np.full((ct.shape[1], row_len), 77.0, dtype=np.float64)
+            with patch("dce_pipeline._fit_stage_d_model_accelerated", return_value=sentinel) as mocked_accel:
+                out = _fit_stage_d_model(
+                    model_name=model_name,
+                    ct=ct,
+                    cp_use=cp,
+                    timer=timer,
+                    prefs={},
+                    r1o=None,
+                    relaxivity=3.6,
+                    fw=0.8,
+                    stlv_use=None,
+                    sttum=None,
+                    start_injection_min=0.0,
+                    sss=None,
+                    ssstum=None,
+                    acceleration_backend="cpufit_cpu",
+                )
+            mocked_accel.assert_called_once()
+            assert out.shape == (ct.shape[1], row_len), f"{model_name}: unexpected output shape"
+            assert np.allclose(out, 77.0), f"{model_name}: unexpected output values"
 
     def test_stage_a_real_mode_runs_with_mocked_io(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -618,11 +620,11 @@ class TestDcePipeline(unittest.TestCase):
                         ):
                             result = run_dce_pipeline(config)
 
-            self.assertEqual(result["stages"]["A"]["impl"], "real")
-            self.assertEqual(result["stages"]["A"]["status"], "ok")
-            self.assertIn("array_shapes", result["stages"]["A"])
-            self.assertIn("Cp", result["stages"]["A"]["array_shapes"])
-            self.assertIn("Ct", result["stages"]["A"]["array_shapes"])
+            assert result["stages"]["A"]["impl"] == "real"
+            assert result["stages"]["A"]["status"] == "ok"
+            assert "array_shapes" in result["stages"]["A"]
+            assert "Cp" in result["stages"]["A"]["array_shapes"]
+            assert "Ct" in result["stages"]["A"]["array_shapes"]
 
     def test_stage_b_real_raw_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -631,10 +633,10 @@ class TestDcePipeline(unittest.TestCase):
             stage_a = _make_stage_a_payload()
 
             result = _run_stage_b_real(config, stage_a)
-            self.assertEqual(result["impl"], "real")
-            self.assertEqual(result["aif_name"], "raw")
-            self.assertIn("Cp_use", result["arrays"])
-            self.assertEqual(result["arrays"]["Cp_use"].shape[0], result["arrays"]["timer"].shape[0])
+            assert result["impl"] == "real"
+            assert result["aif_name"] == "raw"
+            assert "Cp_use" in result["arrays"]
+            assert result["arrays"]["Cp_use"].shape[0] == result["arrays"]["timer"].shape[0]
 
     def test_stage_b_real_fitted_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -649,10 +651,10 @@ class TestDcePipeline(unittest.TestCase):
             stage_a = _make_stage_a_payload()
 
             result = _run_stage_b_real(config, stage_a)
-            self.assertEqual(result["impl"], "real")
-            self.assertEqual(result["aif_name"], "fitted")
-            self.assertIn("fit_params_cp", result)
-            self.assertEqual(result["arrays"]["Cp_use"].shape, result["arrays"]["CpROI"].shape)
+            assert result["impl"] == "real"
+            assert result["aif_name"] == "fitted"
+            assert "fit_params_cp" in result
+            assert result["arrays"]["Cp_use"].shape == result["arrays"]["CpROI"].shape
 
     def test_stage_b_real_imported_mode_npz(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -675,10 +677,10 @@ class TestDcePipeline(unittest.TestCase):
             config.stage_overrides = {"stage_b_mode": "real"}
 
             result = _run_stage_b_real(config, stage_a)
-            self.assertEqual(result["impl"], "real")
-            self.assertEqual(result["aif_name"], "imported")
-            self.assertIn("Cp_use", result["arrays"])
-            self.assertEqual(result["arrays"]["Cp_use"].shape[0], timer.shape[0])
+            assert result["impl"] == "real"
+            assert result["aif_name"] == "imported"
+            assert "Cp_use" in result["arrays"]
+            assert result["arrays"]["Cp_use"].shape[0] == timer.shape[0]
 
     def test_stage_d_real_generates_maps_and_xls(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -708,16 +710,16 @@ class TestDcePipeline(unittest.TestCase):
             with patch("dce_pipeline._load_nifti_data", side_effect=fake_load):
                 stage_d = _run_stage_d_real(config, stage_a, stage_b)
 
-            self.assertEqual(stage_d["impl"], "real")
-            self.assertIn("tofts", stage_d["models_run"])
-            self.assertIn("patlak", stage_d["models_run"])
+            assert stage_d["impl"] == "real"
+            assert "tofts" in stage_d["models_run"]
+            assert "patlak" in stage_d["models_run"]
 
             tofts_out = stage_d["model_outputs"]["tofts"]
-            self.assertTrue(tofts_out["map_paths"])
+            assert tofts_out["map_paths"]
             for _, out_path in tofts_out["map_paths"].items():
-                self.assertTrue(Path(out_path).exists())
-            self.assertTrue(tofts_out["xls_path"])
-            self.assertTrue(Path(tofts_out["xls_path"]).exists())
+                assert Path(out_path).exists()
+            assert tofts_out["xls_path"]
+            assert Path(tofts_out["xls_path"]).exists()
 
     def test_pipeline_end_to_end_real_abd(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -785,12 +787,8 @@ class TestDcePipeline(unittest.TestCase):
                             ):
                                 result = run_dce_pipeline(config)
 
-            self.assertEqual(result["stages"]["A"]["impl"], "real")
-            self.assertEqual(result["stages"]["B"]["impl"], "real")
-            self.assertEqual(result["stages"]["D"]["impl"], "real")
-            self.assertIn("tofts", result["stages"]["D"]["models_run"])
-            self.assertIn("patlak", result["stages"]["D"]["models_run"])
-
-
-if __name__ == "__main__":
-    unittest.main()
+            assert result["stages"]["A"]["impl"] == "real"
+            assert result["stages"]["B"]["impl"] == "real"
+            assert result["stages"]["D"]["impl"] == "real"
+            assert "tofts" in result["stages"]["D"]["models_run"]
+            assert "patlak" in result["stages"]["D"]["models_run"]

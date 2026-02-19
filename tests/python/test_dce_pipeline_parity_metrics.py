@@ -6,21 +6,16 @@ import os
 from pathlib import Path
 import sys
 import tempfile
-import unittest
 
 import nibabel as nib
 import numpy as np
+import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "python"))
 
 from dce_pipeline import DcePipelineConfig, run_dce_pipeline  # noqa: E402
-
-
-RUN_PARITY = os.environ.get("ROCKETSHIP_RUN_PIPELINE_PARITY", "0") == "1"
-RUN_FULL = os.environ.get("ROCKETSHIP_RUN_FULL_VOLUME_PARITY", "0") == "1"
-RUN_MULTI_MODEL_BACKEND_PARITY = os.environ.get("ROCKETSHIP_RUN_MULTI_MODEL_BACKEND_PARITY", "0") == "1"
 
 MULTI_MODEL_PARITY_SPECS = {
     "tofts": {"params": ["Ktrans", "ve"]},
@@ -277,7 +272,6 @@ def _parity_error_hint(paths: dict, *, models: list[str], expected_maps: list[Pa
 
 
 def _assert_map_parity(
-    testcase: unittest.TestCase,
     py_map: np.ndarray,
     matlab_map: np.ndarray,
     roi_mask: np.ndarray,
@@ -293,13 +287,12 @@ def _assert_map_parity(
         f"mae={m['mae']:.6f}, p95_abs_err={m['p95_abs_err']:.6f}"
     )
     _parity_log(summary)
-    testcase.assertGreaterEqual(m["corr"], corr_min, f"{summary} (corr_min={corr_min})")
-    testcase.assertLessEqual(m["mse"], mse_max, f"{summary} (mse_max={mse_max})")
+    assert m["corr"] >= corr_min, f"{summary} (corr_min={corr_min})"
+    assert m["mse"] <= mse_max, f"{summary} (mse_max={mse_max})"
     return m
 
 
 def _assert_map_parity_if_enough(
-    testcase: unittest.TestCase,
     lhs: np.ndarray,
     rhs: np.ndarray,
     roi_mask: np.ndarray,
@@ -314,7 +307,6 @@ def _assert_map_parity_if_enough(
         _parity_log(f"{label}: skipped (valid_voxels={n_valid})")
         return False
     _assert_map_parity(
-        testcase,
         lhs,
         rhs,
         roi_mask,
@@ -326,367 +318,367 @@ def _assert_map_parity_if_enough(
     return True
 
 
-class TestDcePipelineParityMetrics(unittest.TestCase):
-    @unittest.skipUnless(
-        RUN_PARITY and RUN_MULTI_MODEL_BACKEND_PARITY,
-        "Set ROCKETSHIP_RUN_PIPELINE_PARITY=1 and ROCKETSHIP_RUN_MULTI_MODEL_BACKEND_PARITY=1 "
-        "to run multi-model CPU-vs-auto map parity checks.",
-    )
-    def test_downsample_bbb_p19_models_cpu_and_auto(self) -> None:
-        root = Path(
-            os.environ.get(
-                "ROCKETSHIP_BBB_DOWNSAMPLED_ROOT",
-                str(_default_downsample_root()),
-            )
+@pytest.mark.parity
+@pytest.mark.integration
+@pytest.mark.slow
+def test_downsample_bbb_p19_models_cpu_and_auto(
+    run_parity: bool,
+    run_multi_model_backend_parity: bool,
+    parity_dataset_root: str,
+    parity_roi_stride: int,
+) -> None:
+    if not (run_parity and run_multi_model_backend_parity):
+        pytest.skip(
+            "Use --run-parity --run-multi-model-backend-parity to run multi-model CPU-vs-auto checks."
         )
-        paths = _dataset_paths(root)
-        models = list(MULTI_MODEL_PARITY_SPECS.keys())
-        expected_maps = [
-            _matlab_map_path(paths, model_name, param)
-            for model_name, spec in MULTI_MODEL_PARITY_SPECS.items()
-            for param in spec["params"]
-        ]
-        for map_path in expected_maps:
-            self.assertTrue(map_path.exists(), _parity_error_hint(paths, models=models, expected_maps=expected_maps))
 
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            out_cpu = tmp_path / "python_out_cpu"
-            out_auto = tmp_path / "python_out_auto"
-            sparse_roi_path = tmp_path / "roi_sparse.nii.gz"
-            roi_stride = int(os.environ.get("ROCKETSHIP_PARITY_MULTI_MODEL_ROI_STRIDE", "12"))
-            _parity_log(
-                "starting multi-model backend parity: "
-                f"root={paths['root']} roi_stride={roi_stride} models={models}"
+    root = Path(parity_dataset_root) if parity_dataset_root else _default_downsample_root()
+    paths = _dataset_paths(root)
+    models = list(MULTI_MODEL_PARITY_SPECS.keys())
+    expected_maps = [
+        _matlab_map_path(paths, model_name, param)
+        for model_name, spec in MULTI_MODEL_PARITY_SPECS.items()
+        for param in spec["params"]
+    ]
+    for map_path in expected_maps:
+        assert map_path.exists(), _parity_error_hint(paths, models=models, expected_maps=expected_maps)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        out_cpu = tmp_path / "python_out_cpu"
+        out_auto = tmp_path / "python_out_auto"
+        sparse_roi_path = tmp_path / "roi_sparse.nii.gz"
+        roi_stride = parity_roi_stride
+        _parity_log(
+            "starting multi-model backend parity: "
+            f"root={paths['root']} roi_stride={roi_stride} models={models}"
+        )
+        _write_sparse_roi_mask(paths["roi"], sparse_roi_path, roi_stride)
+
+        cpu_result = run_dce_pipeline(
+            _make_config(paths, out_cpu, backend="cpu", models=models, roi_path=sparse_roi_path)
+        )
+        auto_result = run_dce_pipeline(
+            _make_config(paths, out_auto, backend="auto", models=models, roi_path=sparse_roi_path)
+        )
+        assert cpu_result["meta"]["status"] == "ok"
+        assert auto_result["meta"]["status"] == "ok"
+
+        roi_mask = _load_nifti(sparse_roi_path)
+
+        ktrans_corr_min = float(os.environ.get("ROCKETSHIP_PARITY_MODEL_KTRANS_CORR_MIN", "0.95"))
+        ktrans_mse_max = float(os.environ.get("ROCKETSHIP_PARITY_MODEL_KTRANS_MSE_MAX", "0.01"))
+        param_corr_min = float(os.environ.get("ROCKETSHIP_PARITY_MODEL_PARAM_CORR_MIN", "0.90"))
+        param_mse_max = float(os.environ.get("ROCKETSHIP_PARITY_MODEL_PARAM_MSE_MAX", "0.02"))
+        cpu_auto_ktrans_corr_min = float(os.environ.get("ROCKETSHIP_PARITY_CPU_AUTO_KTRANS_CORR_MIN", "0.98"))
+        cpu_auto_ktrans_mse_max = float(os.environ.get("ROCKETSHIP_PARITY_CPU_AUTO_KTRANS_MSE_MAX", "0.002"))
+        cpu_auto_param_corr_min = float(os.environ.get("ROCKETSHIP_PARITY_CPU_AUTO_PARAM_CORR_MIN", "0.95"))
+        cpu_auto_param_mse_max = float(os.environ.get("ROCKETSHIP_PARITY_CPU_AUTO_PARAM_MSE_MAX", "0.01"))
+        ve_ktrans_min = float(os.environ.get("ROCKETSHIP_PARITY_VE_KTRANS_MIN", "1e-6"))
+        ex_tofts_ktrans_corr_min = float(os.environ.get("ROCKETSHIP_PARITY_EX_TOFTS_KTRANS_CORR_MIN", "0.85"))
+        ktrans_upper_exclude = float(os.environ.get("ROCKETSHIP_PARITY_KTRANS_UPPER_EXCLUDE", "1.9"))
+        require_all_models = os.environ.get("ROCKETSHIP_PARITY_REQUIRE_ALL_MODELS", "0") == "1"
+        required_models_raw = os.environ.get("ROCKETSHIP_PARITY_REQUIRED_MODELS", "tofts,ex_tofts,patlak")
+        required_models = {
+            token.strip().lower() for token in required_models_raw.split(",") if token.strip()
+        }
+        if require_all_models:
+            required_models = set(MULTI_MODEL_PARITY_SPECS.keys())
+        cpu_optional_models_raw = os.environ.get("ROCKETSHIP_PARITY_CPU_OPTIONAL_MODELS", "patlak")
+        cpu_optional_models = {
+            token.strip().lower() for token in cpu_optional_models_raw.split(",") if token.strip()
+        }
+        failures: list[str] = []
+        diagnostic_failures: list[str] = []
+
+        def run_check(
+            lhs: np.ndarray,
+            rhs: np.ndarray,
+            *,
+            label: str,
+            corr_min: float,
+            mse_max: float,
+            extra_mask: np.ndarray | None = None,
+            required: bool = True,
+        ) -> None:
+            try:
+                _assert_map_parity_if_enough(
+                    lhs,
+                    rhs,
+                    roi_mask,
+                    label=label,
+                    corr_min=corr_min,
+                    mse_max=mse_max,
+                    extra_mask=extra_mask,
+                )
+            except AssertionError as exc:
+                if required:
+                    failures.append(f"{label}: {exc}")
+                    _parity_log(f"{label}: FAILED (required)")
+                else:
+                    diagnostic_failures.append(f"{label}: {exc}")
+                    _parity_log(f"{label}: FAILED (diagnostic)")
+
+        for model_name, spec in MULTI_MODEL_PARITY_SPECS.items():
+            _parity_log(f"model={model_name}: running checks")
+            model_required = model_name in required_models
+            cpu_required = model_required and (model_name not in cpu_optional_models)
+            py_cpu_ktrans = _load_nifti(out_cpu / f"Dyn-1_{model_name}_fit_Ktrans.nii.gz")
+            py_auto_ktrans = _load_nifti(out_auto / f"Dyn-1_{model_name}_fit_Ktrans.nii.gz")
+            matlab_ktrans = _load_nifti(_matlab_map_path(paths, model_name, "Ktrans"))
+            if model_name in {"ex_tofts", "2cxm"}:
+                cpu_ktrans_mask = (
+                    np.isfinite(py_cpu_ktrans)
+                    & np.isfinite(matlab_ktrans)
+                    & (py_cpu_ktrans < ktrans_upper_exclude)
+                    & (matlab_ktrans < ktrans_upper_exclude)
+                )
+                auto_ktrans_mask = (
+                    np.isfinite(py_auto_ktrans)
+                    & np.isfinite(matlab_ktrans)
+                    & (py_auto_ktrans < ktrans_upper_exclude)
+                    & (matlab_ktrans < ktrans_upper_exclude)
+                )
+                cpu_auto_ktrans_mask = (
+                    np.isfinite(py_auto_ktrans)
+                    & np.isfinite(py_cpu_ktrans)
+                    & (py_auto_ktrans < ktrans_upper_exclude)
+                    & (py_cpu_ktrans < ktrans_upper_exclude)
+                )
+            else:
+                cpu_ktrans_mask = None
+                auto_ktrans_mask = None
+                cpu_auto_ktrans_mask = None
+            model_ktrans_corr_min = ex_tofts_ktrans_corr_min if model_name == "ex_tofts" else ktrans_corr_min
+
+            run_check(
+                py_cpu_ktrans,
+                matlab_ktrans,
+                label=f"{model_name}_ktrans_cpu_vs_matlab",
+                corr_min=model_ktrans_corr_min,
+                mse_max=ktrans_mse_max,
+                extra_mask=cpu_ktrans_mask,
+                required=cpu_required,
             )
-            _write_sparse_roi_mask(paths["roi"], sparse_roi_path, roi_stride)
-
-            cpu_result = run_dce_pipeline(
-                _make_config(paths, out_cpu, backend="cpu", models=models, roi_path=sparse_roi_path)
+            run_check(
+                py_auto_ktrans,
+                matlab_ktrans,
+                label=f"{model_name}_ktrans_auto_vs_matlab",
+                corr_min=model_ktrans_corr_min,
+                mse_max=ktrans_mse_max,
+                extra_mask=auto_ktrans_mask,
+                required=model_required,
             )
-            auto_result = run_dce_pipeline(
-                _make_config(paths, out_auto, backend="auto", models=models, roi_path=sparse_roi_path)
+            run_check(
+                py_auto_ktrans,
+                py_cpu_ktrans,
+                label=f"{model_name}_ktrans_auto_vs_cpu",
+                corr_min=cpu_auto_ktrans_corr_min,
+                mse_max=cpu_auto_ktrans_mse_max,
+                extra_mask=cpu_auto_ktrans_mask,
+                required=cpu_required,
             )
-            self.assertEqual(cpu_result["meta"]["status"], "ok")
-            self.assertEqual(auto_result["meta"]["status"], "ok")
 
-            roi_mask = _load_nifti(sparse_roi_path)
+            for param in spec["params"]:
+                if param == "Ktrans":
+                    continue
+                py_cpu_map = _load_nifti(out_cpu / f"Dyn-1_{model_name}_fit_{param}.nii.gz")
+                py_auto_map = _load_nifti(out_auto / f"Dyn-1_{model_name}_fit_{param}.nii.gz")
+                matlab_map = _load_nifti(_matlab_map_path(paths, model_name, param))
 
-            ktrans_corr_min = float(os.environ.get("ROCKETSHIP_PARITY_MODEL_KTRANS_CORR_MIN", "0.95"))
-            ktrans_mse_max = float(os.environ.get("ROCKETSHIP_PARITY_MODEL_KTRANS_MSE_MAX", "0.01"))
-            param_corr_min = float(os.environ.get("ROCKETSHIP_PARITY_MODEL_PARAM_CORR_MIN", "0.90"))
-            param_mse_max = float(os.environ.get("ROCKETSHIP_PARITY_MODEL_PARAM_MSE_MAX", "0.02"))
-            cpu_auto_ktrans_corr_min = float(os.environ.get("ROCKETSHIP_PARITY_CPU_AUTO_KTRANS_CORR_MIN", "0.98"))
-            cpu_auto_ktrans_mse_max = float(os.environ.get("ROCKETSHIP_PARITY_CPU_AUTO_KTRANS_MSE_MAX", "0.002"))
-            cpu_auto_param_corr_min = float(os.environ.get("ROCKETSHIP_PARITY_CPU_AUTO_PARAM_CORR_MIN", "0.95"))
-            cpu_auto_param_mse_max = float(os.environ.get("ROCKETSHIP_PARITY_CPU_AUTO_PARAM_MSE_MAX", "0.01"))
-            ve_ktrans_min = float(os.environ.get("ROCKETSHIP_PARITY_VE_KTRANS_MIN", "1e-6"))
-            ex_tofts_ktrans_corr_min = float(os.environ.get("ROCKETSHIP_PARITY_EX_TOFTS_KTRANS_CORR_MIN", "0.85"))
-            ktrans_upper_exclude = float(os.environ.get("ROCKETSHIP_PARITY_KTRANS_UPPER_EXCLUDE", "1.9"))
-            require_all_models = os.environ.get("ROCKETSHIP_PARITY_REQUIRE_ALL_MODELS", "0") == "1"
-            required_models_raw = os.environ.get("ROCKETSHIP_PARITY_REQUIRED_MODELS", "tofts,ex_tofts,patlak")
-            required_models = {
-                token.strip().lower() for token in required_models_raw.split(",") if token.strip()
-            }
-            if require_all_models:
-                required_models = set(MULTI_MODEL_PARITY_SPECS.keys())
-            # CPU-vs-MATLAB and AUTO-vs-CPU checks for these models are diagnostic by default.
-            cpu_optional_models_raw = os.environ.get("ROCKETSHIP_PARITY_CPU_OPTIONAL_MODELS", "patlak")
-            cpu_optional_models = {
-                token.strip().lower() for token in cpu_optional_models_raw.split(",") if token.strip()
-            }
-            failures: list[str] = []
-            diagnostic_failures: list[str] = []
-
-            def run_check(
-                lhs: np.ndarray,
-                rhs: np.ndarray,
-                *,
-                label: str,
-                corr_min: float,
-                mse_max: float,
-                extra_mask: np.ndarray | None = None,
-                required: bool = True,
-            ) -> None:
-                try:
-                    _assert_map_parity_if_enough(
-                        self,
-                        lhs,
-                        rhs,
-                        roi_mask,
-                        label=label,
-                        corr_min=corr_min,
-                        mse_max=mse_max,
-                        extra_mask=extra_mask,
-                    )
-                except AssertionError as exc:
-                    if required:
-                        failures.append(f"{label}: {exc}")
-                        _parity_log(f"{label}: FAILED (required)")
-                    else:
-                        diagnostic_failures.append(f"{label}: {exc}")
-                        _parity_log(f"{label}: FAILED (diagnostic)")
-
-            for model_name, spec in MULTI_MODEL_PARITY_SPECS.items():
-                _parity_log(f"model={model_name}: running checks")
-                model_required = model_name in required_models
-                cpu_required = model_required and (model_name not in cpu_optional_models)
-                py_cpu_ktrans = _load_nifti(out_cpu / f"Dyn-1_{model_name}_fit_Ktrans.nii.gz")
-                py_auto_ktrans = _load_nifti(out_auto / f"Dyn-1_{model_name}_fit_Ktrans.nii.gz")
-                matlab_ktrans = _load_nifti(_matlab_map_path(paths, model_name, "Ktrans"))
-                # Exclude upper-bound-saturated Ktrans voxels from strict checks for known unstable fits.
-                if model_name in {"ex_tofts", "2cxm"}:
-                    cpu_ktrans_mask = (
+                param_use_ktrans_mask = param.lower() == "ve"
+                if param_use_ktrans_mask:
+                    cpu_mask = (
                         np.isfinite(py_cpu_ktrans)
                         & np.isfinite(matlab_ktrans)
-                        & (py_cpu_ktrans < ktrans_upper_exclude)
-                        & (matlab_ktrans < ktrans_upper_exclude)
+                        & (py_cpu_ktrans > ve_ktrans_min)
+                        & (matlab_ktrans > ve_ktrans_min)
                     )
-                    auto_ktrans_mask = (
+                    auto_mask = (
                         np.isfinite(py_auto_ktrans)
                         & np.isfinite(matlab_ktrans)
-                        & (py_auto_ktrans < ktrans_upper_exclude)
-                        & (matlab_ktrans < ktrans_upper_exclude)
+                        & (py_auto_ktrans > ve_ktrans_min)
+                        & (matlab_ktrans > ve_ktrans_min)
                     )
-                    cpu_auto_ktrans_mask = (
-                        np.isfinite(py_auto_ktrans)
-                        & np.isfinite(py_cpu_ktrans)
-                        & (py_auto_ktrans < ktrans_upper_exclude)
-                        & (py_cpu_ktrans < ktrans_upper_exclude)
+                    cpu_auto_mask = (
+                        np.isfinite(py_cpu_ktrans)
+                        & np.isfinite(py_auto_ktrans)
+                        & (py_cpu_ktrans > ve_ktrans_min)
+                        & (py_auto_ktrans > ve_ktrans_min)
                     )
                 else:
-                    cpu_ktrans_mask = None
-                    auto_ktrans_mask = None
-                    cpu_auto_ktrans_mask = None
-                model_ktrans_corr_min = ex_tofts_ktrans_corr_min if model_name == "ex_tofts" else ktrans_corr_min
+                    cpu_mask = None
+                    auto_mask = None
+                    cpu_auto_mask = None
+                base_valid_cpu = np.isfinite(py_cpu_map) & np.isfinite(matlab_map) & (roi_mask > 0)
+                base_valid_auto = np.isfinite(py_auto_map) & np.isfinite(matlab_map) & (roi_mask > 0)
+                base_valid_cpu_auto = np.isfinite(py_auto_map) & np.isfinite(py_cpu_map) & (roi_mask > 0)
+
+                if param_use_ktrans_mask:
+                    cpu_mask_use = cpu_mask if np.count_nonzero(base_valid_cpu & cpu_mask) >= 2 else None
+                    auto_mask_use = auto_mask if np.count_nonzero(base_valid_auto & auto_mask) >= 2 else None
+                    cpu_auto_mask_use = cpu_auto_mask if np.count_nonzero(base_valid_cpu_auto & cpu_auto_mask) >= 2 else None
+                else:
+                    cpu_mask_use = None
+                    auto_mask_use = None
+                    cpu_auto_mask_use = None
 
                 run_check(
-                    py_cpu_ktrans,
-                    matlab_ktrans,
-                    label=f"{model_name}_ktrans_cpu_vs_matlab",
-                    corr_min=model_ktrans_corr_min,
-                    mse_max=ktrans_mse_max,
-                    extra_mask=cpu_ktrans_mask,
+                    py_cpu_map,
+                    matlab_map,
+                    label=f"{model_name}_{param}_cpu_vs_matlab",
+                    corr_min=param_corr_min,
+                    mse_max=param_mse_max,
+                    extra_mask=cpu_mask_use,
                     required=cpu_required,
                 )
                 run_check(
-                    py_auto_ktrans,
-                    matlab_ktrans,
-                    label=f"{model_name}_ktrans_auto_vs_matlab",
-                    corr_min=model_ktrans_corr_min,
-                    mse_max=ktrans_mse_max,
-                    extra_mask=auto_ktrans_mask,
+                    py_auto_map,
+                    matlab_map,
+                    label=f"{model_name}_{param}_auto_vs_matlab",
+                    corr_min=param_corr_min,
+                    mse_max=param_mse_max,
+                    extra_mask=auto_mask_use,
                     required=model_required,
                 )
                 run_check(
-                    py_auto_ktrans,
-                    py_cpu_ktrans,
-                    label=f"{model_name}_ktrans_auto_vs_cpu",
-                    corr_min=cpu_auto_ktrans_corr_min,
-                    mse_max=cpu_auto_ktrans_mse_max,
-                    extra_mask=cpu_auto_ktrans_mask,
+                    py_auto_map,
+                    py_cpu_map,
+                    label=f"{model_name}_{param}_auto_vs_cpu",
+                    corr_min=cpu_auto_param_corr_min,
+                    mse_max=cpu_auto_param_mse_max,
+                    extra_mask=cpu_auto_mask_use,
                     required=cpu_required,
                 )
 
-                for param in spec["params"]:
-                    if param == "Ktrans":
-                        continue
-                    py_cpu_map = _load_nifti(out_cpu / f"Dyn-1_{model_name}_fit_{param}.nii.gz")
-                    py_auto_map = _load_nifti(out_auto / f"Dyn-1_{model_name}_fit_{param}.nii.gz")
-                    matlab_map = _load_nifti(_matlab_map_path(paths, model_name, param))
-
-                    param_use_ktrans_mask = param.lower() == "ve"
-                    if param_use_ktrans_mask:
-                        cpu_mask = (
-                            np.isfinite(py_cpu_ktrans)
-                            & np.isfinite(matlab_ktrans)
-                            & (py_cpu_ktrans > ve_ktrans_min)
-                            & (matlab_ktrans > ve_ktrans_min)
-                        )
-                        auto_mask = (
-                            np.isfinite(py_auto_ktrans)
-                            & np.isfinite(matlab_ktrans)
-                            & (py_auto_ktrans > ve_ktrans_min)
-                            & (matlab_ktrans > ve_ktrans_min)
-                        )
-                        cpu_auto_mask = (
-                            np.isfinite(py_cpu_ktrans)
-                            & np.isfinite(py_auto_ktrans)
-                            & (py_cpu_ktrans > ve_ktrans_min)
-                            & (py_auto_ktrans > ve_ktrans_min)
-                        )
-                    else:
-                        cpu_mask = None
-                        auto_mask = None
-                        cpu_auto_mask = None
-                    base_valid_cpu = np.isfinite(py_cpu_map) & np.isfinite(matlab_map) & (roi_mask > 0)
-                    base_valid_auto = np.isfinite(py_auto_map) & np.isfinite(matlab_map) & (roi_mask > 0)
-                    base_valid_cpu_auto = np.isfinite(py_auto_map) & np.isfinite(py_cpu_map) & (roi_mask > 0)
-
-                    if param_use_ktrans_mask:
-                        cpu_mask_use = cpu_mask if np.count_nonzero(base_valid_cpu & cpu_mask) >= 2 else None
-                        auto_mask_use = auto_mask if np.count_nonzero(base_valid_auto & auto_mask) >= 2 else None
-                        cpu_auto_mask_use = cpu_auto_mask if np.count_nonzero(base_valid_cpu_auto & cpu_auto_mask) >= 2 else None
-                    else:
-                        cpu_mask_use = None
-                        auto_mask_use = None
-                        cpu_auto_mask_use = None
-
-                    run_check(
-                        py_cpu_map,
-                        matlab_map,
-                        label=f"{model_name}_{param}_cpu_vs_matlab",
-                        corr_min=param_corr_min,
-                        mse_max=param_mse_max,
-                        extra_mask=cpu_mask_use,
-                        required=cpu_required,
-                    )
-                    run_check(
-                        py_auto_map,
-                        matlab_map,
-                        label=f"{model_name}_{param}_auto_vs_matlab",
-                        corr_min=param_corr_min,
-                        mse_max=param_mse_max,
-                        extra_mask=auto_mask_use,
-                        required=model_required,
-                    )
-                    run_check(
-                        py_auto_map,
-                        py_cpu_map,
-                        label=f"{model_name}_{param}_auto_vs_cpu",
-                        corr_min=cpu_auto_param_corr_min,
-                        mse_max=cpu_auto_param_mse_max,
-                        extra_mask=cpu_auto_mask_use,
-                        required=cpu_required,
-                    )
-
-            _parity_log("completed multi-model backend parity")
-            if diagnostic_failures:
-                _parity_log(
-                    f"diagnostic parity failures (non-gating): {len(diagnostic_failures)}"
-                )
-            if failures:
-                failure_text = "\n\n".join(failures)
-                self.fail(
-                    "multi-model parity checks failed; see details below:\n"
-                    f"{failure_text}"
-                )
-
-    @unittest.skipUnless(RUN_PARITY, "Set ROCKETSHIP_RUN_PIPELINE_PARITY=1 to run dataset parity checks.")
-    def test_downsample_bbb_p19_tofts_ktrans(self) -> None:
-        root = Path(
-            os.environ.get(
-                "ROCKETSHIP_BBB_DOWNSAMPLED_ROOT",
-                str(_default_downsample_root()),
+        _parity_log("completed multi-model backend parity")
+        if diagnostic_failures:
+            _parity_log(
+                f"diagnostic parity failures (non-gating): {len(diagnostic_failures)}"
             )
-        )
-        paths = _dataset_paths(root)
-        tofts_expected = [paths["matlab_tofts_ktrans"], paths["matlab_tofts_ve"]]
-        self.assertTrue(
-            paths["matlab_tofts_ktrans"].exists(),
-            _parity_error_hint(paths, models=["tofts"], expected_maps=tofts_expected),
-        )
-        self.assertTrue(
-            paths["matlab_tofts_ve"].exists(),
-            _parity_error_hint(paths, models=["tofts"], expected_maps=tofts_expected),
-        )
+        if failures:
+            failure_text = "\n\n".join(failures)
+            pytest.fail(
+                "multi-model parity checks failed; see details below:\n"
+                f"{failure_text}"
+            )
 
-        with tempfile.TemporaryDirectory() as tmp:
-            out_dir = Path(tmp) / "python_out"
-            result = run_dce_pipeline(_make_config(paths, out_dir, backend="auto", models=["tofts"]))
-            self.assertEqual(result["meta"]["status"], "ok")
 
-            py_ktrans = _load_nifti(out_dir / "Dyn-1_tofts_fit_Ktrans.nii.gz")
-            matlab_ktrans = _load_nifti(paths["matlab_tofts_ktrans"])
-            py_ve = _load_nifti(out_dir / "Dyn-1_tofts_fit_ve.nii.gz")
-            matlab_ve = _load_nifti(paths["matlab_tofts_ve"])
-            roi_mask = _load_nifti(paths["roi"])
+@pytest.mark.parity
+@pytest.mark.integration
+def test_downsample_bbb_p19_tofts_ktrans(
+    run_parity: bool,
+    parity_dataset_root: str,
+) -> None:
+    if not run_parity:
+        pytest.skip("Use --run-parity to run dataset-backed parity checks.")
 
-        _assert_map_parity(
-            self,
-            py_ktrans,
-            matlab_ktrans,
-            roi_mask,
-            label="tofts_ktrans_downsample",
-            corr_min=float(os.environ.get("ROCKETSHIP_PARITY_DOWNSAMPLED_KTRANS_CORR_MIN", "0.99")),
-            mse_max=float(os.environ.get("ROCKETSHIP_PARITY_DOWNSAMPLED_KTRANS_MSE_MAX", "0.001")),
-        )
-        ve_ktrans_min = float(os.environ.get("ROCKETSHIP_PARITY_VE_KTRANS_MIN", "1e-6"))
-        _assert_map_parity(
-            self,
-            py_ve,
-            matlab_ve,
-            roi_mask,
-            label="tofts_ve_downsample",
-            corr_min=float(os.environ.get("ROCKETSHIP_PARITY_DOWNSAMPLED_VE_CORR_MIN", "0.97")),
-            mse_max=float(os.environ.get("ROCKETSHIP_PARITY_DOWNSAMPLED_VE_MSE_MAX", "0.002")),
-            extra_mask=(
-                np.isfinite(py_ktrans)
-                & np.isfinite(matlab_ktrans)
-                & (py_ktrans > ve_ktrans_min)
-                & (matlab_ktrans > ve_ktrans_min)
-            ),
-        )
-
-    @unittest.skipUnless(
-        RUN_PARITY and RUN_FULL,
-        "Set ROCKETSHIP_RUN_PIPELINE_PARITY=1 and ROCKETSHIP_RUN_FULL_VOLUME_PARITY=1 for full-volume parity.",
+    root = Path(parity_dataset_root) if parity_dataset_root else _default_downsample_root()
+    paths = _dataset_paths(root)
+    tofts_expected = [paths["matlab_tofts_ktrans"], paths["matlab_tofts_ve"]]
+    assert paths["matlab_tofts_ktrans"].exists(), _parity_error_hint(
+        paths,
+        models=["tofts"],
+        expected_maps=tofts_expected,
     )
-    def test_full_bbb_p19_tofts_ktrans(self) -> None:
-        root = Path(
-            os.environ.get(
-                "ROCKETSHIP_BBB_FULL_ROOT",
-                str(REPO_ROOT / "test_data" / "BBB data p19"),
-            )
-        )
-        paths = _dataset_paths(root)
-        tofts_expected = [paths["matlab_tofts_ktrans"], paths["matlab_tofts_ve"]]
-        self.assertTrue(
-            paths["matlab_tofts_ktrans"].exists(),
-            _parity_error_hint(paths, models=["tofts"], expected_maps=tofts_expected),
-        )
-        self.assertTrue(
-            paths["matlab_tofts_ve"].exists(),
-            _parity_error_hint(paths, models=["tofts"], expected_maps=tofts_expected),
-        )
+    assert paths["matlab_tofts_ve"].exists(), _parity_error_hint(
+        paths,
+        models=["tofts"],
+        expected_maps=tofts_expected,
+    )
 
-        with tempfile.TemporaryDirectory() as tmp:
-            out_dir = Path(tmp) / "python_out"
-            result = run_dce_pipeline(_make_config(paths, out_dir, backend="auto", models=["tofts"]))
-            self.assertEqual(result["meta"]["status"], "ok")
+    with tempfile.TemporaryDirectory() as tmp:
+        out_dir = Path(tmp) / "python_out"
+        result = run_dce_pipeline(_make_config(paths, out_dir, backend="auto", models=["tofts"]))
+        assert result["meta"]["status"] == "ok"
 
-            py_ktrans = _load_nifti(out_dir / "Dyn-1_tofts_fit_Ktrans.nii.gz")
-            matlab_ktrans = _load_nifti(paths["matlab_tofts_ktrans"])
-            py_ve = _load_nifti(out_dir / "Dyn-1_tofts_fit_ve.nii.gz")
-            matlab_ve = _load_nifti(paths["matlab_tofts_ve"])
-            roi_mask = _load_nifti(paths["roi"])
+        py_ktrans = _load_nifti(out_dir / "Dyn-1_tofts_fit_Ktrans.nii.gz")
+        matlab_ktrans = _load_nifti(paths["matlab_tofts_ktrans"])
+        py_ve = _load_nifti(out_dir / "Dyn-1_tofts_fit_ve.nii.gz")
+        matlab_ve = _load_nifti(paths["matlab_tofts_ve"])
+        roi_mask = _load_nifti(paths["roi"])
 
-        _assert_map_parity(
-            self,
-            py_ktrans,
-            matlab_ktrans,
-            roi_mask,
-            label="tofts_ktrans_full",
-            corr_min=float(os.environ.get("ROCKETSHIP_PARITY_FULL_KTRANS_CORR_MIN", "0.99")),
-            mse_max=float(os.environ.get("ROCKETSHIP_PARITY_FULL_KTRANS_MSE_MAX", "0.001")),
-        )
-        ve_ktrans_min = float(os.environ.get("ROCKETSHIP_PARITY_VE_KTRANS_MIN", "1e-6"))
-        _assert_map_parity(
-            self,
-            py_ve,
-            matlab_ve,
-            roi_mask,
-            label="tofts_ve_full",
-            corr_min=float(os.environ.get("ROCKETSHIP_PARITY_FULL_VE_CORR_MIN", "0.97")),
-            mse_max=float(os.environ.get("ROCKETSHIP_PARITY_FULL_VE_MSE_MAX", "0.002")),
-            extra_mask=(
-                np.isfinite(py_ktrans)
-                & np.isfinite(matlab_ktrans)
-                & (py_ktrans > ve_ktrans_min)
-                & (matlab_ktrans > ve_ktrans_min)
-            ),
-        )
+    _assert_map_parity(
+        py_ktrans,
+        matlab_ktrans,
+        roi_mask,
+        label="tofts_ktrans_downsample",
+        corr_min=float(os.environ.get("ROCKETSHIP_PARITY_DOWNSAMPLED_KTRANS_CORR_MIN", "0.99")),
+        mse_max=float(os.environ.get("ROCKETSHIP_PARITY_DOWNSAMPLED_KTRANS_MSE_MAX", "0.001")),
+    )
+    ve_ktrans_min = float(os.environ.get("ROCKETSHIP_PARITY_VE_KTRANS_MIN", "1e-6"))
+    _assert_map_parity(
+        py_ve,
+        matlab_ve,
+        roi_mask,
+        label="tofts_ve_downsample",
+        corr_min=float(os.environ.get("ROCKETSHIP_PARITY_DOWNSAMPLED_VE_CORR_MIN", "0.97")),
+        mse_max=float(os.environ.get("ROCKETSHIP_PARITY_DOWNSAMPLED_VE_MSE_MAX", "0.002")),
+        extra_mask=(
+            np.isfinite(py_ktrans)
+            & np.isfinite(matlab_ktrans)
+            & (py_ktrans > ve_ktrans_min)
+            & (matlab_ktrans > ve_ktrans_min)
+        ),
+    )
 
 
-if __name__ == "__main__":
-    unittest.main()
+@pytest.mark.parity
+@pytest.mark.integration
+@pytest.mark.slow
+def test_full_bbb_p19_tofts_ktrans(
+    run_parity: bool,
+    run_full_parity: bool,
+    parity_full_root: str,
+) -> None:
+    if not (run_parity and run_full_parity):
+        pytest.skip("Use --run-parity --run-full-parity to run full-volume parity checks.")
+
+    root = Path(parity_full_root) if parity_full_root else (REPO_ROOT / "test_data" / "BBB data p19")
+    paths = _dataset_paths(root)
+    tofts_expected = [paths["matlab_tofts_ktrans"], paths["matlab_tofts_ve"]]
+    assert paths["matlab_tofts_ktrans"].exists(), _parity_error_hint(
+        paths,
+        models=["tofts"],
+        expected_maps=tofts_expected,
+    )
+    assert paths["matlab_tofts_ve"].exists(), _parity_error_hint(
+        paths,
+        models=["tofts"],
+        expected_maps=tofts_expected,
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out_dir = Path(tmp) / "python_out"
+        result = run_dce_pipeline(_make_config(paths, out_dir, backend="auto", models=["tofts"]))
+        assert result["meta"]["status"] == "ok"
+
+        py_ktrans = _load_nifti(out_dir / "Dyn-1_tofts_fit_Ktrans.nii.gz")
+        matlab_ktrans = _load_nifti(paths["matlab_tofts_ktrans"])
+        py_ve = _load_nifti(out_dir / "Dyn-1_tofts_fit_ve.nii.gz")
+        matlab_ve = _load_nifti(paths["matlab_tofts_ve"])
+        roi_mask = _load_nifti(paths["roi"])
+
+    _assert_map_parity(
+        py_ktrans,
+        matlab_ktrans,
+        roi_mask,
+        label="tofts_ktrans_full",
+        corr_min=float(os.environ.get("ROCKETSHIP_PARITY_FULL_KTRANS_CORR_MIN", "0.99")),
+        mse_max=float(os.environ.get("ROCKETSHIP_PARITY_FULL_KTRANS_MSE_MAX", "0.001")),
+    )
+    ve_ktrans_min = float(os.environ.get("ROCKETSHIP_PARITY_VE_KTRANS_MIN", "1e-6"))
+    _assert_map_parity(
+        py_ve,
+        matlab_ve,
+        roi_mask,
+        label="tofts_ve_full",
+        corr_min=float(os.environ.get("ROCKETSHIP_PARITY_FULL_VE_CORR_MIN", "0.97")),
+        mse_max=float(os.environ.get("ROCKETSHIP_PARITY_FULL_VE_MSE_MAX", "0.002")),
+        extra_mask=(
+            np.isfinite(py_ktrans)
+            & np.isfinite(matlab_ktrans)
+            & (py_ktrans > ve_ktrans_min)
+            & (matlab_ktrans > ve_ktrans_min)
+        ),
+    )

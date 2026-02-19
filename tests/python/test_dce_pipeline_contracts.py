@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 import sys
 import tempfile
-import unittest
+
+import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -39,85 +40,81 @@ def _make_temp_config(tmp_dir: Path) -> Path:
     return config_path
 
 
-class TestDcePipelineContracts(unittest.TestCase):
-    def test_cli_pipeline_writes_event_log_and_summary_contract(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_dir = Path(tmp)
-            config_path = _make_temp_config(tmp_dir)
-            event_log_path = tmp_dir / "events.jsonl"
+@pytest.mark.integration
+def test_cli_pipeline_writes_event_log_and_summary_contract() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_dir = Path(tmp)
+        config_path = _make_temp_config(tmp_dir)
+        event_log_path = tmp_dir / "events.jsonl"
 
-            rc = dce_cli.main(
-                [
-                    "--config",
-                    str(config_path),
-                    "--events",
-                    "off",
-                    "--event-log",
-                    str(event_log_path),
-                ]
-            )
-            self.assertEqual(rc, 0)
-            self.assertTrue(event_log_path.exists(), "Expected JSONL event log to be written")
-
-            events = [
-                json.loads(line)
-                for line in event_log_path.read_text(encoding="utf-8").splitlines()
-                if line.strip()
+        rc = dce_cli.main(
+            [
+                "--config",
+                str(config_path),
+                "--events",
+                "off",
+                "--event-log",
+                str(event_log_path),
             ]
-            self.assertGreater(len(events), 0)
-            event_types = [str(e.get("type", "")) for e in events]
+        )
+        assert rc == 0
+        assert event_log_path.exists(), "Expected JSONL event log to be written"
 
-            self.assertIn("cli_config", event_types)
-            self.assertIn("run_start", event_types)
-            self.assertIn("run_done", event_types)
-            self.assertIn("stage_start", event_types)
-            self.assertIn("stage_done", event_types)
-            self.assertIn("artifact_written", event_types)
-            self.assertIn("model_start", event_types)
-            self.assertIn("model_done", event_types)
+        events = [
+            json.loads(line)
+            for line in event_log_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        assert len(events) > 0
+        event_types = [str(e.get("type", "")) for e in events]
 
-            stage_start = [str(e.get("stage", "")) for e in events if e.get("type") == "stage_start"]
-            stage_done = [str(e.get("stage", "")) for e in events if e.get("type") == "stage_done"]
-            self.assertEqual(stage_start, ["A", "B", "D"])
-            self.assertEqual(stage_done, ["A", "B", "D"])
+        assert "cli_config" in event_types
+        assert "run_start" in event_types
+        assert "run_done" in event_types
+        assert "stage_start" in event_types
+        assert "stage_done" in event_types
+        assert "artifact_written" in event_types
+        assert "model_start" in event_types
+        assert "model_done" in event_types
 
-            for event in events:
-                if event.get("type") != "cli_config":
-                    self.assertIn("timestamp_utc", event)
+        stage_start = [str(e.get("stage", "")) for e in events if e.get("type") == "stage_start"]
+        stage_done = [str(e.get("stage", "")) for e in events if e.get("type") == "stage_done"]
+        assert stage_start == ["A", "B", "D"]
+        assert stage_done == ["A", "B", "D"]
 
-            summary_path = tmp_dir / "out" / "dce_pipeline_run.json"
-            self.assertTrue(summary_path.exists(), "Expected run summary file")
-            summary_payload = json.loads(summary_path.read_text(encoding="utf-8"))
+        for event in events:
+            if event.get("type") != "cli_config":
+                assert "timestamp_utc" in event
 
-            self.assertIn("meta", summary_payload)
-            self.assertIn("stages", summary_payload)
-            self.assertEqual(summary_payload["meta"]["status"], "ok")
-            self.assertIn("A", summary_payload["stages"])
-            self.assertIn("B", summary_payload["stages"])
-            self.assertIn("D", summary_payload["stages"])
+        summary_path = tmp_dir / "out" / "dce_pipeline_run.json"
+        assert summary_path.exists(), "Expected run summary file"
+        summary_payload = json.loads(summary_path.read_text(encoding="utf-8"))
 
-            stage_d = summary_payload["stages"]["D"]
-            for key in (
-                "selected_backend",
-                "acceleration_backend",
-                "backend_reason",
-                "backend_used",
-                "models_run",
-                "model_outputs",
-            ):
-                self.assertIn(key, stage_d)
-            self.assertEqual(stage_d["selected_backend"], "cpu")
-            self.assertEqual(stage_d["acceleration_backend"], "none")
-            self.assertIn("tofts", stage_d["models_run"])
+        assert "meta" in summary_payload
+        assert "stages" in summary_payload
+        assert summary_payload["meta"]["status"] == "ok"
+        assert "A" in summary_payload["stages"]
+        assert "B" in summary_payload["stages"]
+        assert "D" in summary_payload["stages"]
 
-            tofts_out = stage_d["model_outputs"]["tofts"]
-            self.assertIn("map_paths", tofts_out)
-            self.assertTrue(bool(tofts_out["map_paths"]))
-            for map_path in tofts_out["map_paths"].values():
-                self.assertTrue(Path(map_path).exists())
-            self.assertTrue(tofts_out["xls_path"])
-            self.assertTrue(Path(tofts_out["xls_path"]).exists())
+        stage_d = summary_payload["stages"]["D"]
+        for key in (
+            "selected_backend",
+            "acceleration_backend",
+            "backend_reason",
+            "backend_used",
+            "models_run",
+            "model_outputs",
+        ):
+            assert key in stage_d
+        assert stage_d["selected_backend"] == "cpu"
+        assert stage_d["acceleration_backend"] == "none"
+        assert "tofts" in stage_d["models_run"]
 
-
-if __name__ == "__main__":
-    unittest.main()
+        tofts_out = stage_d["model_outputs"]["tofts"]
+        assert "map_paths" in tofts_out
+        assert bool(tofts_out["map_paths"])
+        for map_path in tofts_out["map_paths"].values():
+            assert Path(map_path).exists()
+        assert tofts_out["xls_path"]
+        assert Path(tofts_out["xls_path"]).exists()

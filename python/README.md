@@ -148,7 +148,7 @@ Shared options documentation for CLI + GUI:
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python -m unittest discover -s tests/python -p 'test_*.py'
+.venv/bin/python -m pytest tests/python -q
 ```
 
 This includes Phase-1 reliability coverage such as installer asset-selection logic and
@@ -169,16 +169,18 @@ Fast downsample parity:
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
-ROCKETSHIP_RUN_PIPELINE_PARITY=1 .venv/bin/python -m unittest \
-  tests.python.test_dce_pipeline_parity_metrics.TestDcePipelineParityMetrics.test_downsample_bbb_p19_tofts_ktrans
+.venv/bin/python -m pytest \
+  tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_tofts_ktrans \
+  --run-parity
 ```
 
 Optional VE parity mask threshold (measurable-Ktrans voxels only):
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
-ROCKETSHIP_RUN_PIPELINE_PARITY=1 ROCKETSHIP_PARITY_VE_KTRANS_MIN=1e-6 .venv/bin/python -m unittest \
-  tests.python.test_dce_pipeline_parity_metrics.TestDcePipelineParityMetrics.test_downsample_bbb_p19_tofts_ktrans
+ROCKETSHIP_PARITY_VE_KTRANS_MIN=1e-6 .venv/bin/python -m pytest \
+  tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_tofts_ktrans \
+  --run-parity
 ```
 
 Notes:
@@ -189,8 +191,9 @@ Optional full-volume parity (slower; reserve for occasional thorough checks):
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
-ROCKETSHIP_RUN_PIPELINE_PARITY=1 ROCKETSHIP_RUN_FULL_VOLUME_PARITY=1 .venv/bin/python -m unittest \
-  tests.python.test_dce_pipeline_parity_metrics.TestDcePipelineParityMetrics.test_full_bbb_p19_tofts_ktrans
+.venv/bin/python -m pytest \
+  tests/python/test_dce_pipeline_parity_metrics.py::test_full_bbb_p19_tofts_ktrans \
+  --run-parity --run-full-parity
 ```
 
 Default downsample fixture used for parity:
@@ -201,7 +204,7 @@ Default downsample fixture used for parity:
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python tests/python/generate_tiny_dce_settings_fixture.py --clean
-.venv/bin/python -m unittest tests.python.test_dce_pipeline_settings_matrix -v
+.venv/bin/python -m pytest tests/python/test_dce_pipeline_settings_matrix.py -v
 ```
 
 ## CI behavior (high level)
