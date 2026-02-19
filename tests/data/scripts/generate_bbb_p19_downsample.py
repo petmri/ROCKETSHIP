@@ -12,9 +12,9 @@ import nibabel as nib
 import numpy as np
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_SOURCE = REPO_ROOT / "test_data" / "BBB data p19"
-DEFAULT_OUTPUT = REPO_ROOT / "test_data" / "synthetic" / "generated" / "bbb_p19_downsample_x3y3"
+REPO_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_SOURCE = REPO_ROOT / "tests" / "data" / "BBB data p19"
+DEFAULT_OUTPUT = REPO_ROOT / "tests" / "data" / "synthetic" / "generated" / "bbb_p19_downsample_x3y3"
 
 
 def _iter_result_maps(results_dir: Path) -> Iterable[Path]:

@@ -14,7 +14,7 @@ Reference data and peer result summaries were imported from:
 
 ## Imported Data
 
-- DCE model datasets: `/Users/samuelbarnes/code/ROCKETSHIP/tests/osipi/data/dce_models/`
+- DCE model datasets: `/Users/samuelbarnes/code/ROCKETSHIP/tests/data/osipi/dce_models/`
   - `dce_DRO_data_tofts.csv`
   - `dce_DRO_data_extended_tofts.csv`
   - `patlak_sd_0.02_delay_0.csv`
@@ -23,7 +23,7 @@ Reference data and peer result summaries were imported from:
   - `2cxm_sd_0.001_delay_5.csv`
   - `2cum_sd_0.0025_delay_0.csv`
   - `2cum_sd_0.0025_delay_5.csv`
-- T1 datasets: `/Users/samuelbarnes/code/ROCKETSHIP/tests/osipi/data/t1_mapping/`
+- T1 datasets: `/Users/samuelbarnes/code/ROCKETSHIP/tests/data/osipi/t1_mapping/`
   - `t1_brain_data.csv`
   - `t1_quiba_data.csv`
   - `t1_prostate_data.csv`
@@ -32,7 +32,7 @@ Reference data and peer result summaries were imported from:
 
 Patlak delay reference values are normalized into:
 
-- `/Users/samuelbarnes/code/ROCKETSHIP/tests/osipi/reference/patlak_delay_reference_values.json`
+- `/Users/samuelbarnes/code/ROCKETSHIP/tests/data/osipi/reference/patlak_delay_reference_values.json`
 
 This manifest links each base Patlak case label to the delay-0 and delay-5 reference values and preserves `vp`/`ps` references for future delay-fit model tests.
 
@@ -40,8 +40,8 @@ This manifest links each base Patlak case label to the delay-0 and delay-5 refer
 
 Peer error summaries are stored in:
 
-- `/Users/samuelbarnes/code/ROCKETSHIP/tests/osipi/reference/osipi_peer_error_summary.json`
-- `/Users/samuelbarnes/code/ROCKETSHIP/tests/osipi/reference/peer_accuracy_summary.md`
+- `/Users/samuelbarnes/code/ROCKETSHIP/tests/data/osipi/reference/osipi_peer_error_summary.json`
+- `/Users/samuelbarnes/code/ROCKETSHIP/tests/data/osipi/reference/peer_accuracy_summary.md`
 
 These values are computed from OSIPI `TestResults` CSV outputs and used by the OSIPI tests to set comparison thresholds in a reproducible way.
 

@@ -2,13 +2,13 @@
 
 Computed from ROCKETSHIP fits against imported OSIPI datasets and compared to OSIPI posted peer-result aggregates.
 
-- ROCKETSHIP datasets: `tests/osipi/data/...`
-- Peer reference summary: `tests/osipi/reference/osipi_peer_error_summary.json`
+- ROCKETSHIP datasets: `tests/data/osipi/...`
+- Peer reference summary: `tests/data/osipi/reference/osipi_peer_error_summary.json`
 - Peer source: https://github.com/OSIPI/DCE-DSC-MRI_TestResults (commit `23d3714797045d8103d5b5fa4f4c016840094dc0`)
 - Figures:
-  - `tests/osipi/reference/figures/osipi_accuracy_dros.png`
-  - `tests/osipi/reference/figures/osipi_accuracy_patlak_delay.png`
-  - `tests/osipi/reference/figures/osipi_accuracy_t1.png`
+  - `tests/data/osipi/reference/figures/osipi_accuracy_dros.png`
+  - `tests/data/osipi/reference/figures/osipi_accuracy_patlak_delay.png`
+  - `tests/data/osipi/reference/figures/osipi_accuracy_t1.png`
 
 | Model | Dataset slice | Param | N | Our MAE | Our P95 | Our Max | Peer MAE | Peer P95 | Peer Max | MAE Ratio (Our/Peer) | Max Ratio (Our/Peer) | Within Peer Max | Notes |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :---: | --- |

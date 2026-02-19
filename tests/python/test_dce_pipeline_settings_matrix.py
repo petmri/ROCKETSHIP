@@ -22,7 +22,7 @@ def _tiny_root() -> Path:
     return Path(
         os.environ.get(
             "ROCKETSHIP_TINY_SETTINGS_ROOT",
-            str(REPO_ROOT / "test_data" / "ci_fixtures" / "dce" / "tiny_settings_case"),
+            str(REPO_ROOT / "tests/data" / "ci_fixtures" / "dce" / "tiny_settings_case"),
         )
     ).expanduser().resolve()
 

@@ -5,7 +5,7 @@ This test suite is scoped to **core algorithms** and intentionally avoids GUI be
 ## Goals
 - Verify numerical correctness of core MATLAB algorithms.
 - Build reusable parity contracts so future Python ports can be validated against MATLAB reference behavior.
-- Support both synthetic fixtures and curated real fixtures from `test_data`.
+- Support both synthetic fixtures and curated real fixtures from `tests/data`.
 
 ## Layout
 - `tests/matlab/unit/`: fast deterministic unit tests for core DCE/DSC/parametric algorithms.
@@ -13,7 +13,7 @@ This test suite is scoped to **core algorithms** and intentionally avoids GUI be
 - `tests/matlab/helpers/`: shared MATLAB helpers for path setup, fixtures, and assertions.
 - `tests/contracts/`: cross-language parity contracts and tolerance profiles.
 - `tests/contracts/baselines/`: generated MATLAB baseline outputs used by future Python parity checks.
-- `tests/osipi/`: imported OSIPI reference datasets, provenance docs, and peer-result tolerance summaries used by OSIPI-labeled Python tests.
+- `tests/data/osipi/`: imported OSIPI reference datasets, provenance docs, and peer-result tolerance summaries used by OSIPI-labeled Python tests.
 
 ## Running MATLAB tests
 From MATLAB:
@@ -42,17 +42,17 @@ This writes:
 These files are intended for direct numerical comparison when the Python implementation is introduced.
 
 ## Generating synthetic datasets
-Create deterministic synthetic BIDS-like fixtures derived from `test_data/BIDS_test`:
+Create deterministic synthetic BIDS-like fixtures derived from `tests/data/BIDS_test`:
 
 ```matlab
 manifest = generate_synthetic_datasets();
 ```
 
 Default output:
-- `test_data/synthetic/generated/noisy_low`
-- `test_data/synthetic/generated/noisy_high`
-- `test_data/synthetic/generated/downsample_x2`
-- `test_data/synthetic/generated/bolus_delay`
+- `tests/data/synthetic/generated/noisy_low`
+- `tests/data/synthetic/generated/noisy_high`
+- `tests/data/synthetic/generated/downsample_x2`
+- `tests/data/synthetic/generated/bolus_delay`
 
 You can also generate into a temp directory:
 
@@ -64,20 +64,20 @@ Generate a fast, nearest-neighbor downsampled `BBB data p19` fixture (`x3,y3`) f
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python tests/python/generate_bbb_p19_downsample.py --clean --factor-x 3 --factor-y 3
+.venv/bin/python tests/data/scripts/generate_bbb_p19_downsample.py --clean --factor-x 3 --factor-y 3
 ```
 
 CI uses committed lightweight fixtures (no per-run generation required):
-- `test_data/ci_fixtures/dce/downsample_x2_bids` (MATLAB PR smoke DCE run)
-- `test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3` (Python DCE pipeline parity)
+- `tests/data/ci_fixtures/dce/downsample_x2_bids` (MATLAB PR smoke DCE run)
+- `tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3` (Python DCE pipeline parity)
 
 Generate MATLAB Tofts Ktrans parity baselines (`processed/results_matlab`) for both
 downsampled and full-volume BBB datasets:
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
-matlab -batch "cd('/Users/samuelbarnes/code/ROCKETSHIP'); addpath('tests/matlab'); generate_dce_tofts_parity_map('subjectRoot','/Users/samuelbarnes/code/ROCKETSHIP/test_data/synthetic/generated/bbb_p19_downsample_x3y3')"
-matlab -batch "cd('/Users/samuelbarnes/code/ROCKETSHIP'); addpath('tests/matlab'); generate_dce_tofts_parity_map('subjectRoot','/Users/samuelbarnes/code/ROCKETSHIP/test_data/BBB data p19')"
+matlab -batch "cd('/Users/samuelbarnes/code/ROCKETSHIP'); addpath('tests/matlab'); generate_dce_tofts_parity_map('subjectRoot','/Users/samuelbarnes/code/ROCKETSHIP/tests/data/synthetic/generated/bbb_p19_downsample_x3y3')"
+matlab -batch "cd('/Users/samuelbarnes/code/ROCKETSHIP'); addpath('tests/matlab'); generate_dce_tofts_parity_map('subjectRoot','/Users/samuelbarnes/code/ROCKETSHIP/tests/data/BBB data p19')"
 ```
 
 ## MATLAB-vs-Python parity runner

@@ -36,9 +36,9 @@ from rocketship import (  # noqa: E402
 )
 
 
-OSIPI_ROOT = REPO_ROOT / "tests" / "osipi"
-DCE_DATA_DIR = OSIPI_ROOT / "data" / "dce_models"
-T1_DATA_DIR = OSIPI_ROOT / "data" / "t1_mapping"
+OSIPI_ROOT = REPO_ROOT / "tests" / "data" / "osipi"
+DCE_DATA_DIR = OSIPI_ROOT / "dce_models"
+T1_DATA_DIR = OSIPI_ROOT / "t1_mapping"
 REFERENCE_DIR = OSIPI_ROOT / "reference"
 FIG_DIR = REFERENCE_DIR / "figures"
 SUMMARY_MD = REPO_ROOT / "osipi_summary.md"
@@ -769,13 +769,13 @@ def _write_markdown(table_rows: list[dict[str, Any]]) -> None:
     lines.append("")
     lines.append("Computed from ROCKETSHIP fits against imported OSIPI datasets and compared to OSIPI posted peer-result aggregates.")
     lines.append("")
-    lines.append("- ROCKETSHIP datasets: `tests/osipi/data/...`")
-    lines.append("- Peer reference summary: `tests/osipi/reference/osipi_peer_error_summary.json`")
+    lines.append("- ROCKETSHIP datasets: `tests/data/osipi/...`")
+    lines.append("- Peer reference summary: `tests/data/osipi/reference/osipi_peer_error_summary.json`")
     lines.append("- Peer source: https://github.com/OSIPI/DCE-DSC-MRI_TestResults (commit `23d3714797045d8103d5b5fa4f4c016840094dc0`)")
     lines.append("- Figures:")
-    lines.append("  - `tests/osipi/reference/figures/osipi_accuracy_dros.png`")
-    lines.append("  - `tests/osipi/reference/figures/osipi_accuracy_patlak_delay.png`")
-    lines.append("  - `tests/osipi/reference/figures/osipi_accuracy_t1.png`")
+    lines.append("  - `tests/data/osipi/reference/figures/osipi_accuracy_dros.png`")
+    lines.append("  - `tests/data/osipi/reference/figures/osipi_accuracy_patlak_delay.png`")
+    lines.append("  - `tests/data/osipi/reference/figures/osipi_accuracy_t1.png`")
     lines.append("")
     lines.append(
         "| Model | Dataset slice | Param | N | Our MAE | Our P95 | Our Max | Peer MAE | Peer P95 | Peer Max | MAE Ratio (Our/Peer) | Max Ratio (Our/Peer) | Within Peer Max | Notes |"

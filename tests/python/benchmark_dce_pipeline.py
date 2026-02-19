@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DATASET = REPO_ROOT / "test_data" / "ci_fixtures" / "dce" / "downsample_x2_bids"
+DEFAULT_DATASET = REPO_ROOT / "tests/data" / "ci_fixtures" / "dce" / "downsample_x2_bids"
 ALL_MODELS = ["tofts", "ex_tofts", "patlak", "tissue_uptake", "two_cxm", "fxr", "auc", "nested", "FXL_rr"]
 ALL_CONFIGS = ["matlab_cpu", "matlab_gpufit", "python_cpu", "python_cpufit", "python_gpufit"]
 

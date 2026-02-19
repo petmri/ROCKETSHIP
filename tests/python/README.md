@@ -243,13 +243,13 @@ GUI behavior highlights:
 
 ## Dataset-backed DCE parity checks
 Default downsample parity fixture is committed for CI/local use:
-- `test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3`
+- `tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3`
 
 Optional: regenerate a fast real-data fixture (nearest-neighbor downsample of `BBB data p19`):
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python tests/python/generate_bbb_p19_downsample.py --clean --factor-x 3 --factor-y 3
+.venv/bin/python tests/data/scripts/generate_bbb_p19_downsample.py --clean --factor-x 3 --factor-y 3
 ```
 
 Generate MATLAB parity baselines.
@@ -257,15 +257,15 @@ Tofts-only (default):
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
-matlab -batch "cd('/Users/samuelbarnes/code/ROCKETSHIP'); addpath('tests/matlab'); generate_dce_tofts_parity_map('subjectRoot','/Users/samuelbarnes/code/ROCKETSHIP/test_data/synthetic/generated/bbb_p19_downsample_x3y3')"
-matlab -batch "cd('/Users/samuelbarnes/code/ROCKETSHIP'); addpath('tests/matlab'); generate_dce_tofts_parity_map('subjectRoot','/Users/samuelbarnes/code/ROCKETSHIP/test_data/BBB data p19')"
+matlab -batch "cd('/Users/samuelbarnes/code/ROCKETSHIP'); addpath('tests/matlab'); generate_dce_tofts_parity_map('subjectRoot','/Users/samuelbarnes/code/ROCKETSHIP/tests/data/synthetic/generated/bbb_p19_downsample_x3y3')"
+matlab -batch "cd('/Users/samuelbarnes/code/ROCKETSHIP'); addpath('tests/matlab'); generate_dce_tofts_parity_map('subjectRoot','/Users/samuelbarnes/code/ROCKETSHIP/tests/data/BBB data p19')"
 ```
 
 Multi-model baselines (for `tofts`, `ex_tofts`, `patlak`, `tissue_uptake`, `2cxm`):
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
-matlab -batch "cd('/Users/samuelbarnes/code/ROCKETSHIP'); addpath('tests/matlab'); generate_dce_tofts_parity_map('subjectRoot','/Users/samuelbarnes/code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3','models',{'tofts','ex_tofts','patlak','tissue_uptake','2cxm'})"
+matlab -batch "cd('/Users/samuelbarnes/code/ROCKETSHIP'); addpath('tests/matlab'); generate_dce_tofts_parity_map('subjectRoot','/Users/samuelbarnes/code/ROCKETSHIP/tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3','models',{'tofts','ex_tofts','patlak','tissue_uptake','2cxm'})"
 ```
 
 Run downsampled full-pipeline Tofts parity test (Python vs MATLAB maps for `Ktrans` and `ve`, with corr/MSE tolerances):
@@ -311,8 +311,8 @@ Examples:
 
 ```bash
 python tests/python/run_dce_parity.py -s tofts-downsample
-python tests/python/run_dce_parity.py -s tofts-full -f "/path/to/ROCKETSHIP/test_data/BBB data p19"
-python tests/python/run_dce_parity.py -s multi-model -d "/path/to/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3" -r 12
+python tests/python/run_dce_parity.py -s tofts-full -f "/path/to/ROCKETSHIP/tests/data/BBB data p19"
+python tests/python/run_dce_parity.py -s multi-model -d "/path/to/ROCKETSHIP/tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3" -r 12
 python tests/python/run_dce_parity.py -s multi-model -w
 ```
 
@@ -367,7 +367,7 @@ Generate or refresh tiny fixture:
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python tests/python/generate_tiny_dce_settings_fixture.py --clean
+.venv/bin/python tests/data/scripts/generate_tiny_dce_settings_fixture.py --clean
 ```
 
 Run settings/feature coverage tests (constraints, initial guesses, blood T1 override):

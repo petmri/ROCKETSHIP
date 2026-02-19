@@ -111,7 +111,7 @@ Confirmed in-scope requirements to retain:
     - also compares Python `auto` vs Python CPU-only maps
     - enabled with `ROCKETSHIP_RUN_PIPELINE_PARITY=1` and `ROCKETSHIP_RUN_MULTI_MODEL_BACKEND_PARITY=1`
     - uses sparse ROI sampling (`ROCKETSHIP_PARITY_MULTI_MODEL_ROI_STRIDE`, default `12`) to keep runtime manageable
-  - fast path uses committed fixture `test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3` (with fallback to synthetic-generated path if needed).
+  - fast path uses committed fixture `tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3` (with fallback to synthetic-generated path if needed).
   - full-volume `BBB data p19` path is available behind env gating and intended for occasional thorough checks due runtime.
   - both tests require MATLAB baseline map `processed/results_matlab/Dyn-1_tofts_fit_Ktrans.nii` (not legacy `processed/results`).
   - MATLAB baseline generator: `tests/matlab/generate_dce_tofts_parity_map.m`
@@ -122,8 +122,8 @@ Confirmed in-scope requirements to retain:
     - full-volume `BBB p19` `Ktrans`: `corr=0.99499`, `mse=0.0004671`, `mae=0.005261` (`n=25512`)
     - full-volume `BBB p19` `ve`: `corr=0.98822`, `mse=0.0008778`, `mae=0.001473` (`n=25512`)
 - Tiny settings-matrix tests:
-  - fixture generator: `tests/python/generate_tiny_dce_settings_fixture.py`
-  - fixture path: `test_data/ci_fixtures/dce/tiny_settings_case`
+  - fixture generator: `tests/data/scripts/generate_tiny_dce_settings_fixture.py`
+  - fixture path: `tests/data/ci_fixtures/dce/tiny_settings_case`
   - test module: `tests/python/test_dce_pipeline_settings_matrix.py`
   - current covered settings/features:
     - Tofts fit bound enforcement (`voxel_lower/upper_limit_*`)
@@ -189,7 +189,7 @@ Workflow: `/Users/samuelbarnes/code/ROCKETSHIP/.github/workflows/run_DCE.yml`
 
 - `python_checks` job (push + PR): Python unit tests, contract parity checks, and downsample DCE pipeline parity.
 - `python_portability` job (push + PR): Python unit/integration suite on `windows-latest` and `macos-latest` (non-parity mode).
-- PR MATLAB job: unit/integration checks + DCE smoke run using committed fixture `test_data/ci_fixtures/dce/downsample_x2_bids`.
+- PR MATLAB job: unit/integration checks + DCE smoke run using committed fixture `tests/data/ci_fixtures/dce/downsample_x2_bids`.
 - Push to `dev/master`: heavier MATLAB matrix (full validation path).
 
 ## Next recommended steps

@@ -12,8 +12,8 @@ import nibabel as nib
 import numpy as np
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_OUTPUT = REPO_ROOT / "test_data" / "ci_fixtures" / "dce" / "tiny_settings_case"
+REPO_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_OUTPUT = REPO_ROOT / "tests" / "data" / "ci_fixtures" / "dce" / "tiny_settings_case"
 
 
 def _to_signal_from_conc(

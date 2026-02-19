@@ -32,11 +32,12 @@ Recently completed
 - Installer for GPU/CPUfit for both python and matlab
 - Migrated all tests to pyTest
 - Imported OSIPI data and built tests around that
+- Reorganized test assets:
+  - moved `test_data` into `tests/data`
+  - moved data-generation scripts into `tests/data/scripts`
+  - moved `tests/osipi` into `tests/data/osipi`
 
 Highest priority next
-- Move test_data into tests/data
-- Move data generating scripts into tests/data
-- Move tests/osipi into tests/data/osipi
 - Make some tests with detailed CLI outputs, give consistent naming scheme to id them (run_*, or something else)
   - Fix run_dce_parity to output correlation and MSE again (see old version)
   - Rename benchmark to new naming scheme

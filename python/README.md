@@ -81,7 +81,7 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 Default template location:
 - `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_default.json`
 - This default is prewired to the tiny fixture:
-  - `/Users/samuelbarnes/code/ROCKETSHIP/test_data/ci_fixtures/dce/tiny_settings_case`
+  - `/Users/samuelbarnes/code/ROCKETSHIP/tests/data/ci_fixtures/dce/tiny_settings_case`
   - outputs to `/Users/samuelbarnes/code/ROCKETSHIP/out/dce_gui_tiny`
 
 Optional runtime overrides:
@@ -209,13 +209,13 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 ```
 
 Default downsample fixture used for parity:
-- `/Users/samuelbarnes/code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3`
+- `/Users/samuelbarnes/code/ROCKETSHIP/tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3`
 
 ### Tiny settings matrix (fast)
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python tests/python/generate_tiny_dce_settings_fixture.py --clean
+.venv/bin/python tests/data/scripts/generate_tiny_dce_settings_fixture.py --clean
 .venv/bin/python -m pytest tests/python/test_dce_pipeline_settings_matrix.py -v
 ```
 

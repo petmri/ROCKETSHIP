@@ -73,10 +73,10 @@ def _model_flags(models: list[str]) -> dict[str, int]:
 
 
 def _default_downsample_root() -> Path:
-    ci_fixture = REPO_ROOT / "test_data" / "ci_fixtures" / "dce" / "bbb_p19_downsample_x3y3"
+    ci_fixture = REPO_ROOT / "tests/data" / "ci_fixtures" / "dce" / "bbb_p19_downsample_x3y3"
     if ci_fixture.exists():
         return ci_fixture
-    return REPO_ROOT / "test_data" / "synthetic" / "generated" / "bbb_p19_downsample_x3y3"
+    return REPO_ROOT / "tests/data" / "synthetic" / "generated" / "bbb_p19_downsample_x3y3"
 
 
 def _make_config(
@@ -691,7 +691,7 @@ def test_full_bbb_p19_tofts_ktrans(
     if not (run_parity and run_full_parity):
         pytest.skip("Use --run-parity --run-full-parity to run full-volume parity checks.")
 
-    root = Path(parity_full_root) if parity_full_root else (REPO_ROOT / "test_data" / "BBB data p19")
+    root = Path(parity_full_root) if parity_full_root else (REPO_ROOT / "tests/data" / "BBB data p19")
     paths = _dataset_paths(root)
     tofts_expected = [paths["matlab_tofts_ktrans"], paths["matlab_tofts_ve"]]
     assert paths["matlab_tofts_ktrans"].exists(), _parity_error_hint(

@@ -16,8 +16,8 @@ sys.path.insert(0, str(REPO_ROOT / "python"))
 from rocketship import t1_fa_linear_fit  # noqa: E402
 
 
-OSIPI_ROOT = REPO_ROOT / "tests" / "osipi"
-T1_DATA_DIR = OSIPI_ROOT / "data" / "t1_mapping"
+OSIPI_ROOT = REPO_ROOT / "tests" / "data" / "osipi"
+T1_DATA_DIR = OSIPI_ROOT / "t1_mapping"
 REFERENCE_DIR = OSIPI_ROOT / "reference"
 
 PEER_ERROR_SUMMARY = json.loads((REFERENCE_DIR / "osipi_peer_error_summary.json").read_text())

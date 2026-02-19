@@ -23,8 +23,8 @@ from rocketship import (  # noqa: E402
 )
 
 
-OSIPI_ROOT = REPO_ROOT / "tests" / "osipi"
-DCE_DATA_DIR = OSIPI_ROOT / "data" / "dce_models"
+OSIPI_ROOT = REPO_ROOT / "tests" / "data" / "osipi"
+DCE_DATA_DIR = OSIPI_ROOT / "dce_models"
 REFERENCE_DIR = OSIPI_ROOT / "reference"
 
 PEER_ERROR_SUMMARY = json.loads((REFERENCE_DIR / "osipi_peer_error_summary.json").read_text())

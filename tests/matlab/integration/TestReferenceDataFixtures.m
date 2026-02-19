@@ -13,12 +13,12 @@ classdef TestReferenceDataFixtures < matlab.unittest.TestCase
     methods (Test)
         function testBbbFixtureFilesExist(testCase)
             requiredFiles = {
-                fullfile(testCase.RepoRoot, 'test_data', 'BBB data p19', 'Dynamic_t1w.nii')
-                fullfile(testCase.RepoRoot, 'test_data', 'BBB data p19', 'fa2.nii')
-                fullfile(testCase.RepoRoot, 'test_data', 'BBB data p19', 'fa5.nii')
-                fullfile(testCase.RepoRoot, 'test_data', 'BBB data p19', 'fa10.nii')
-                fullfile(testCase.RepoRoot, 'test_data', 'BBB data p19', 'processed', 'T1_map_t1_fa_fit_fa10.nii')
-                fullfile(testCase.RepoRoot, 'test_data', 'BBB data p19', 'processed', 'results', 'Dyn-1_patlak_fit_Ktrans.nii')
+                fullfile(testCase.RepoRoot, 'tests/data', 'BBB data p19', 'Dynamic_t1w.nii')
+                fullfile(testCase.RepoRoot, 'tests/data', 'BBB data p19', 'fa2.nii')
+                fullfile(testCase.RepoRoot, 'tests/data', 'BBB data p19', 'fa5.nii')
+                fullfile(testCase.RepoRoot, 'tests/data', 'BBB data p19', 'fa10.nii')
+                fullfile(testCase.RepoRoot, 'tests/data', 'BBB data p19', 'processed', 'T1_map_t1_fa_fit_fa10.nii')
+                fullfile(testCase.RepoRoot, 'tests/data', 'BBB data p19', 'processed', 'results', 'Dyn-1_patlak_fit_Ktrans.nii')
             };
 
             for i = 1:numel(requiredFiles)
@@ -28,10 +28,10 @@ classdef TestReferenceDataFixtures < matlab.unittest.TestCase
 
         function testBidsFixtureFilesExist(testCase)
             requiredFiles = {
-                fullfile(testCase.RepoRoot, 'test_data', 'BIDS_test', 'rawdata', 'sub-01', 'ses-01', 'dce', 'sub-01_ses-01_DCE.json')
-                fullfile(testCase.RepoRoot, 'test_data', 'BIDS_test', 'rawdata', 'sub-01', 'ses-01', 'anat', 'sub-01_ses-01_flip-01_VFA.nii.gz')
-                fullfile(testCase.RepoRoot, 'test_data', 'BIDS_test', 'rawdata', 'sub-01', 'ses-01', 'anat', 'sub-01_ses-01_flip-02_VFA.nii.gz')
-                fullfile(testCase.RepoRoot, 'test_data', 'BIDS_test', 'rawdata', 'sub-01', 'ses-01', 'anat', 'sub-01_ses-01_flip-03_VFA.nii.gz')
+                fullfile(testCase.RepoRoot, 'tests/data', 'BIDS_test', 'rawdata', 'sub-01', 'ses-01', 'dce', 'sub-01_ses-01_DCE.json')
+                fullfile(testCase.RepoRoot, 'tests/data', 'BIDS_test', 'rawdata', 'sub-01', 'ses-01', 'anat', 'sub-01_ses-01_flip-01_VFA.nii.gz')
+                fullfile(testCase.RepoRoot, 'tests/data', 'BIDS_test', 'rawdata', 'sub-01', 'ses-01', 'anat', 'sub-01_ses-01_flip-02_VFA.nii.gz')
+                fullfile(testCase.RepoRoot, 'tests/data', 'BIDS_test', 'rawdata', 'sub-01', 'ses-01', 'anat', 'sub-01_ses-01_flip-03_VFA.nii.gz')
             };
 
             for i = 1:numel(requiredFiles)
@@ -40,8 +40,8 @@ classdef TestReferenceDataFixtures < matlab.unittest.TestCase
         end
 
         function testReferenceMapMatchesDynamicSpatialSize(testCase)
-            dynamicPath = fullfile(testCase.RepoRoot, 'test_data', 'BBB data p19', 'Dynamic_t1w.nii');
-            ktransPath = fullfile(testCase.RepoRoot, 'test_data', 'BBB data p19', 'processed', 'results', 'Dyn-1_patlak_fit_Ktrans.nii');
+            dynamicPath = fullfile(testCase.RepoRoot, 'tests/data', 'BBB data p19', 'Dynamic_t1w.nii');
+            ktransPath = fullfile(testCase.RepoRoot, 'tests/data', 'BBB data p19', 'processed', 'results', 'Dyn-1_patlak_fit_Ktrans.nii');
 
             dynamicNii = load_untouch_nii(dynamicPath);
             ktransNii = load_untouch_nii(ktransPath);

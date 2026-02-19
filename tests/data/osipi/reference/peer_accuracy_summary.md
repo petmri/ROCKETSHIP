@@ -30,5 +30,5 @@ These values are aggregated from the peer implementation result CSV files and ar
   - `max(error) <= peer max`
   - at least `95%` of cases within `1.2 * peer p95`.
 - Patlak delay references are imported and normalized in
-  `/Users/samuelbarnes/code/ROCKETSHIP/tests/osipi/reference/patlak_delay_reference_values.json`
+  `/Users/samuelbarnes/code/ROCKETSHIP/tests/data/osipi/reference/patlak_delay_reference_values.json`
   for upcoming delay-fit test wiring.

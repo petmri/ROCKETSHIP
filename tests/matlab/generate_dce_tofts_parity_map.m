@@ -7,8 +7,8 @@ function output = generate_dce_tofts_parity_map(varargin)
 % Example:
 %   output = generate_dce_tofts_parity_map();
 %   output = generate_dce_tofts_parity_map( ...
-%       'subjectRoot', '/path/to/test_data/BBB data p19', ...
-%       'outputRoot', '/path/to/test_data/BBB data p19/processed/results_matlab', ...
+%       'subjectRoot', '/path/to/tests/data/BBB data p19', ...
+%       'outputRoot', '/path/to/tests/data/BBB data p19/processed/results_matlab', ...
 %       'models', {'tofts','ex_tofts','patlak','tissue_uptake','2cxm'});
 
 thisFile = mfilename('fullpath');
@@ -39,7 +39,7 @@ if isempty(selectedAifFitHelper) || isempty(strfind(selectedAifFitHelper, [files
 end
 
 p = inputParser;
-addParameter(p, 'subjectRoot', fullfile(repoRoot, 'test_data', 'BBB data p19'), @is_text_scalar);
+addParameter(p, 'subjectRoot', fullfile(repoRoot, 'tests/data', 'BBB data p19'), @is_text_scalar);
 addParameter(p, 'outputRoot', '', @is_text_scalar);
 addParameter(p, 'rootname', 'Dyn-1', @is_text_scalar);
 addParameter(p, 'trMs', 8.29, @isscalar);

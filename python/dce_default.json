@@ -1,25 +1,25 @@
 {
-  "subject_source_path": "./test_data/ci_fixtures/dce/tiny_settings_case",
-  "subject_tp_path": "./test_data/ci_fixtures/dce/tiny_settings_case/processed",
+  "subject_source_path": "./tests/data/ci_fixtures/dce/tiny_settings_case",
+  "subject_tp_path": "./tests/data/ci_fixtures/dce/tiny_settings_case/processed",
   "output_dir": "./out/dce_gui_tiny",
   "checkpoint_dir": "./out/dce_gui_tiny/checkpoints",
   "backend": "cpu",
   "write_xls": true,
   "aif_mode": "auto",
   "dynamic_files": [
-    "./test_data/ci_fixtures/dce/tiny_settings_case/Dynamic_t1w.nii"
+    "./tests/data/ci_fixtures/dce/tiny_settings_case/Dynamic_t1w.nii"
   ],
   "aif_files": [
-    "./test_data/ci_fixtures/dce/tiny_settings_case/processed/T1_AIF_roi.nii"
+    "./tests/data/ci_fixtures/dce/tiny_settings_case/processed/T1_AIF_roi.nii"
   ],
   "roi_files": [
-    "./test_data/ci_fixtures/dce/tiny_settings_case/processed/T1_brain_roi.nii"
+    "./tests/data/ci_fixtures/dce/tiny_settings_case/processed/T1_brain_roi.nii"
   ],
   "t1map_files": [
-    "./test_data/ci_fixtures/dce/tiny_settings_case/processed/T1_map_t1_fa_fit_fa10.nii"
+    "./tests/data/ci_fixtures/dce/tiny_settings_case/processed/T1_map_t1_fa_fit_fa10.nii"
   ],
   "noise_files": [
-    "./test_data/ci_fixtures/dce/tiny_settings_case/processed/T1_noise_roi.nii"
+    "./tests/data/ci_fixtures/dce/tiny_settings_case/processed/T1_noise_roi.nii"
   ],
   "drift_files": [],
   "model_flags": {
