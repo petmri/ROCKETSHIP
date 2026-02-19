@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import sys
@@ -305,8 +306,8 @@ def _assert_map_parity_if_enough(
     n_valid = _valid_voxel_count(lhs, rhs, roi_mask, extra_mask=extra_mask)
     if n_valid < 2:
         _parity_log(f"{label}: skipped (valid_voxels={n_valid})")
-        return False
-    _assert_map_parity(
+        return None
+    return _assert_map_parity(
         lhs,
         rhs,
         roi_mask,
@@ -315,7 +316,14 @@ def _assert_map_parity_if_enough(
         mse_max=mse_max,
         extra_mask=extra_mask,
     )
-    return True
+
+
+def _write_parity_summary(summary_dir: Path | None, file_name: str, payload: dict) -> None:
+    if summary_dir is None:
+        return
+    out_path = summary_dir / file_name
+    out_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    _parity_log(f"summary_json={out_path}")
 
 
 @pytest.mark.parity
@@ -326,6 +334,8 @@ def test_downsample_bbb_p19_models_cpu_and_auto(
     run_multi_model_backend_parity: bool,
     parity_dataset_root: str,
     parity_roi_stride: int,
+    parity_summary_dir: Path | None,
+    parity_thresholds: dict,
 ) -> None:
     if not (run_parity and run_multi_model_backend_parity):
         pytest.skip(
@@ -366,30 +376,31 @@ def test_downsample_bbb_p19_models_cpu_and_auto(
 
         roi_mask = _load_nifti(sparse_roi_path)
 
-        ktrans_corr_min = float(os.environ.get("ROCKETSHIP_PARITY_MODEL_KTRANS_CORR_MIN", "0.95"))
-        ktrans_mse_max = float(os.environ.get("ROCKETSHIP_PARITY_MODEL_KTRANS_MSE_MAX", "0.01"))
-        param_corr_min = float(os.environ.get("ROCKETSHIP_PARITY_MODEL_PARAM_CORR_MIN", "0.90"))
-        param_mse_max = float(os.environ.get("ROCKETSHIP_PARITY_MODEL_PARAM_MSE_MAX", "0.02"))
-        cpu_auto_ktrans_corr_min = float(os.environ.get("ROCKETSHIP_PARITY_CPU_AUTO_KTRANS_CORR_MIN", "0.98"))
-        cpu_auto_ktrans_mse_max = float(os.environ.get("ROCKETSHIP_PARITY_CPU_AUTO_KTRANS_MSE_MAX", "0.002"))
-        cpu_auto_param_corr_min = float(os.environ.get("ROCKETSHIP_PARITY_CPU_AUTO_PARAM_CORR_MIN", "0.95"))
-        cpu_auto_param_mse_max = float(os.environ.get("ROCKETSHIP_PARITY_CPU_AUTO_PARAM_MSE_MAX", "0.01"))
-        ve_ktrans_min = float(os.environ.get("ROCKETSHIP_PARITY_VE_KTRANS_MIN", "1e-6"))
-        ex_tofts_ktrans_corr_min = float(os.environ.get("ROCKETSHIP_PARITY_EX_TOFTS_KTRANS_CORR_MIN", "0.85"))
-        ktrans_upper_exclude = float(os.environ.get("ROCKETSHIP_PARITY_KTRANS_UPPER_EXCLUDE", "1.9"))
-        require_all_models = os.environ.get("ROCKETSHIP_PARITY_REQUIRE_ALL_MODELS", "0") == "1"
-        required_models_raw = os.environ.get("ROCKETSHIP_PARITY_REQUIRED_MODELS", "tofts,ex_tofts,patlak")
+        ktrans_corr_min = float(parity_thresholds["model_ktrans_corr_min"])
+        ktrans_mse_max = float(parity_thresholds["model_ktrans_mse_max"])
+        param_corr_min = float(parity_thresholds["model_param_corr_min"])
+        param_mse_max = float(parity_thresholds["model_param_mse_max"])
+        cpu_auto_ktrans_corr_min = float(parity_thresholds["cpu_auto_ktrans_corr_min"])
+        cpu_auto_ktrans_mse_max = float(parity_thresholds["cpu_auto_ktrans_mse_max"])
+        cpu_auto_param_corr_min = float(parity_thresholds["cpu_auto_param_corr_min"])
+        cpu_auto_param_mse_max = float(parity_thresholds["cpu_auto_param_mse_max"])
+        ve_ktrans_min = float(parity_thresholds["ve_ktrans_min"])
+        ex_tofts_ktrans_corr_min = float(parity_thresholds["ex_tofts_ktrans_corr_min"])
+        ktrans_upper_exclude = float(parity_thresholds["ktrans_upper_exclude"])
+        require_all_models = bool(parity_thresholds["require_all_models"])
+        required_models_raw = str(parity_thresholds["required_models_raw"])
         required_models = {
             token.strip().lower() for token in required_models_raw.split(",") if token.strip()
         }
         if require_all_models:
             required_models = set(MULTI_MODEL_PARITY_SPECS.keys())
-        cpu_optional_models_raw = os.environ.get("ROCKETSHIP_PARITY_CPU_OPTIONAL_MODELS", "patlak")
+        cpu_optional_models_raw = str(parity_thresholds["cpu_optional_models_raw"])
         cpu_optional_models = {
             token.strip().lower() for token in cpu_optional_models_raw.split(",") if token.strip()
         }
         failures: list[str] = []
         diagnostic_failures: list[str] = []
+        checks: list[dict] = []
 
         def run_check(
             lhs: np.ndarray,
@@ -401,8 +412,21 @@ def test_downsample_bbb_p19_models_cpu_and_auto(
             extra_mask: np.ndarray | None = None,
             required: bool = True,
         ) -> None:
+            n_valid = _valid_voxel_count(lhs, rhs, roi_mask, extra_mask=extra_mask)
+            check_rec = {
+                "label": label,
+                "required": bool(required),
+                "corr_min": float(corr_min),
+                "mse_max": float(mse_max),
+                "valid_voxels": int(n_valid),
+            }
+            if n_valid < 2:
+                check_rec["status"] = "skipped"
+                checks.append(check_rec)
+                _parity_log(f"{label}: skipped (valid_voxels={n_valid})")
+                return
             try:
-                _assert_map_parity_if_enough(
+                metrics = _assert_map_parity_if_enough(
                     lhs,
                     rhs,
                     roi_mask,
@@ -411,7 +435,14 @@ def test_downsample_bbb_p19_models_cpu_and_auto(
                     mse_max=mse_max,
                     extra_mask=extra_mask,
                 )
+                check_rec["status"] = "pass"
+                if metrics is not None:
+                    check_rec["metrics"] = metrics
+                checks.append(check_rec)
             except AssertionError as exc:
+                check_rec["status"] = "failed"
+                check_rec["error"] = str(exc)
+                checks.append(check_rec)
                 if required:
                     failures.append(f"{label}: {exc}")
                     _parity_log(f"{label}: FAILED (required)")
@@ -552,6 +583,17 @@ def test_downsample_bbb_p19_models_cpu_and_auto(
                 )
 
         _parity_log("completed multi-model backend parity")
+        summary_payload = {
+            "suite": "multi-model",
+            "dataset_root": str(paths["root"]),
+            "roi_stride": int(roi_stride),
+            "required_models": sorted(required_models),
+            "cpu_optional_models": sorted(cpu_optional_models),
+            "required_failures": failures,
+            "diagnostic_failures": diagnostic_failures,
+            "checks": checks,
+        }
+        _write_parity_summary(parity_summary_dir, "parity_multi_model_summary.json", summary_payload)
         if diagnostic_failures:
             _parity_log(
                 f"diagnostic parity failures (non-gating): {len(diagnostic_failures)}"
@@ -569,6 +611,8 @@ def test_downsample_bbb_p19_models_cpu_and_auto(
 def test_downsample_bbb_p19_tofts_ktrans(
     run_parity: bool,
     parity_dataset_root: str,
+    parity_summary_dir: Path | None,
+    parity_thresholds: dict,
 ) -> None:
     if not run_parity:
         pytest.skip("Use --run-parity to run dataset-backed parity checks.")
@@ -598,28 +642,39 @@ def test_downsample_bbb_p19_tofts_ktrans(
         matlab_ve = _load_nifti(paths["matlab_tofts_ve"])
         roi_mask = _load_nifti(paths["roi"])
 
-    _assert_map_parity(
+    ktrans_metrics = _assert_map_parity(
         py_ktrans,
         matlab_ktrans,
         roi_mask,
         label="tofts_ktrans_downsample",
-        corr_min=float(os.environ.get("ROCKETSHIP_PARITY_DOWNSAMPLED_KTRANS_CORR_MIN", "0.99")),
-        mse_max=float(os.environ.get("ROCKETSHIP_PARITY_DOWNSAMPLED_KTRANS_MSE_MAX", "0.001")),
+        corr_min=float(parity_thresholds["downsample_ktrans_corr_min"]),
+        mse_max=float(parity_thresholds["downsample_ktrans_mse_max"]),
     )
-    ve_ktrans_min = float(os.environ.get("ROCKETSHIP_PARITY_VE_KTRANS_MIN", "1e-6"))
-    _assert_map_parity(
+    ve_ktrans_min = float(parity_thresholds["ve_ktrans_min"])
+    ve_metrics = _assert_map_parity(
         py_ve,
         matlab_ve,
         roi_mask,
         label="tofts_ve_downsample",
-        corr_min=float(os.environ.get("ROCKETSHIP_PARITY_DOWNSAMPLED_VE_CORR_MIN", "0.97")),
-        mse_max=float(os.environ.get("ROCKETSHIP_PARITY_DOWNSAMPLED_VE_MSE_MAX", "0.002")),
+        corr_min=float(parity_thresholds["downsample_ve_corr_min"]),
+        mse_max=float(parity_thresholds["downsample_ve_mse_max"]),
         extra_mask=(
             np.isfinite(py_ktrans)
             & np.isfinite(matlab_ktrans)
             & (py_ktrans > ve_ktrans_min)
             & (matlab_ktrans > ve_ktrans_min)
         ),
+    )
+    _write_parity_summary(
+        parity_summary_dir,
+        "parity_tofts_downsample_summary.json",
+        {
+            "suite": "tofts-downsample",
+            "dataset_root": str(paths["root"]),
+            "ktrans": ktrans_metrics,
+            "ve": ve_metrics,
+            "ve_ktrans_min": float(ve_ktrans_min),
+        },
     )
 
 
@@ -630,6 +685,8 @@ def test_full_bbb_p19_tofts_ktrans(
     run_parity: bool,
     run_full_parity: bool,
     parity_full_root: str,
+    parity_summary_dir: Path | None,
+    parity_thresholds: dict,
 ) -> None:
     if not (run_parity and run_full_parity):
         pytest.skip("Use --run-parity --run-full-parity to run full-volume parity checks.")
@@ -659,26 +716,37 @@ def test_full_bbb_p19_tofts_ktrans(
         matlab_ve = _load_nifti(paths["matlab_tofts_ve"])
         roi_mask = _load_nifti(paths["roi"])
 
-    _assert_map_parity(
+    ktrans_metrics = _assert_map_parity(
         py_ktrans,
         matlab_ktrans,
         roi_mask,
         label="tofts_ktrans_full",
-        corr_min=float(os.environ.get("ROCKETSHIP_PARITY_FULL_KTRANS_CORR_MIN", "0.99")),
-        mse_max=float(os.environ.get("ROCKETSHIP_PARITY_FULL_KTRANS_MSE_MAX", "0.001")),
+        corr_min=float(parity_thresholds["full_ktrans_corr_min"]),
+        mse_max=float(parity_thresholds["full_ktrans_mse_max"]),
     )
-    ve_ktrans_min = float(os.environ.get("ROCKETSHIP_PARITY_VE_KTRANS_MIN", "1e-6"))
-    _assert_map_parity(
+    ve_ktrans_min = float(parity_thresholds["ve_ktrans_min"])
+    ve_metrics = _assert_map_parity(
         py_ve,
         matlab_ve,
         roi_mask,
         label="tofts_ve_full",
-        corr_min=float(os.environ.get("ROCKETSHIP_PARITY_FULL_VE_CORR_MIN", "0.97")),
-        mse_max=float(os.environ.get("ROCKETSHIP_PARITY_FULL_VE_MSE_MAX", "0.002")),
+        corr_min=float(parity_thresholds["full_ve_corr_min"]),
+        mse_max=float(parity_thresholds["full_ve_mse_max"]),
         extra_mask=(
             np.isfinite(py_ktrans)
             & np.isfinite(matlab_ktrans)
             & (py_ktrans > ve_ktrans_min)
             & (matlab_ktrans > ve_ktrans_min)
         ),
+    )
+    _write_parity_summary(
+        parity_summary_dir,
+        "parity_tofts_full_summary.json",
+        {
+            "suite": "tofts-full",
+            "dataset_root": str(paths["root"]),
+            "ktrans": ktrans_metrics,
+            "ve": ve_metrics,
+            "ve_ktrans_min": float(ve_ktrans_min),
+        },
     )

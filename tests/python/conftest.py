@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -46,6 +45,34 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=12,
         help="ROI stride for multi-model parity sparse masks.",
     )
+    group.addoption(
+        "--parity-summary-dir",
+        action="store",
+        default=".pytest_cache/parity_summaries",
+        help="Directory to write parity summary JSON reports.",
+    )
+    group.addoption("--parity-ve-ktrans-min", action="store", type=float, default=1e-6)
+    group.addoption("--parity-downsample-ktrans-corr-min", action="store", type=float, default=0.99)
+    group.addoption("--parity-downsample-ktrans-mse-max", action="store", type=float, default=0.001)
+    group.addoption("--parity-downsample-ve-corr-min", action="store", type=float, default=0.97)
+    group.addoption("--parity-downsample-ve-mse-max", action="store", type=float, default=0.002)
+    group.addoption("--parity-full-ktrans-corr-min", action="store", type=float, default=0.99)
+    group.addoption("--parity-full-ktrans-mse-max", action="store", type=float, default=0.001)
+    group.addoption("--parity-full-ve-corr-min", action="store", type=float, default=0.97)
+    group.addoption("--parity-full-ve-mse-max", action="store", type=float, default=0.002)
+    group.addoption("--parity-model-ktrans-corr-min", action="store", type=float, default=0.95)
+    group.addoption("--parity-model-ktrans-mse-max", action="store", type=float, default=0.01)
+    group.addoption("--parity-model-param-corr-min", action="store", type=float, default=0.90)
+    group.addoption("--parity-model-param-mse-max", action="store", type=float, default=0.02)
+    group.addoption("--parity-cpu-auto-ktrans-corr-min", action="store", type=float, default=0.98)
+    group.addoption("--parity-cpu-auto-ktrans-mse-max", action="store", type=float, default=0.002)
+    group.addoption("--parity-cpu-auto-param-corr-min", action="store", type=float, default=0.95)
+    group.addoption("--parity-cpu-auto-param-mse-max", action="store", type=float, default=0.01)
+    group.addoption("--parity-ex-tofts-ktrans-corr-min", action="store", type=float, default=0.85)
+    group.addoption("--parity-ktrans-upper-exclude", action="store", type=float, default=1.9)
+    group.addoption("--parity-required-models", action="store", default="tofts,ex_tofts,patlak")
+    group.addoption("--parity-cpu-optional-models", action="store", default="patlak")
+    group.addoption("--parity-require-all-models", action="store_true", default=False)
 
 
 @pytest.fixture(scope="session")
@@ -55,47 +82,72 @@ def repo_root() -> Path:
 
 @pytest.fixture(scope="session")
 def run_parity(request: pytest.FixtureRequest) -> bool:
-    return bool(request.config.getoption("--run-parity")) or os.environ.get(
-        "ROCKETSHIP_RUN_PIPELINE_PARITY", "0"
-    ) == "1"
+    return bool(request.config.getoption("--run-parity"))
 
 
 @pytest.fixture(scope="session")
 def run_full_parity(request: pytest.FixtureRequest) -> bool:
-    return bool(request.config.getoption("--run-full-parity")) or os.environ.get(
-        "ROCKETSHIP_RUN_FULL_VOLUME_PARITY", "0"
-    ) == "1"
+    return bool(request.config.getoption("--run-full-parity"))
 
 
 @pytest.fixture(scope="session")
 def run_multi_model_backend_parity(request: pytest.FixtureRequest) -> bool:
-    return bool(request.config.getoption("--run-multi-model-backend-parity")) or os.environ.get(
-        "ROCKETSHIP_RUN_MULTI_MODEL_BACKEND_PARITY", "0"
-    ) == "1"
+    return bool(request.config.getoption("--run-multi-model-backend-parity"))
 
 
 @pytest.fixture(scope="session")
 def parity_dataset_root(request: pytest.FixtureRequest) -> str:
     option_value = str(request.config.getoption("--dataset-root") or "").strip()
-    if option_value:
-        return option_value
-    return os.environ.get("ROCKETSHIP_BBB_DOWNSAMPLED_ROOT", "").strip()
+    return option_value
 
 
 @pytest.fixture(scope="session")
 def parity_full_root(request: pytest.FixtureRequest) -> str:
     option_value = str(request.config.getoption("--full-root") or "").strip()
-    if option_value:
-        return option_value
-    return os.environ.get("ROCKETSHIP_BBB_FULL_ROOT", "").strip()
+    return option_value
 
 
 @pytest.fixture(scope="session")
 def parity_roi_stride(request: pytest.FixtureRequest) -> int:
-    if request.config.getoption("--roi-stride"):
-        return max(1, int(request.config.getoption("--roi-stride")))
-    env_value = os.environ.get("ROCKETSHIP_PARITY_MULTI_MODEL_ROI_STRIDE", "12").strip()
-    try:
-        return max(1, int(env_value))
-    except ValueError:
-        return 12
+    return max(1, int(request.config.getoption("--roi-stride")))
+
+
+@pytest.fixture(scope="session")
+def parity_summary_dir(request: pytest.FixtureRequest, repo_root: Path) -> Path | None:
+    option_value = str(request.config.getoption("--parity-summary-dir") or "").strip()
+    if not option_value:
+        return None
+    path = Path(option_value).expanduser()
+    if not path.is_absolute():
+        path = (repo_root / path).resolve()
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+@pytest.fixture(scope="session")
+def parity_thresholds(request: pytest.FixtureRequest) -> dict:
+    cfg = request.config
+    return {
+        "ve_ktrans_min": float(cfg.getoption("--parity-ve-ktrans-min")),
+        "downsample_ktrans_corr_min": float(cfg.getoption("--parity-downsample-ktrans-corr-min")),
+        "downsample_ktrans_mse_max": float(cfg.getoption("--parity-downsample-ktrans-mse-max")),
+        "downsample_ve_corr_min": float(cfg.getoption("--parity-downsample-ve-corr-min")),
+        "downsample_ve_mse_max": float(cfg.getoption("--parity-downsample-ve-mse-max")),
+        "full_ktrans_corr_min": float(cfg.getoption("--parity-full-ktrans-corr-min")),
+        "full_ktrans_mse_max": float(cfg.getoption("--parity-full-ktrans-mse-max")),
+        "full_ve_corr_min": float(cfg.getoption("--parity-full-ve-corr-min")),
+        "full_ve_mse_max": float(cfg.getoption("--parity-full-ve-mse-max")),
+        "model_ktrans_corr_min": float(cfg.getoption("--parity-model-ktrans-corr-min")),
+        "model_ktrans_mse_max": float(cfg.getoption("--parity-model-ktrans-mse-max")),
+        "model_param_corr_min": float(cfg.getoption("--parity-model-param-corr-min")),
+        "model_param_mse_max": float(cfg.getoption("--parity-model-param-mse-max")),
+        "cpu_auto_ktrans_corr_min": float(cfg.getoption("--parity-cpu-auto-ktrans-corr-min")),
+        "cpu_auto_ktrans_mse_max": float(cfg.getoption("--parity-cpu-auto-ktrans-mse-max")),
+        "cpu_auto_param_corr_min": float(cfg.getoption("--parity-cpu-auto-param-corr-min")),
+        "cpu_auto_param_mse_max": float(cfg.getoption("--parity-cpu-auto-param-mse-max")),
+        "ex_tofts_ktrans_corr_min": float(cfg.getoption("--parity-ex-tofts-ktrans-corr-min")),
+        "ktrans_upper_exclude": float(cfg.getoption("--parity-ktrans-upper-exclude")),
+        "required_models_raw": str(cfg.getoption("--parity-required-models") or "").strip(),
+        "cpu_optional_models_raw": str(cfg.getoption("--parity-cpu-optional-models") or "").strip(),
+        "require_all_models": bool(cfg.getoption("--parity-require-all-models")),
+    }

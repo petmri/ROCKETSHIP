@@ -300,7 +300,35 @@ cd /path/to/ROCKETSHIP
 python tests/python/tune_dce_unstable_models.py --model both --curves 120 --noise-std "0,2e-4,5e-4"
 ```
 
-Model-specific parity tuning env vars (applied only to the named model):
+Tune parity thresholds and model gates via pytest options:
+
+```bash
+.venv/bin/python -m pytest \
+  tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_models_cpu_and_auto \
+  --run-parity --run-multi-model-backend-parity \
+  --roi-stride 12 \
+  --parity-model-ktrans-corr-min 0.95 \
+  --parity-model-ktrans-mse-max 0.01 \
+  --parity-model-param-corr-min 0.90 \
+  --parity-model-param-mse-max 0.02 \
+  --parity-cpu-auto-ktrans-corr-min 0.98 \
+  --parity-cpu-auto-ktrans-mse-max 0.002 \
+  --parity-cpu-auto-param-corr-min 0.95 \
+  --parity-cpu-auto-param-mse-max 0.01 \
+  --parity-required-models tofts,ex_tofts,patlak \
+  --parity-cpu-optional-models patlak
+```
+
+Additional threshold options are available for downsample/full Tofts checks:
+- `--parity-downsample-ktrans-corr-min`, `--parity-downsample-ktrans-mse-max`
+- `--parity-downsample-ve-corr-min`, `--parity-downsample-ve-mse-max`
+- `--parity-full-ktrans-corr-min`, `--parity-full-ktrans-mse-max`
+- `--parity-full-ve-corr-min`, `--parity-full-ve-mse-max`
+- `--parity-ex-tofts-ktrans-corr-min`, `--parity-ktrans-upper-exclude`
+- `--parity-require-all-models`
+
+Model-specific parity tuning env vars remain supported as compatibility overrides
+(applied only to the named model):
 - `ROCKETSHIP_PARITY_TISSUE_*` for `tissue_uptake`
 - `ROCKETSHIP_PARITY_2CXM_*` for `2cxm`
 
@@ -308,35 +336,6 @@ Examples:
 - bounds/init: `..._LOWER_LIMIT_*`, `..._UPPER_LIMIT_*`, `..._INITIAL_VALUE_*`
 - optimizer: `ROCKETSHIP_PARITY_TISSUE_MAXFUNEVALS`, `ROCKETSHIP_PARITY_TISSUE_MAXITER`, `ROCKETSHIP_PARITY_TISSUE_ROBUST`
 - optimizer: `ROCKETSHIP_PARITY_2CXM_MAXFUNEVALS`, `ROCKETSHIP_PARITY_2CXM_MAXITER`, `ROCKETSHIP_PARITY_2CXM_ROBUST`
-
-This check is intended to expose remaining model parity gaps; tune thresholds with env vars below as needed during bring-up.
-
-Tune parity thresholds via environment variables:
-
-```bash
-ROCKETSHIP_PARITY_DOWNSAMPLED_KTRANS_CORR_MIN=0.99
-ROCKETSHIP_PARITY_DOWNSAMPLED_KTRANS_MSE_MAX=0.001
-ROCKETSHIP_PARITY_DOWNSAMPLED_VE_CORR_MIN=0.97
-ROCKETSHIP_PARITY_DOWNSAMPLED_VE_MSE_MAX=0.002
-ROCKETSHIP_PARITY_FULL_KTRANS_CORR_MIN=0.99
-ROCKETSHIP_PARITY_FULL_KTRANS_MSE_MAX=0.001
-ROCKETSHIP_PARITY_FULL_VE_CORR_MIN=0.97
-ROCKETSHIP_PARITY_FULL_VE_MSE_MAX=0.002
-ROCKETSHIP_PARITY_MODEL_KTRANS_CORR_MIN=0.95
-ROCKETSHIP_PARITY_MODEL_KTRANS_MSE_MAX=0.01
-ROCKETSHIP_PARITY_MODEL_PARAM_CORR_MIN=0.90
-ROCKETSHIP_PARITY_MODEL_PARAM_MSE_MAX=0.02
-ROCKETSHIP_PARITY_CPU_AUTO_KTRANS_CORR_MIN=0.98
-ROCKETSHIP_PARITY_CPU_AUTO_KTRANS_MSE_MAX=0.002
-ROCKETSHIP_PARITY_CPU_AUTO_PARAM_CORR_MIN=0.95
-ROCKETSHIP_PARITY_CPU_AUTO_PARAM_MSE_MAX=0.01
-ROCKETSHIP_PARITY_EX_TOFTS_KTRANS_CORR_MIN=0.85
-ROCKETSHIP_PARITY_KTRANS_UPPER_EXCLUDE=1.9
-ROCKETSHIP_PARITY_REQUIRED_MODELS=tofts,ex_tofts,patlak
-ROCKETSHIP_PARITY_CPU_OPTIONAL_MODELS=patlak
-ROCKETSHIP_PARITY_REQUIRE_ALL_MODELS=0
-ROCKETSHIP_PARITY_MULTI_MODEL_ROI_STRIDE=12
-```
 
 ## Tiny settings-matrix tests (very fast)
 Generate or refresh tiny fixture:

@@ -28,6 +28,7 @@ Replace the Python test stack’s `unittest` execution and style with idiomatic 
 - [x] `tests/python/README.md` and `python/README.md` use pytest-first commands.
 - [x] Failure output provides model/param/threshold context for parity failures.
 - [x] Final sweep removes stale `unittest`-specific docs/helpers from Python path.
+- [x] Snapshot-style parity summaries are emitted for parity runs.
 
 ## Phase Checklist
 
@@ -48,6 +49,7 @@ Replace the Python test stack’s `unittest` execution and style with idiomatic 
 - [x] Convert parity skip gates from env checks to marker+option checks.
 - [x] Centralize warning behavior in pytest config/options.
 - [x] Centralize temp output and fixture path handling.
+- [x] Replace core parity env toggles with pytest options.
 
 ### Phase 2 — Mechanical Test Conversion
 - [x] Convert `unittest.TestCase` classes to pytest test functions where practical.
@@ -60,6 +62,7 @@ Replace the Python test stack’s `unittest` execution and style with idiomatic 
 - [x] Split oversized files where useful (especially parity modules).
 - [x] Improve assertion messages for parity diagnostics.
 - [x] Standardize CLI test invocation helpers.
+- [x] Add snapshot-style parity summary outputs.
 
 ### Phase 4 — Coverage + CI Hard Cut
 - [x] Update GitHub Actions Python jobs to run pytest.
