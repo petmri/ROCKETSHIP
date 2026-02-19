@@ -151,6 +151,17 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python -m pytest tests/python -q
 ```
 
+Coverage summary + XML report:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python -m pytest tests/python -q \
+  --cov=python \
+  --cov-report=term-missing \
+  --cov-report=xml \
+  --cov-fail-under=60
+```
+
 This includes Phase-1 reliability coverage such as installer asset-selection logic and
 pipeline output/event contract checks (`tests/python/test_install_python_acceleration.py`,
 `tests/python/test_dce_pipeline_contracts.py`).

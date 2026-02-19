@@ -28,8 +28,21 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Run Python tests
-        run: python -m pytest tests/python -q
+      - name: Run Python tests with coverage
+        run: |
+          python -m pytest tests/python -q \
+            --cov=python \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-fail-under=60
+
+      - name: Upload Python coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-coverage-xml
+          path: coverage.xml
+          retention-days: 7
+          if-no-files-found: error
 
       - name: Run Python contract parity checks
         run: |

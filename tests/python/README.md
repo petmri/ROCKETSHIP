@@ -111,6 +111,16 @@ Targeted Phase-1 reliability tests:
   tests/python/test_dce_pipeline_contracts.py -v
 ```
 
+Coverage run (terminal summary + XML):
+
+```bash
+.venv/bin/python -m pytest tests/python -q \
+  --cov=python \
+  --cov-report=term-missing \
+  --cov-report=xml \
+  --cov-fail-under=60
+```
+
 ## What it does
 - Loads MATLAB baseline outputs from `tests/contracts/baselines/matlab_reference_v1.json`
 - Loads contracts/tolerances from `tests/contracts/`

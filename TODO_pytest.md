@@ -24,7 +24,7 @@ Replace the Python test stack’s `unittest` execution and style with idiomatic 
 - [x] Python tests run with `pytest` only (no required `unittest` command paths).
 - [x] Parity controls are available via pytest options/markers (not env-vars required for basic use).
 - [x] CI Python jobs in `.github/workflows/run_DCE.yml` use pytest commands.
-- [ ] Coverage summary appears in CI logs, plus machine-readable report artifact.
+- [x] Coverage summary appears in CI logs, plus machine-readable report artifact.
 - [x] `tests/python/README.md` and `python/README.md` use pytest-first commands.
 - [x] Failure output provides model/param/threshold context for parity failures.
 - [x] Final sweep removes stale `unittest`-specific docs/helpers from Python path.
@@ -56,15 +56,15 @@ Replace the Python test stack’s `unittest` execution and style with idiomatic 
 - [x] Preserve test IDs/intent while modernizing structure.
 
 ### Phase 3 — Idiomatic Refactor
-- [ ] Parametrize repetitive model/parameter/back-end matrices.
+- [x] Parametrize repetitive model/parameter/back-end matrices.
 - [x] Split oversized files where useful (especially parity modules).
 - [x] Improve assertion messages for parity diagnostics.
-- [ ] Standardize CLI test invocation helpers.
+- [x] Standardize CLI test invocation helpers.
 
 ### Phase 4 — Coverage + CI Hard Cut
 - [x] Update GitHub Actions Python jobs to run pytest.
-- [ ] Add coverage terminal summary (`term-missing`).
-- [ ] Emit coverage XML (and/or HTML artifact) in CI.
+- [x] Add coverage terminal summary (`term-missing`).
+- [x] Emit coverage XML (and/or HTML artifact) in CI.
 - [x] Keep parity in dedicated marker-invoked CI step.
 
 ### Phase 5 — Docs + Cleanup

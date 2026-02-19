@@ -433,37 +433,9 @@ class TestDcePipeline:
         assert out.shape == (ct.shape[1], 10)
         assert np.allclose(out, 9.0)
 
-    def test_stage_d_accelerated_outputs_for_supported_models(self) -> None:
-        ct = np.asarray(
-            [
-                [1.0, 2.0],
-                [1.1, 2.1],
-                [1.2, 2.2],
-                [1.3, 2.3],
-                [1.4, 2.4],
-            ],
-            dtype=np.float64,
-        )
-        cp = np.asarray([0.7, 0.8, 0.9, 1.0, 1.1], dtype=np.float64)
-        timer = np.asarray([0.0, 0.1, 0.2, 0.3, 0.4], dtype=np.float64)
-        prefs = {
-            "initial_value_ktrans": 0.11,
-            "initial_value_ve": 0.22,
-            "initial_value_vp": 0.33,
-            "initial_value_fp": 0.44,
-            "lower_limit_ktrans": 0.01,
-            "upper_limit_ktrans": 1.01,
-            "lower_limit_ve": 0.02,
-            "upper_limit_ve": 1.02,
-            "lower_limit_vp": 0.03,
-            "upper_limit_vp": 1.03,
-            "lower_limit_fp": 0.04,
-            "upper_limit_fp": 1.04,
-            "gpu_tolerance": 1e-12,
-            "gpu_max_n_iterations": 64,
-        }
-
-        cases = [
+    @pytest.mark.parametrize(
+        "model_name,model_id,expected_init,expected_bounds,expected_row0",
+        [
             (
                 "tofts",
                 _FakeAccelModule.ModelID.TOFTS,
@@ -499,33 +471,70 @@ class TestDcePipeline:
                 [0.01, 1.01, 0.02, 1.02, 0.03, 1.03, 0.04, 1.04],
                 [1.0, 2.0, 3.0, 4.0, 0.1, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0],
             ),
-        ]
+        ],
+    )
+    def test_stage_d_accelerated_outputs_for_supported_models(
+        self,
+        model_name: str,
+        model_id: int,
+        expected_init: list[float],
+        expected_bounds: list[float],
+        expected_row0: list[float],
+    ) -> None:
+        ct = np.asarray(
+            [
+                [1.0, 2.0],
+                [1.1, 2.1],
+                [1.2, 2.2],
+                [1.3, 2.3],
+                [1.4, 2.4],
+            ],
+            dtype=np.float64,
+        )
+        cp = np.asarray([0.7, 0.8, 0.9, 1.0, 1.1], dtype=np.float64)
+        timer = np.asarray([0.0, 0.1, 0.2, 0.3, 0.4], dtype=np.float64)
+        prefs = {
+            "initial_value_ktrans": 0.11,
+            "initial_value_ve": 0.22,
+            "initial_value_vp": 0.33,
+            "initial_value_fp": 0.44,
+            "lower_limit_ktrans": 0.01,
+            "upper_limit_ktrans": 1.01,
+            "lower_limit_ve": 0.02,
+            "upper_limit_ve": 1.02,
+            "lower_limit_vp": 0.03,
+            "upper_limit_vp": 1.03,
+            "lower_limit_fp": 0.04,
+            "upper_limit_fp": 1.04,
+            "gpu_tolerance": 1e-12,
+            "gpu_max_n_iterations": 64,
+        }
 
-        for model_name, model_id, expected_init, expected_bounds, expected_row0 in cases:
-            _FakeAccelModule.last_call = None
-            with patch("dce_pipeline._load_fit_module_for_acceleration", return_value=_FakeAccelModule):
-                out = _fit_stage_d_model_accelerated(
-                    model_name=model_name,
-                    ct=ct,
-                    cp_use=cp,
-                    timer=timer,
-                    prefs=prefs,
-                    acceleration_backend="cpufit_cpu",
-                )
-
-            assert out is not None, f"{model_name}: expected accelerated output"
-            assert out.shape == (ct.shape[1], len(MODEL_LAYOUTS[model_name]["param_names"])), (
-                f"{model_name}: unexpected output shape"
+        _FakeAccelModule.last_call = None
+        with patch("dce_pipeline._load_fit_module_for_acceleration", return_value=_FakeAccelModule):
+            out = _fit_stage_d_model_accelerated(
+                model_name=model_name,
+                ct=ct,
+                cp_use=cp,
+                timer=timer,
+                prefs=prefs,
+                acceleration_backend="cpufit_cpu",
             )
-            assert np.allclose(np.asarray(out)[0, :], np.asarray(expected_row0, dtype=np.float64)), (
-                f"{model_name}: unexpected output row"
-            )
-            assert _FakeAccelModule.last_call is not None, f"{model_name}: accelerator call missing"
-            assert _FakeAccelModule.last_call["model_id"] == model_id
-            assert np.allclose(_FakeAccelModule.last_call["initial_parameters"][0, :], np.asarray(expected_init))
-            assert np.allclose(_FakeAccelModule.last_call["constraints"][0, :], np.asarray(expected_bounds))
 
-    def test_stage_d_uses_acceleration_for_new_models(self) -> None:
+        assert out is not None, f"{model_name}: expected accelerated output"
+        assert out.shape == (ct.shape[1], len(MODEL_LAYOUTS[model_name]["param_names"])), (
+            f"{model_name}: unexpected output shape"
+        )
+        assert np.allclose(np.asarray(out)[0, :], np.asarray(expected_row0, dtype=np.float64)), (
+            f"{model_name}: unexpected output row"
+        )
+        assert _FakeAccelModule.last_call is not None, f"{model_name}: accelerator call missing"
+        assert _FakeAccelModule.last_call["model_id"] == model_id
+        assert np.allclose(_FakeAccelModule.last_call["initial_parameters"][0, :], np.asarray(expected_init))
+        assert np.allclose(_FakeAccelModule.last_call["constraints"][0, :], np.asarray(expected_bounds))
+
+    @pytest.mark.parametrize("model_name", ["ex_tofts", "tissue_uptake", "2cxm"])
+    def test_stage_d_uses_acceleration_for_new_models(self, model_name: str) -> None:
         ct = np.asarray(
             [
                 [1.0, 2.0],
@@ -538,29 +547,28 @@ class TestDcePipeline:
         cp = np.asarray([0.8, 0.9, 1.0, 1.1], dtype=np.float64)
         timer = np.asarray([0.0, 0.1, 0.2, 0.3], dtype=np.float64)
 
-        for model_name in ("ex_tofts", "tissue_uptake", "2cxm"):
-            row_len = len(MODEL_LAYOUTS[model_name]["param_names"])
-            sentinel = np.full((ct.shape[1], row_len), 77.0, dtype=np.float64)
-            with patch("dce_pipeline._fit_stage_d_model_accelerated", return_value=sentinel) as mocked_accel:
-                out = _fit_stage_d_model(
-                    model_name=model_name,
-                    ct=ct,
-                    cp_use=cp,
-                    timer=timer,
-                    prefs={},
-                    r1o=None,
-                    relaxivity=3.6,
-                    fw=0.8,
-                    stlv_use=None,
-                    sttum=None,
-                    start_injection_min=0.0,
-                    sss=None,
-                    ssstum=None,
-                    acceleration_backend="cpufit_cpu",
-                )
-            mocked_accel.assert_called_once()
-            assert out.shape == (ct.shape[1], row_len), f"{model_name}: unexpected output shape"
-            assert np.allclose(out, 77.0), f"{model_name}: unexpected output values"
+        row_len = len(MODEL_LAYOUTS[model_name]["param_names"])
+        sentinel = np.full((ct.shape[1], row_len), 77.0, dtype=np.float64)
+        with patch("dce_pipeline._fit_stage_d_model_accelerated", return_value=sentinel) as mocked_accel:
+            out = _fit_stage_d_model(
+                model_name=model_name,
+                ct=ct,
+                cp_use=cp,
+                timer=timer,
+                prefs={},
+                r1o=None,
+                relaxivity=3.6,
+                fw=0.8,
+                stlv_use=None,
+                sttum=None,
+                start_injection_min=0.0,
+                sss=None,
+                ssstum=None,
+                acceleration_backend="cpufit_cpu",
+            )
+        mocked_accel.assert_called_once()
+        assert out.shape == (ct.shape[1], row_len), f"{model_name}: unexpected output shape"
+        assert np.allclose(out, 77.0), f"{model_name}: unexpected output values"
 
     def test_stage_a_real_mode_runs_with_mocked_io(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

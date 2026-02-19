@@ -14,12 +14,9 @@ import warnings
 
 
 SUITES = {
-    "multi-model": "tests.python.test_dce_pipeline_parity_metrics."
-    "TestDcePipelineParityMetrics.test_downsample_bbb_p19_models_cpu_and_auto",
-    "tofts-downsample": "tests.python.test_dce_pipeline_parity_metrics."
-    "TestDcePipelineParityMetrics.test_downsample_bbb_p19_tofts_ktrans",
-    "tofts-full": "tests.python.test_dce_pipeline_parity_metrics."
-    "TestDcePipelineParityMetrics.test_full_bbb_p19_tofts_ktrans",
+    "multi-model": "tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_models_cpu_and_auto",
+    "tofts-downsample": "tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_tofts_ktrans",
+    "tofts-full": "tests/python/test_dce_pipeline_parity_metrics.py::test_full_bbb_p19_tofts_ktrans",
 }
 
 
@@ -101,7 +98,25 @@ def main() -> int:
     if not args.show_warnings:
         env["PYTHONWARNINGS"] = "ignore::DeprecationWarning,ignore::PendingDeprecationWarning"
 
-    cmd = [sys.executable, "-m", "unittest", test_name, "-v"]
+    cmd = [
+        sys.executable,
+        "-m",
+        "pytest",
+        test_name,
+        "-v",
+        "--run-parity",
+        "--roi-stride",
+        str(max(1, int(args.roi_stride))),
+    ]
+    if args.dataset_root:
+        cmd.extend(["--dataset-root", args.dataset_root])
+    if args.full_root:
+        cmd.extend(["--full-root", args.full_root])
+    if args.suite == "multi-model":
+        cmd.append("--run-multi-model-backend-parity")
+    if args.suite == "tofts-full":
+        cmd.append("--run-full-parity")
+
     completed = subprocess.run(cmd, env=env, check=False)
     return int(completed.returncode)
 
