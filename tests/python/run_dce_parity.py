@@ -25,28 +25,33 @@ def _parse_args() -> argparse.Namespace:
         description="Run ROCKETSHIP DCE parity tests with discoverable options."
     )
     parser.add_argument(
+        "-s",
         "--suite",
         choices=sorted(SUITES.keys()),
         default="multi-model",
         help="Parity test suite to run (default: multi-model).",
     )
     parser.add_argument(
+        "-d",
         "--dataset-root",
         default="",
-        help="Override ROCKETSHIP_BBB_DOWNSAMPLED_ROOT.",
+        help="Override the downsample parity dataset root (pytest alias: --ds-root).",
     )
     parser.add_argument(
+        "-f",
         "--full-root",
         default="",
-        help="Override ROCKETSHIP_BBB_FULL_ROOT for tofts-full suite.",
+        help="Override full-volume dataset root for tofts-full suite (pytest alias: --fr-root).",
     )
     parser.add_argument(
+        "-r",
         "--roi-stride",
         type=int,
         default=12,
-        help="ROI stride for multi-model suite (default: 12).",
+        help="ROI stride for multi-model suite (default: 12; pytest alias: --stride).",
     )
     parser.add_argument(
+        "-w",
         "--show-warnings",
         action="store_true",
         help="Show deprecation warnings (suppressed by default).",
@@ -55,18 +60,6 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _configure_environment(args: argparse.Namespace) -> None:
-    os.environ["ROCKETSHIP_RUN_PIPELINE_PARITY"] = "1"
-    os.environ["ROCKETSHIP_PARITY_MULTI_MODEL_ROI_STRIDE"] = str(max(1, int(args.roi_stride)))
-
-    if args.dataset_root:
-        os.environ["ROCKETSHIP_BBB_DOWNSAMPLED_ROOT"] = args.dataset_root
-    if args.full_root:
-        os.environ["ROCKETSHIP_BBB_FULL_ROOT"] = args.full_root
-
-    os.environ["ROCKETSHIP_RUN_MULTI_MODEL_BACKEND_PARITY"] = "1" if args.suite == "multi-model" else "0"
-    if args.suite == "tofts-full":
-        os.environ["ROCKETSHIP_RUN_FULL_VOLUME_PARITY"] = "1"
-
     if not args.show_warnings:
         warnings.filterwarnings("ignore", category=DeprecationWarning)
         warnings.filterwarnings("ignore", category=PendingDeprecationWarning)
@@ -104,18 +97,18 @@ def main() -> int:
         "pytest",
         test_name,
         "-v",
-        "--run-parity",
-        "--roi-stride",
+        "--parity",
+        "--stride",
         str(max(1, int(args.roi_stride))),
     ]
     if args.dataset_root:
-        cmd.extend(["--dataset-root", args.dataset_root])
+        cmd.extend(["--ds-root", args.dataset_root])
     if args.full_root:
-        cmd.extend(["--full-root", args.full_root])
+        cmd.extend(["--fr-root", args.full_root])
     if args.suite == "multi-model":
-        cmd.append("--run-multi-model-backend-parity")
+        cmd.append("--mm-parity")
     if args.suite == "tofts-full":
-        cmd.append("--run-full-parity")
+        cmd.append("--full-parity")
 
     completed = subprocess.run(cmd, env=env, check=False)
     return int(completed.returncode)

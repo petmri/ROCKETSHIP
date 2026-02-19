@@ -182,20 +182,21 @@ Fast downsample parity:
 cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python -m pytest \
   tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_tofts_ktrans \
-  --run-parity
+  --parity
 ```
 
 Optional VE parity mask threshold (measurable-Ktrans voxels only):
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
-ROCKETSHIP_PARITY_VE_KTRANS_MIN=1e-6 .venv/bin/python -m pytest \
+.venv/bin/python -m pytest \
   tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_tofts_ktrans \
-  --run-parity
+  --parity \
+  --parity-ve-ktrans-min 1e-6
 ```
 
 Notes:
-- `ROCKETSHIP_PARITY_VE_KTRANS_MIN` default is `1e-6`
+- `--parity-ve-ktrans-min` default is `1e-6`
 - VE parity is evaluated only where both MATLAB and Python Ktrans exceed that threshold
 
 Optional full-volume parity (slower; reserve for occasional thorough checks):
@@ -204,7 +205,7 @@ Optional full-volume parity (slower; reserve for occasional thorough checks):
 cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python -m pytest \
   tests/python/test_dce_pipeline_parity_metrics.py::test_full_bbb_p19_tofts_ktrans \
-  --run-parity --run-full-parity
+  --parity --full-parity
 ```
 
 Default downsample fixture used for parity:

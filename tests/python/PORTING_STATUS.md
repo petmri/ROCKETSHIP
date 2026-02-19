@@ -6,7 +6,7 @@ This file is the handoff point for resuming work later.
 - Branch: `codex/algorithm-test-suite`
 - Latest milestone commit: `d59c492`
 - Python test baseline at this checkpoint:
-  - `.venv/bin/python -m unittest discover -s tests/python -p 'test_*.py'`
+  - `.venv/bin/python -m pytest tests/python -q`
   - `57` run, `0` failed, `2` skipped (parity-gated)
 
 ## Current scope covered
@@ -171,7 +171,7 @@ Expected summary right now:
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python -m unittest discover -s tests/python -p 'test_*.py'
+.venv/bin/python -m pytest tests/python -q
 .venv/bin/python tests/python/generate_python_results.py --output /tmp/python_results.json
 .venv/bin/python tests/python/compare_with_matlab_baseline.py --python-results /tmp/python_results.json --require-all
 ```

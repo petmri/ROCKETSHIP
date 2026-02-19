@@ -10,40 +10,46 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     group = parser.getgroup("rocketship parity")
     group.addoption(
         "--run-parity",
+        "--parity",
         action="store_true",
         default=False,
-        help="Enable dataset-backed parity tests.",
+        help="Enable dataset-backed parity tests. Alias: --parity",
     )
     group.addoption(
         "--run-full-parity",
+        "--full-parity",
         action="store_true",
         default=False,
-        help="Enable full-volume parity tests (slow).",
+        help="Enable full-volume parity tests (slow). Alias: --full-parity",
     )
     group.addoption(
         "--run-multi-model-backend-parity",
+        "--mm-parity",
         action="store_true",
         default=False,
-        help="Enable multi-model CPU-vs-auto backend parity checks.",
+        help="Enable multi-model CPU-vs-auto backend parity checks. Alias: --mm-parity",
     )
     group.addoption(
         "--dataset-root",
+        "--ds-root",
         action="store",
         default="",
-        help="Override downsample parity dataset root.",
+        help="Override downsample parity dataset root. Alias: --ds-root",
     )
     group.addoption(
         "--full-root",
+        "--fr-root",
         action="store",
         default="",
-        help="Override full-volume parity dataset root.",
+        help="Override full-volume parity dataset root. Alias: --fr-root",
     )
     group.addoption(
         "--roi-stride",
+        "--stride",
         action="store",
         type=int,
         default=12,
-        help="ROI stride for multi-model parity sparse masks.",
+        help="ROI stride for multi-model parity sparse masks. Alias: --stride",
     )
     group.addoption(
         "--parity-summary-dir",
@@ -70,14 +76,22 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     group.addoption("--parity-cpu-auto-param-mse-max", action="store", type=float, default=0.01)
     group.addoption("--parity-ex-tofts-ktrans-corr-min", action="store", type=float, default=0.85)
     group.addoption("--parity-ktrans-upper-exclude", action="store", type=float, default=1.9)
-    group.addoption("--parity-required-models", action="store", default="tofts,ex_tofts,patlak")
-    group.addoption("--parity-cpu-optional-models", action="store", default="patlak")
-    group.addoption("--parity-require-all-models", action="store_true", default=False)
+    group.addoption("--parity-required-models", "--req-models", action="store", default="tofts,ex_tofts,patlak")
+    group.addoption("--parity-cpu-optional-models", "--cpu-opt-models", action="store", default="patlak")
+    group.addoption("--parity-require-all-models", "--all-models", action="store_true", default=False)
 
 
 @pytest.fixture(scope="session")
 def repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parent
+
+
+@pytest.hookimpl
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    # Treat non-parity tests as portability-targeted checks by default.
+    for item in items:
+        if "parity" not in item.keywords:
+            item.add_marker(pytest.mark.portability)
 
 
 @pytest.fixture(scope="session")

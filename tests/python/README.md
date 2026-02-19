@@ -249,7 +249,7 @@ Run downsampled full-pipeline Tofts parity test (Python vs MATLAB maps for `Ktra
 cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python -m pytest \
   tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_tofts_ktrans \
-  --run-parity
+  --parity
 ```
 
 Optional full-volume parity test (slower; reserve for occasional thorough checks):
@@ -258,7 +258,7 @@ Optional full-volume parity test (slower; reserve for occasional thorough checks
 cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python -m pytest \
   tests/python/test_dce_pipeline_parity_metrics.py::test_full_bbb_p19_tofts_ktrans \
-  --run-parity --run-full-parity
+  --parity --full-parity
 ```
 
 Optional multi-model backend parity (CPU-only vs auto backend vs MATLAB maps).
@@ -268,7 +268,7 @@ This is opt-in because it is heavier than the Tofts-only check:
 cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python -m pytest \
   tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_models_cpu_and_auto \
-  --run-parity --run-multi-model-backend-parity
+  --parity --mm-parity
 ```
 
 Default multi-model behavior:
@@ -285,10 +285,10 @@ python tests/python/run_dce_parity.py --suite multi-model
 Examples:
 
 ```bash
-python tests/python/run_dce_parity.py --suite tofts-downsample
-python tests/python/run_dce_parity.py --suite tofts-full --full-root "/path/to/ROCKETSHIP/test_data/BBB data p19"
-python tests/python/run_dce_parity.py --suite multi-model --dataset-root "/path/to/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3" --roi-stride 12
-python tests/python/run_dce_parity.py --suite multi-model --show-warnings
+python tests/python/run_dce_parity.py -s tofts-downsample
+python tests/python/run_dce_parity.py -s tofts-full -f "/path/to/ROCKETSHIP/test_data/BBB data p19"
+python tests/python/run_dce_parity.py -s multi-model -d "/path/to/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3" -r 12
+python tests/python/run_dce_parity.py -s multi-model -w
 ```
 
 The runner suppresses deprecation warnings by default to keep parity output readable.
@@ -305,8 +305,8 @@ Tune parity thresholds and model gates via pytest options:
 ```bash
 .venv/bin/python -m pytest \
   tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_models_cpu_and_auto \
-  --run-parity --run-multi-model-backend-parity \
-  --roi-stride 12 \
+  --parity --mm-parity \
+  --stride 12 \
   --parity-model-ktrans-corr-min 0.95 \
   --parity-model-ktrans-mse-max 0.01 \
   --parity-model-param-corr-min 0.90 \
@@ -315,8 +315,8 @@ Tune parity thresholds and model gates via pytest options:
   --parity-cpu-auto-ktrans-mse-max 0.002 \
   --parity-cpu-auto-param-corr-min 0.95 \
   --parity-cpu-auto-param-mse-max 0.01 \
-  --parity-required-models tofts,ex_tofts,patlak \
-  --parity-cpu-optional-models patlak
+  --req-models tofts,ex_tofts,patlak \
+  --cpu-opt-models patlak
 ```
 
 Additional threshold options are available for downsample/full Tofts checks:
