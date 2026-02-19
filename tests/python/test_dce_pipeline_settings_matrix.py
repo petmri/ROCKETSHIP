@@ -88,6 +88,13 @@ def _run_abd(config: DcePipelineConfig) -> tuple[dict, dict, dict]:
     stage_b = _run_stage_b_real(config, stage_a)
     stage_d = _run_stage_d_real(config, stage_a, stage_b)
     return stage_a, stage_b, stage_d
+
+
+def _drop_stage_overrides(config: DcePipelineConfig, *keys: str) -> None:
+    for key in keys:
+        config.stage_overrides.pop(key, None)
+
+
 @pytest.fixture(scope="module")
 def tiny_root() -> Path:
     root = _tiny_root()
@@ -202,3 +209,93 @@ def test_blood_t1_override_rejects_nonpositive(tiny_root: Path) -> None:
         config_bad = _make_config(tiny_root, Path(tmp) / "bad", {"blood_t1_ms": 0.0})
         with pytest.raises(ValueError, match="blood_t1 override must be positive"):
             _run_stage_a_real(config_bad)
+
+
+@pytest.mark.integration
+def test_script_level_tr_fa_time_resolution_aliases(tiny_root: Path) -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        config = _make_config(
+            tiny_root,
+            Path(tmp) / "alias_meta",
+            {
+                "tr": 9.7,
+                "fa": 18.5,
+                "time_resolution": 6.0,
+            },
+        )
+        _drop_stage_overrides(config, "tr_ms", "fa_deg", "time_resolution_sec")
+        stage_a = _run_stage_a_real(config)
+
+        assert float(stage_a["tr_ms"]) == pytest.approx(9.7)
+        assert float(stage_a["fa_deg"]) == pytest.approx(18.5)
+        assert float(stage_a["time_resolution_min"]) == pytest.approx(6.0 / 60.0)
+
+
+@pytest.mark.integration
+def test_script_level_blood_t1_alias(tiny_root: Path) -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        config = _make_config(tiny_root, Path(tmp) / "alias_blood_t1", {"blood_t1": 1.62})
+        stage_a = _run_stage_a_real(config)
+        assert float(stage_a["blood_t1_override_sec"]) == pytest.approx(1.62)
+        assert np.allclose(stage_a["arrays"]["T1LV"], 1.62)
+
+
+@pytest.mark.integration
+def test_script_level_aif_type_and_injection_aliases(tiny_root: Path) -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        config = _make_config(
+            tiny_root,
+            Path(tmp) / "alias_aif",
+            {
+                "aif_type": 2,
+                "start_injection": 0.75,
+                "end_injection": 1.05,
+            },
+        )
+        _drop_stage_overrides(config, "aif_curve_mode", "start_injection_min", "end_injection_min")
+
+        stage_a = _run_stage_a_real(config)
+        stage_b = _run_stage_b_real(config, stage_a)
+
+        assert stage_b["aif_mode"] == "raw"
+        assert stage_b["aif_name"] == "raw"
+        assert float(stage_b["start_injection_min"]) == pytest.approx(0.75)
+        assert float(stage_b["end_injection_min"]) == pytest.approx(1.05)
+        assert np.allclose(stage_b["arrays"]["Cp_use"], stage_b["arrays"]["CpROI"])
+
+
+@pytest.mark.integration
+def test_script_level_timevectyn_controls_timevectpath(tiny_root: Path) -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        timer_file = tmp_path / "timer.csv"
+        custom_timer = np.linspace(0.0, 0.85, num=18, dtype=np.float64)
+        np.savetxt(timer_file, custom_timer, delimiter=",")
+
+        config_enabled = _make_config(
+            tiny_root,
+            tmp_path / "enabled",
+            {
+                "timevectpath": str(timer_file),
+                "timevectyn": 1,
+                "aif_type": 2,
+            },
+        )
+        _drop_stage_overrides(config_enabled, "aif_curve_mode")
+        stage_a_enabled = _run_stage_a_real(config_enabled)
+        stage_b_enabled = _run_stage_b_real(config_enabled, stage_a_enabled)
+        assert np.allclose(stage_b_enabled["arrays"]["timer"], custom_timer)
+
+        config_disabled = _make_config(
+            tiny_root,
+            tmp_path / "disabled",
+            {
+                "timevectpath": str(timer_file),
+                "timevectyn": 0,
+                "aif_type": 2,
+            },
+        )
+        _drop_stage_overrides(config_disabled, "aif_curve_mode")
+        stage_a_disabled = _run_stage_a_real(config_disabled)
+        stage_b_disabled = _run_stage_b_real(config_disabled, stage_a_disabled)
+        assert not np.allclose(stage_b_disabled["arrays"]["timer"], custom_timer)

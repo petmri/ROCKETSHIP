@@ -193,15 +193,19 @@ Workflow: `/Users/samuelbarnes/code/ROCKETSHIP/.github/workflows/run_DCE.yml`
 - Push to `dev/master`: heavier MATLAB matrix (full validation path).
 
 ## Next recommended steps
-1. Complete MATLAB script-level option mapping audit:
-   - map `script_preferences.txt` keys to Python config/stage overrides
-   - classify each as `supported`, `dropped-by-design`, or `pending`
-   - add targeted tests for newly-wired options
+1. Close remaining pending script-preference keys from the completed audit:
+   - canonical audit file: `tests/data/scripts/script_preferences_option_audit.json`
+   - docs summary: `docs/script_preferences_option_audit.md`
+   - current regression tests for newly-wired alias families:
+     - `tests/python/test_dce_pipeline_settings_matrix.py`
+     - `tests/python/test_dce_pipeline.py`
 2. Expand tiny fixture variants for edge-case sweeps:
    - low-SNR case
    - non-uniform timer case (`stage_overrides.time_vector_path`)
    - harsh bounds / low-iteration fit case
-3. Expand dataset-backed DCE regression beyond current Tofts map checks (`Ktrans`, `ve`) into ROI table values and additional model maps.
+3. Tighten dataset-backed DCE gating policy now that CPU parity coverage includes additional model maps and ROI `.xls` checks:
+   - test: `tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_model_maps_and_roi_xls_cpu`
+   - promote `tissue_uptake` (and later `2cxm`) from diagnostic to strict gating after instability is resolved.
 4. Decide whether to port `nested` and `FXL_rr` DCE model flows in the Python CLI or keep them explicitly unsupported.
 5. Expand DSC parity work (`DSC_convolution_oSVD`) once DCE dataset regression checks are stable.
 6. Performance pass (post-stability/parity lock):

@@ -55,22 +55,29 @@ For options in `stage_overrides`:
 ### Acquisition / timing
 - `dce_metadata_path`: explicit metadata JSON path
 - `tr_sec`, `tr_ms`, `fa_deg`
+- MATLAB script aliases: `tr` (ms), `fa` (deg)
 - `time_resolution_sec`, `time_resolution_min`
+- MATLAB script alias: `time_resolution` (sec)
 - `time_vector_path`, `timevectpath`, `timer_path`
+- MATLAB script toggle: `timevectyn` controls whether legacy `timevectpath` is used
 - `steady_state_start`, `steady_state_end`
 - `start_time`, `end_time`, `start_time_min`, `end_time_min`
 - `start_injection_min`, `end_injection_min`
+- MATLAB script aliases: `start_injection`, `end_injection` (min)
 - `injection_duration`
 
 ### Stage A concentration conversion
 - `relaxivity`
 - `hematocrit`
 - `blood_t1_ms`, `blood_t1_sec`
+- MATLAB script alias: `blood_t1`
 - `noise_pixsize`
 - `snr_filter`
 
 ### Stage B AIF fit
 - `aif_curve_mode`: `fitted|raw|imported|auto`
+- MATLAB script alias: `aif_type` (`1=fitted`, `2=raw`, `3=imported`)
+- Imported AIF path fallback alias: `import_aif_path`
 - `aif_lower_limits`: 4 values `[A,B,c,d]`
 - `aif_upper_limits`: 4 values `[A,B,c,d]`
 - `aif_initial_values`: 4 values `[A,B,c,d]`
@@ -107,7 +114,7 @@ For options in `stage_overrides`:
 - `gpu_initial_value_fp`
 
 Notes:
-- Stage-D acceleration currently applies to `tofts` and `patlak`.
+- Stage-D acceleration currently applies to `tofts`, `ex_tofts`, `patlak`, `tissue_uptake`, and `2cxm`.
 - Stage summary for part D includes:
   - `selected_backend`
   - `acceleration_backend`
@@ -118,6 +125,9 @@ Notes:
 - MATLAB-style numeric expressions in preferences (for example `10^-7`) are supported when loaded from `dce_preferences.txt`.
 - GUI v1 provides `Browse...` dialogs for all path/file input widgets currently shown in the form.
 - `imported_aif_path` exists at the config level, but current GUI form does not expose a dedicated field yet; set it via JSON config when using imported AIF mode.
+- Script-level option audit (all keys in `script_preferences.txt` with support status):
+  - `/Users/samuelbarnes/code/ROCKETSHIP/docs/script_preferences_option_audit.md`
+  - `/Users/samuelbarnes/code/ROCKETSHIP/tests/data/scripts/script_preferences_option_audit.json`
 - Not all MATLAB-era options are fully consumed by current Python runtime yet; see active backlog:
   - `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/PORTING_STATUS.md`
   - `/Users/samuelbarnes/code/ROCKETSHIP/TODO.txt`

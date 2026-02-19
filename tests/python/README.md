@@ -268,6 +268,13 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 matlab -batch "cd('/Users/samuelbarnes/code/ROCKETSHIP'); addpath('tests/matlab'); generate_dce_tofts_parity_map('subjectRoot','/Users/samuelbarnes/code/ROCKETSHIP/tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3','models',{'tofts','ex_tofts','patlak','tissue_uptake','2cxm'})"
 ```
 
+Multi-model baselines with ROI `.xls` outputs (for ROI parity checks):
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+matlab -batch "cd('/Users/samuelbarnes/code/ROCKETSHIP'); addpath('tests/matlab'); generate_dce_tofts_parity_map('subjectRoot','/Users/samuelbarnes/code/ROCKETSHIP/tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3','models',{'tofts','ex_tofts','patlak','tissue_uptake','2cxm'},'roiList',{'/Users/samuelbarnes/code/ROCKETSHIP/tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/T1_brain_roi.nii'})"
+```
+
 Run downsampled full-pipeline Tofts parity test (Python vs MATLAB maps for `Ktrans` and `ve`, with corr/MSE tolerances):
 
 ```bash
@@ -296,6 +303,15 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
   --parity --mm-parity
 ```
 
+Optional CPU-only model-map + ROI table parity (MATLAB map/xls references for `tofts`, `ex_tofts`, `patlak`, `tissue_uptake`):
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python -m pytest \
+  tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_model_maps_and_roi_xls_cpu \
+  --parity
+```
+
 Default multi-model behavior:
 - Required (gating) checks: `tofts`, `ex_tofts`, `patlak` (with `patlak` CPU-vs-MATLAB and AUTO-vs-CPU kept diagnostic-only by default).
 - Diagnostic-only checks: `tissue_uptake`, `2cxm`, and other non-required model checks. These are reported in logs but do not fail the test unless explicitly promoted.
@@ -312,6 +328,7 @@ Examples:
 ```bash
 python tests/python/run_dce_parity.py -s tofts-downsample
 python tests/python/run_dce_parity.py -s tofts-full -f "/path/to/ROCKETSHIP/tests/data/BBB data p19"
+python tests/python/run_dce_parity.py -s model-map-roi-cpu -d "/path/to/ROCKETSHIP/tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3"
 python tests/python/run_dce_parity.py -s multi-model -d "/path/to/ROCKETSHIP/tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3" -r 12
 python tests/python/run_dce_parity.py -s multi-model -w
 ```

@@ -15,6 +15,7 @@ import warnings
 
 SUITES = {
     "multi-model": "tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_models_cpu_and_auto",
+    "model-map-roi-cpu": "tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_model_maps_and_roi_xls_cpu",
     "tofts-downsample": "tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_tofts_ktrans",
     "tofts-full": "tests/python/test_dce_pipeline_parity_metrics.py::test_full_bbb_p19_tofts_ktrans",
 }

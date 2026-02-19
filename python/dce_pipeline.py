@@ -551,10 +551,17 @@ class DcePipelineConfig:
         if backend not in ALLOWED_BACKENDS:
             raise ValueError(f"Unsupported backend '{self.backend}'. Allowed: {sorted(ALLOWED_BACKENDS)}")
 
+        override_import_path = None
+        for override_key, override_val in self.stage_overrides.items():
+            key_lc = str(override_key).strip().lower()
+            if key_lc in {"import_aif_path", "imported_aif_path"} and str(override_val).strip():
+                override_import_path = str(override_val).strip()
+                break
+
         mode = self.aif_mode.strip().lower()
         if mode not in ALLOWED_AIF_MODES:
             raise ValueError(f"Unsupported aif_mode '{self.aif_mode}'. Allowed: {sorted(ALLOWED_AIF_MODES)}")
-        if mode == "imported" and self.imported_aif_path is None:
+        if mode == "imported" and self.imported_aif_path is None and not override_import_path:
             raise ValueError("aif_mode=imported requires imported_aif_path")
 
         stage_a_mode = str(self.stage_overrides.get("stage_a_mode", "real")).strip().lower()
@@ -571,7 +578,7 @@ class DcePipelineConfig:
             raise ValueError(
                 f"Unsupported stage_overrides.aif_curve_mode '{aif_curve_mode}'. Allowed: {sorted(ALLOWED_AIF_MODES)}"
             )
-        if aif_curve_mode == "imported" and self.imported_aif_path is None:
+        if aif_curve_mode == "imported" and self.imported_aif_path is None and not override_import_path:
             raise ValueError("stage_overrides.aif_curve_mode=imported requires imported_aif_path")
 
         # Port scope decision: ImageJ ROI input is intentionally not supported.
@@ -670,9 +677,9 @@ def _resolve_dynamic_metadata(config: DcePipelineConfig, n_timepoints: int) -> D
             break
 
     tr_sec = _stage_override(config, "tr_sec", None)
-    tr_ms = _stage_override(config, "tr_ms", None)
-    time_resolution_sec = _stage_override(config, "time_resolution_sec", None)
-    fa_deg = _stage_override(config, "fa_deg", None)
+    tr_ms = _stage_override(config, "tr_ms", _stage_override(config, "tr", None))
+    time_resolution_sec = _stage_override(config, "time_resolution_sec", _stage_override(config, "time_resolution", None))
+    fa_deg = _stage_override(config, "fa_deg", _stage_override(config, "fa", None))
 
     if tr_ms is None and tr_sec is not None:
         tr_ms = float(tr_sec) * 1000.0
@@ -959,6 +966,8 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     blood_t1_override = _stage_override(config, "blood_t1_ms", None)
     if blood_t1_override is None:
         blood_t1_override = _stage_override(config, "blood_t1_sec", None)
+    if blood_t1_override is None:
+        blood_t1_override = _stage_override(config, "blood_t1", None)
     blood_t1_override_sec: Optional[float] = None
     if blood_t1_override is not None:
         blood_t1_override_sec = float(blood_t1_override)
@@ -1170,11 +1179,17 @@ def _load_vector_from_path(path: Path, key: str = "timer") -> np.ndarray:
 
 
 def _resolve_stage_b_timer(config: DcePipelineConfig, stage_a: Dict[str, Any], n_time: int) -> np.ndarray:
-    path_value = (
-        _stage_override(config, "time_vector_path", None)
-        or _stage_override(config, "timevectpath", None)
-        or _stage_override(config, "timer_path", None)
-    )
+    time_vector_path = _stage_override(config, "time_vector_path", None)
+    timer_path = _stage_override(config, "timer_path", None)
+    legacy_timevectpath = _stage_override(config, "timevectpath", None)
+    use_legacy_timevect = True
+    timevectyn = _stage_override(config, "timevectyn", None)
+    if timevectyn is not None:
+        use_legacy_timevect = _to_bool(timevectyn, False)
+
+    path_value = time_vector_path or timer_path
+    if path_value is None and use_legacy_timevect:
+        path_value = legacy_timevectpath
 
     timer: Optional[np.ndarray] = None
     if path_value:
@@ -1184,6 +1199,14 @@ def _resolve_stage_b_timer(config: DcePipelineConfig, stage_a: Dict[str, Any], n
 
     if timer is None:
         time_resolution = _stage_override(config, "time_resolution_min", stage_a.get("time_resolution_min", None))
+        if time_resolution is None:
+            time_resolution_sec = _stage_override(
+                config,
+                "time_resolution_sec",
+                _stage_override(config, "time_resolution", None),
+            )
+            if time_resolution_sec is not None:
+                time_resolution = float(time_resolution_sec) / 60.0
         if time_resolution is None:
             raise ValueError("Stage-B requires timer data; set stage_overrides.time_resolution_min")
         timer = np.arange(n_time, dtype=np.float64) * float(time_resolution)
@@ -1195,10 +1218,26 @@ def _resolve_stage_b_timer(config: DcePipelineConfig, stage_a: Dict[str, Any], n
             raise ValueError("Resolved timer vector is empty")
         if timer.size == 1:
             step = float(_stage_override(config, "time_resolution_min", stage_a.get("time_resolution_min", 1.0)))
+            if not math.isfinite(step) or step <= 0:
+                time_resolution_sec = _stage_override(
+                    config,
+                    "time_resolution_sec",
+                    _stage_override(config, "time_resolution", None),
+                )
+                if time_resolution_sec is not None:
+                    step = float(time_resolution_sec) / 60.0
         else:
             step = float(timer[-1] - timer[-2])
             if not math.isfinite(step) or step <= 0:
                 step = float(_stage_override(config, "time_resolution_min", stage_a.get("time_resolution_min", 1.0)))
+                if not math.isfinite(step) or step <= 0:
+                    time_resolution_sec = _stage_override(
+                        config,
+                        "time_resolution_sec",
+                        _stage_override(config, "time_resolution", None),
+                    )
+                    if time_resolution_sec is not None:
+                        step = float(time_resolution_sec) / 60.0
         extension = timer[-1] + step * np.arange(1, n_time - timer.size + 1, dtype=np.float64)
         timer = np.concatenate([timer, extension])
 
@@ -1225,14 +1264,37 @@ def _restrict_timer_window(timer: np.ndarray, start_time: float, end_time: float
 
 
 def _resolve_stage_b_aif_mode(config: DcePipelineConfig) -> str:
-    mode = str(_stage_override(config, "aif_curve_mode", config.aif_mode)).strip().lower()
+    mode_raw = _stage_override(config, "aif_curve_mode", None)
+    if mode_raw is None or str(mode_raw).strip() == "":
+        mode_raw = _stage_override(config, "aif_type", None)
+    if mode_raw is None or str(mode_raw).strip() == "":
+        mode_raw = config.aif_mode
+    mode = str(mode_raw).strip().lower()
+    if mode in {"1", "fitted", "fit"}:
+        mode = "fitted"
+    elif mode in {"2", "raw"}:
+        mode = "raw"
+    elif mode in {"3", "import", "imported"}:
+        mode = "imported"
     if mode == "auto":
-        mode = "imported" if config.imported_aif_path else "fitted"
+        mode = "imported" if _resolve_imported_aif_path(config) is not None else "fitted"
     if mode not in {"fitted", "raw", "imported"}:
         raise ValueError(f"Unsupported Stage-B AIF mode '{mode}'")
-    if mode == "imported" and config.imported_aif_path is None:
+    if mode == "imported" and _resolve_imported_aif_path(config) is None:
         raise ValueError("Stage-B imported mode requires imported_aif_path")
     return mode
+
+
+def _resolve_imported_aif_path(config: DcePipelineConfig) -> Optional[Path]:
+    if config.imported_aif_path is not None:
+        return config.imported_aif_path.expanduser().resolve()
+    path_val = _stage_override(config, "import_aif_path", _stage_override(config, "imported_aif_path", None))
+    if path_val is None:
+        return None
+    path_text = str(path_val).strip()
+    if not path_text:
+        return None
+    return Path(path_text).expanduser().resolve()
 
 
 def _resolve_stage_b_injection_window(
@@ -1240,8 +1302,8 @@ def _resolve_stage_b_injection_window(
     stage_a: Dict[str, Any],
     timer_full: np.ndarray,
 ) -> Tuple[float, float]:
-    start_override = _stage_override(config, "start_injection_min", None)
-    end_override = _stage_override(config, "end_injection_min", None)
+    start_override = _stage_override(config, "start_injection_min", _stage_override(config, "start_injection", None))
+    end_override = _stage_override(config, "end_injection_min", _stage_override(config, "end_injection", None))
 
     if start_override is not None:
         start_val = float(start_override)
@@ -1729,7 +1791,8 @@ def _run_stage_b_real(config: DcePipelineConfig, stage_a: Dict[str, Any]) -> Dic
         stlv_use = stlv_roi.copy()
         aif_name = "raw"
     else:
-        imported = _load_imported_aif(config.imported_aif_path if config.imported_aif_path else Path(""))
+        imported_path = _resolve_imported_aif_path(config)
+        imported = _load_imported_aif(imported_path if imported_path else Path(""))
         cp_use = _resample_or_pad_curve(imported["Cp_use"], timer, imported["timer"])
         imported_stlv = imported["Stlv_use"] if imported["Stlv_use"] is not None else imported["Cp_use"]
         stlv_use = _resample_or_pad_curve(imported_stlv, timer, imported["timer"])

@@ -40,6 +40,16 @@ Recently completed
   - unified `2cxm` to a single OSIPI-style fit path (quadratic resampling + bounded curve fit)
   - optimized pure-Python forward-model integration for `tofts`, `ex_tofts`, `patlak`, `tissue_uptake`, and `2cxm`
   - corrected OSIPI `fp` unit conversion handling to `ml/100ml/min` in reliability checks, fast-backend checks, and summary generation
+- Completed script-level option parity audit:
+  - mapped every key in `script_preferences.txt` to Python config/stage overrides
+  - classified each key as `supported`, `intentionally_dropped`, or `pending`
+  - added regression tests for newly wired script-level alias families
+- Expanded dataset-backed DCE regression beyond Tofts maps:
+  - added CPU parity checks for additional model maps (`ex_tofts`, `patlak`, `tissue_uptake`)
+  - added ROI `.xls` parity checks against MATLAB ROI tables (`tofts`, `ex_tofts`, `patlak`, `tissue_uptake`)
+- Hardened OSIPI fast-backend test gating:
+  - `test_osipi_pygpufit.py` now skips unless CUDA GPUfit is actually available
+  - avoids running gpufit fallback-path checks as if they were CUDA GPUfit reliability checks
 
 Highest priority next
 - Make some tests with detailed CLI outputs, give consistent naming scheme to id them (run_*, or something else)
@@ -47,13 +57,9 @@ Highest priority next
   - Rename benchmark to new naming scheme
 - Fix 2cxm and uptake, confirm forward model, look at OSIPI code for fix 
   - when finished delete tune_dce_unstable_models
-- Complete script-level option parity audit:
-  - map every MATLAB script_preferences.txt key to Python config/stage_overrides
-  - mark each key as supported, intentionally dropped, or pending
-  - add one regression test for each newly-supported key family
-- Expand dataset-backed DCE regression beyond Tofts maps:
-  - ROI .xls parity checks
-  - additional model-map parity (patlak, ex_tofts, tissue_uptake) with strict gating once tissue/2cxm instability is resolved
+- Promote unstable-model parity checks to strict gating once stable:
+  - promote `tissue_uptake` from diagnostic to required
+  - promote `2cxm` from diagnostic to required
 - Add tiny fixture edge-case variants:
   - low-SNR
   - non-uniform timer

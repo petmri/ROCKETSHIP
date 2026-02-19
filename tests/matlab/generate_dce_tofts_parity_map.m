@@ -52,12 +52,14 @@ addParameter(p, 'hematocrit', 0.42, @isscalar);
 addParameter(p, 'snrFilter', 5.0, @isscalar);
 addParameter(p, 'relaxivity', 3.6, @isscalar);
 addParameter(p, 'models', {'tofts'}, @is_model_list);
+addParameter(p, 'roiList', {}, @is_text_list_or_scalar);
 parse(p, varargin{:});
 
 subjectRoot = char(p.Results.subjectRoot);
 outputRoot = char(p.Results.outputRoot);
 rootname = char(p.Results.rootname);
 modelList = normalize_models(p.Results.models);
+roiList = normalize_text_list(p.Results.roiList);
 if isempty(outputRoot)
     outputRoot = fullfile(subjectRoot, 'processed', 'results_matlab');
 end
@@ -158,7 +160,7 @@ time_smoothing = 'none';
 time_smoothing_window = 0;
 xy_smooth_size = 0;
 number_cpus = 1;
-roi_list = {};
+roi_list = roiList;
 fit_voxels = 1;
 neuroecon = 0;
 outputft = 1;
@@ -201,6 +203,11 @@ ok = is_text_scalar(value) || iscellstr(value) || ...
     (iscell(value) && all(cellfun(@is_text_scalar, value)));
 end
 
+function ok = is_text_list_or_scalar(value)
+ok = is_text_scalar(value) || isempty(value) || iscellstr(value) || ...
+    (iscell(value) && all(cellfun(@is_text_scalar, value))) || isstring(value);
+end
+
 function out = normalize_models(value)
 if is_text_scalar(value)
     raw = {char(value)};
@@ -229,5 +236,34 @@ end
 
 if isempty(out)
     out = {'tofts'};
+end
+end
+
+function out = normalize_text_list(value)
+if isempty(value)
+    out = {};
+    return;
+end
+
+if is_text_scalar(value)
+    out = {char(value)};
+    return;
+end
+
+if isstring(value)
+    value = cellstr(value(:));
+end
+
+if ~iscell(value)
+    error('Unsupported text-list input');
+end
+
+out = {};
+for i = 1:numel(value)
+    text = strtrim(char(value{i}));
+    if isempty(text)
+        continue;
+    end
+    out{end + 1} = text; %#ok<AGROW>
 end
 end

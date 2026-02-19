@@ -208,6 +208,15 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
   --parity --full-parity
 ```
 
+Optional CPU model-map + ROI table parity (`tofts`, `ex_tofts`, `patlak`, `tissue_uptake`):
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python -m pytest \
+  tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_model_maps_and_roi_xls_cpu \
+  --parity
+```
+
 Default downsample fixture used for parity:
 - `/Users/samuelbarnes/code/ROCKETSHIP/tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3`
 

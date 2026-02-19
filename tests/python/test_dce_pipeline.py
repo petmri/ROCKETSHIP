@@ -203,6 +203,19 @@ class TestDcePipeline:
             with pytest.raises(ValueError, match=r"ImageJ ROI"):
                 run_dce_pipeline(config)
 
+    def test_validate_accepts_import_aif_path_alias_for_imported_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            config.aif_mode = "imported"
+            config.imported_aif_path = None
+            config.stage_overrides = {
+                "stage_a_mode": "scaffold",
+                "stage_b_mode": "scaffold",
+                "stage_d_mode": "scaffold",
+                "import_aif_path": str(Path(tmp) / "imported_alias.npz"),
+            }
+            config.validate()
+
     def test_backend_auto_falls_back_to_cpu_when_gpufit_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))
@@ -689,6 +702,38 @@ class TestDcePipeline:
             assert result["aif_name"] == "imported"
             assert "Cp_use" in result["arrays"]
             assert result["arrays"]["Cp_use"].shape[0] == timer.shape[0]
+
+    def test_stage_b_real_imported_mode_script_aliases(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            stage_a = _make_stage_a_payload()
+            timer = stage_a["arrays"]["timer"]
+            cp_use = np.mean(stage_a["arrays"]["Cp"], axis=1) * 1.02
+            stlv_use = np.mean(stage_a["arrays"]["Stlv"], axis=1) * 0.98
+
+            imported_path = Path(tmp) / "imported_aif_alias.npz"
+            np.savez_compressed(
+                imported_path,
+                Cp_use=cp_use,
+                Stlv_use=stlv_use,
+                timer=timer,
+                start_injection=timer[4],
+            )
+
+            # Exercise script-style aliases without using top-level imported_aif_path.
+            config.imported_aif_path = None
+            config.aif_mode = "auto"
+            config.stage_overrides = {
+                "stage_b_mode": "real",
+                "aif_type": 3,
+                "import_aif_path": str(imported_path),
+            }
+
+            result = _run_stage_b_real(config, stage_a)
+            assert result["impl"] == "real"
+            assert result["aif_mode"] == "imported"
+            assert result["aif_name"] == "imported"
+            assert np.allclose(result["arrays"]["Cp_use"], cp_use)
 
     def test_stage_d_real_generates_maps_and_xls(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

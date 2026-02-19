@@ -326,6 +326,112 @@ def _write_parity_summary(summary_dir: Path | None, file_name: str, payload: dic
     _parity_log(f"summary_json={out_path}")
 
 
+def _load_roi_xls_rows(path: Path) -> tuple[list[str], list[list[str]]]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        text = ""
+
+    if "\t" in text and "\n" in text:
+        lines = [line for line in text.splitlines() if line.strip()]
+        if not lines:
+            raise AssertionError(f"ROI table appears empty: {path}")
+        header = [cell.strip() for cell in lines[0].split("\t")]
+        rows = [[cell.strip() for cell in line.split("\t")] for line in lines[1:]]
+        return header, rows
+
+    try:
+        import xlrd  # type: ignore
+    except Exception as exc:  # pragma: no cover - dependency/config check
+        pytest.skip(f"xlrd is required to read binary .xls ROI tables ({exc})")
+
+    book = xlrd.open_workbook(str(path))
+    sheet = book.sheet_by_index(0)
+    header = [str(sheet.cell_value(0, c)).strip() for c in range(sheet.ncols)]
+    rows: list[list[str]] = []
+    for r in range(1, sheet.nrows):
+        row: list[str] = []
+        for c in range(sheet.ncols):
+            value = sheet.cell_value(r, c)
+            if isinstance(value, float):
+                row.append(f"{value:.17g}")
+            else:
+                row.append(str(value).strip())
+        rows.append(row)
+    return header, rows
+
+
+def _normalized_roi_header(header: list[str]) -> list[str]:
+    out: list[str] = []
+    for cell in header:
+        text = str(cell).strip()
+        if text.lower() == "residual":
+            out.append("SSE")
+        else:
+            out.append(text)
+    return out
+
+
+def _compare_roi_table_against_reference(
+    *,
+    model_name: str,
+    py_path: Path,
+    ref_path: Path,
+    max_abs_err: float,
+) -> dict:
+    py_header_raw, py_rows = _load_roi_xls_rows(py_path)
+    ref_header_raw, ref_rows = _load_roi_xls_rows(ref_path)
+    py_header = _normalized_roi_header(py_header_raw)
+    ref_header = _normalized_roi_header(ref_header_raw)
+
+    assert py_header == ref_header, (
+        f"{model_name}: ROI XLS header mismatch\n"
+        f"python={py_header}\n"
+        f"ref={ref_header}"
+    )
+    assert len(py_rows) == len(ref_rows), (
+        f"{model_name}: ROI XLS row-count mismatch: python={len(py_rows)} ref={len(ref_rows)}"
+    )
+    assert len(py_rows) > 0, f"{model_name}: ROI XLS has no data rows"
+
+    abs_errors: list[float] = []
+    for row_idx, (py_row, ref_row) in enumerate(zip(py_rows, ref_rows)):
+        assert len(py_row) == len(ref_row), (
+            f"{model_name}: row length mismatch at row {row_idx + 1}: "
+            f"python={len(py_row)} ref={len(ref_row)}"
+        )
+
+        py_roi_name = str(py_row[1]).strip()
+        ref_roi_name = str(ref_row[1]).strip()
+        assert py_roi_name == ref_roi_name, (
+            f"{model_name}: ROI name mismatch at row {row_idx + 1}: "
+            f"python={py_roi_name!r} ref={ref_roi_name!r}"
+        )
+
+        py_vals = np.asarray([float(v) for v in py_row[2:]], dtype=np.float64)
+        ref_vals = np.asarray([float(v) for v in ref_row[2:]], dtype=np.float64)
+        both_nan = np.isnan(py_vals) & np.isnan(ref_vals)
+        both_finite = np.isfinite(py_vals) & np.isfinite(ref_vals)
+        valid = both_nan | both_finite
+        assert bool(np.all(valid)), (
+            f"{model_name}: non-matching NaN/finite state in ROI row {row_idx + 1}"
+        )
+
+        if np.any(both_finite):
+            diff = np.abs(py_vals[both_finite] - ref_vals[both_finite])
+            abs_errors.extend(diff.tolist())
+
+    max_err = float(np.max(abs_errors)) if abs_errors else 0.0
+    mae = float(np.mean(abs_errors)) if abs_errors else 0.0
+    summary = (
+        f"{model_name}_roi_xls: rows={len(py_rows)}, mae={mae:.6f}, "
+        f"max_abs_err={max_err:.6f}"
+    )
+    _parity_log(summary)
+    assert max_err <= float(max_abs_err), f"{summary} (max_abs_err_limit={max_abs_err})"
+    return {"rows": int(len(py_rows)), "mae": mae, "max_abs_err": max_err}
+
+
 @pytest.mark.parity
 @pytest.mark.integration
 @pytest.mark.slow
@@ -676,6 +782,233 @@ def test_downsample_bbb_p19_tofts_ktrans(
             "ve_ktrans_min": float(ve_ktrans_min),
         },
     )
+
+
+@pytest.mark.parity
+@pytest.mark.integration
+@pytest.mark.slow
+def test_downsample_bbb_p19_model_maps_and_roi_xls_cpu(
+    run_parity: bool,
+    parity_dataset_root: str,
+    parity_summary_dir: Path | None,
+    parity_thresholds: dict,
+) -> None:
+    if not run_parity:
+        pytest.skip("Use --run-parity to run dataset-backed parity checks.")
+
+    root = Path(parity_dataset_root) if parity_dataset_root else _default_downsample_root()
+    paths = _dataset_paths(root)
+    run_models = ["tofts", "ex_tofts", "patlak", "tissue_uptake"]
+    map_models = ["ex_tofts", "patlak", "tissue_uptake"]
+
+    expected_maps = [
+        _matlab_map_path(paths, model_name, param)
+        for model_name in map_models
+        for param in MULTI_MODEL_PARITY_SPECS[model_name]["params"]
+    ]
+    expected_xls = [Path(paths["processed"]) / "results_matlab" / f"Dyn-1_{name}_fit_rois.xls" for name in run_models]
+    for map_path in expected_maps:
+        assert map_path.exists(), _parity_error_hint(paths, models=map_models, expected_maps=expected_maps)
+    for xls_path in expected_xls:
+        assert xls_path.exists(), f"Missing MATLAB ROI XLS baseline: {xls_path}"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out_dir = Path(tmp) / "python_out_cpu"
+        _parity_log(
+            "starting CPU model-map/ROI parity: "
+            f"root={paths['root']} models={run_models}"
+        )
+        result = run_dce_pipeline(_make_config(paths, out_dir, backend="cpu", models=run_models))
+        assert result["meta"]["status"] == "ok"
+
+        roi_mask = _load_nifti(paths["roi"])
+        ve_ktrans_min = float(parity_thresholds["ve_ktrans_min"])
+        ex_tofts_ktrans_corr_min = float(parity_thresholds["ex_tofts_ktrans_corr_min"])
+        # Ex-Tofts Ktrans parity is dominated by high-end outliers; cap exclusion at 1.0
+        # for this CPU-vs-MATLAB map suite to keep comparisons in the stable range.
+        ktrans_upper_exclude = min(float(parity_thresholds["ktrans_upper_exclude"]), 1.0)
+        ktrans_corr_min = float(parity_thresholds["model_ktrans_corr_min"])
+        ktrans_mse_max = float(parity_thresholds["model_ktrans_mse_max"])
+        param_corr_min = float(parity_thresholds["model_param_corr_min"])
+        param_mse_max = float(parity_thresholds["model_param_mse_max"])
+
+        require_all_models = bool(parity_thresholds["require_all_models"])
+        required_models_raw = str(parity_thresholds["required_models_raw"])
+        required_models = {token.strip().lower() for token in required_models_raw.split(",") if token.strip()}
+        if require_all_models:
+            required_models = set(MULTI_MODEL_PARITY_SPECS.keys())
+        if not required_models:
+            required_models = {"tofts", "ex_tofts", "patlak"}
+
+        failures: list[str] = []
+        diagnostic_failures: list[str] = []
+        map_checks: list[dict] = []
+        roi_checks: list[dict] = []
+
+        def run_map_check(
+            lhs: np.ndarray,
+            rhs: np.ndarray,
+            *,
+            label: str,
+            corr_min: float,
+            mse_max: float,
+            extra_mask: np.ndarray | None = None,
+            required: bool = True,
+        ) -> None:
+            n_valid = _valid_voxel_count(lhs, rhs, roi_mask, extra_mask=extra_mask)
+            check_rec = {
+                "label": label,
+                "required": bool(required),
+                "corr_min": float(corr_min),
+                "mse_max": float(mse_max),
+                "valid_voxels": int(n_valid),
+            }
+            if n_valid < 2:
+                check_rec["status"] = "skipped"
+                map_checks.append(check_rec)
+                _parity_log(f"{label}: skipped (valid_voxels={n_valid})")
+                return
+            try:
+                metrics = _assert_map_parity_if_enough(
+                    lhs,
+                    rhs,
+                    roi_mask,
+                    label=label,
+                    corr_min=corr_min,
+                    mse_max=mse_max,
+                    extra_mask=extra_mask,
+                )
+                check_rec["status"] = "pass"
+                if metrics is not None:
+                    check_rec["metrics"] = metrics
+                map_checks.append(check_rec)
+            except AssertionError as exc:
+                check_rec["status"] = "failed"
+                check_rec["error"] = str(exc)
+                map_checks.append(check_rec)
+                if required:
+                    failures.append(f"{label}: {exc}")
+                    _parity_log(f"{label}: FAILED (required)")
+                else:
+                    diagnostic_failures.append(f"{label}: {exc}")
+                    _parity_log(f"{label}: FAILED (diagnostic)")
+
+        for model_name in map_models:
+            model_required = model_name in required_models
+            py_ktrans = _load_nifti(out_dir / f"Dyn-1_{model_name}_fit_Ktrans.nii.gz")
+            matlab_ktrans = _load_nifti(_matlab_map_path(paths, model_name, "Ktrans"))
+            if model_name == "ex_tofts":
+                ktrans_mask = (
+                    np.isfinite(py_ktrans)
+                    & np.isfinite(matlab_ktrans)
+                    & (py_ktrans < ktrans_upper_exclude)
+                    & (matlab_ktrans < ktrans_upper_exclude)
+                )
+            else:
+                ktrans_mask = None
+            corr_floor = ex_tofts_ktrans_corr_min if model_name == "ex_tofts" else ktrans_corr_min
+            run_map_check(
+                py_ktrans,
+                matlab_ktrans,
+                label=f"{model_name}_ktrans_cpu_vs_matlab",
+                corr_min=corr_floor,
+                mse_max=ktrans_mse_max,
+                extra_mask=ktrans_mask,
+                required=model_required,
+            )
+
+            for param in MULTI_MODEL_PARITY_SPECS[model_name]["params"]:
+                if param == "Ktrans":
+                    continue
+                py_map = _load_nifti(out_dir / f"Dyn-1_{model_name}_fit_{param}.nii.gz")
+                matlab_map = _load_nifti(_matlab_map_path(paths, model_name, param))
+                if param.lower() == "ve":
+                    ve_mask = (
+                        np.isfinite(py_ktrans)
+                        & np.isfinite(matlab_ktrans)
+                        & (py_ktrans > ve_ktrans_min)
+                        & (matlab_ktrans > ve_ktrans_min)
+                    )
+                    base_valid = np.isfinite(py_map) & np.isfinite(matlab_map) & (roi_mask > 0)
+                    mask_use = ve_mask if np.count_nonzero(base_valid & ve_mask) >= 2 else None
+                else:
+                    mask_use = None
+                run_map_check(
+                    py_map,
+                    matlab_map,
+                    label=f"{model_name}_{param}_cpu_vs_matlab",
+                    corr_min=param_corr_min,
+                    mse_max=param_mse_max,
+                    extra_mask=mask_use,
+                    required=model_required,
+                )
+
+        roi_abs_err_limits = {
+            "tofts": 0.03,
+            "ex_tofts": 0.01,
+            "patlak": 0.01,
+            "tissue_uptake": 0.05,
+        }
+        for model_name in run_models:
+            model_required = model_name in required_models
+            py_xls = out_dir / f"Dyn-1_{model_name}_fit_rois.xls"
+            ref_xls = Path(paths["processed"]) / "results_matlab" / f"Dyn-1_{model_name}_fit_rois.xls"
+            check_rec = {
+                "label": f"{model_name}_roi_xls_cpu_vs_matlab",
+                "required": bool(model_required),
+                "max_abs_err_limit": float(roi_abs_err_limits[model_name]),
+            }
+            if not py_xls.exists():
+                msg = f"{model_name}: missing python ROI XLS output ({py_xls})"
+                check_rec["status"] = "failed"
+                check_rec["error"] = msg
+                roi_checks.append(check_rec)
+                if model_required:
+                    failures.append(msg)
+                else:
+                    diagnostic_failures.append(msg)
+                continue
+            try:
+                metrics = _compare_roi_table_against_reference(
+                    model_name=model_name,
+                    py_path=py_xls,
+                    ref_path=ref_xls,
+                    max_abs_err=float(roi_abs_err_limits[model_name]),
+                )
+                check_rec["status"] = "pass"
+                check_rec["metrics"] = metrics
+                roi_checks.append(check_rec)
+            except AssertionError as exc:
+                check_rec["status"] = "failed"
+                check_rec["error"] = str(exc)
+                roi_checks.append(check_rec)
+                if model_required:
+                    failures.append(f"{model_name}_roi_xls_cpu_vs_matlab: {exc}")
+                else:
+                    diagnostic_failures.append(f"{model_name}_roi_xls_cpu_vs_matlab: {exc}")
+
+        _parity_log("completed CPU model-map/ROI parity")
+        _write_parity_summary(
+            parity_summary_dir,
+            "parity_model_map_roi_cpu_summary.json",
+            {
+                "suite": "model-map-roi-cpu",
+                "dataset_root": str(paths["root"]),
+                "required_models": sorted(required_models),
+                "required_failures": failures,
+                "diagnostic_failures": diagnostic_failures,
+                "map_checks": map_checks,
+                "roi_checks": roi_checks,
+            },
+        )
+        if diagnostic_failures:
+            _parity_log(f"diagnostic parity failures (non-gating): {len(diagnostic_failures)}")
+        if failures:
+            failure_text = "\n\n".join(failures)
+            pytest.fail(
+                "model-map/ROI CPU parity checks failed; see details below:\n"
+                f"{failure_text}"
+            )
 
 
 @pytest.mark.parity

@@ -159,14 +159,17 @@ def require_cpufit_backend() -> str:
 
 
 def require_gpufit_backend() -> str:
-    """Return gpufit backend id (CUDA or CPU fallback) or skip if unavailable."""
+    """Return CUDA gpufit backend id or skip when CUDA gpufit is unavailable."""
     probe_acceleration_backend.cache_clear()
     probe = probe_acceleration_backend()
     if not bool(probe.get("pygpufit_imported", False)):
         pytest.skip(f"pygpufit unavailable on this platform: {probe.get('pygpufit_error')}")
-    if str(probe.get("backend", "")) == "gpufit_cuda":
-        return "gpufit_cuda"
-    return "gpufit_cpu_fallback"
+    if str(probe.get("backend", "")) != "gpufit_cuda":
+        pytest.skip(
+            "pygpufit is importable but CUDA gpufit backend is unavailable; "
+            "skip pygpufit reliability checks on non-CUDA platforms."
+        )
+    return "gpufit_cuda"
 
 
 def assert_fast_backend_model_case(model_name: str, acceleration_backend: str) -> None:
