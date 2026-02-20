@@ -60,8 +60,9 @@ Scope:
 
 Current status:
 - Initial non-GUI statistical core is now in Python (`python/dce_postfit_analysis.py`) with MATLAB-style model support checks, SSE extraction, f-test, AIC/relative-likelihood comparison, ROI CSV writers, and voxel-map reconstruction helpers.
-- Unit coverage for this core is in place (`tests/python/test_dce_postfit_analysis.py`).
-- Remaining work is full workflow wiring (fit-result loading, artifact generation, and plotting/report flow) to replace MATLAB Part E usage end-to-end.
+- Reproducible output helpers are available for Part E statistics (`run_ftest_analysis`, `run_aic_analysis`) that emit JSON/CSV/NPY artifacts for ROI and voxel review.
+- Unit coverage for this core and output path is in place (`tests/python/test_dce_postfit_analysis.py`).
+- Remaining work is fit-result loading from workflow artifacts and plot/report flow to replace MATLAB Part E usage end-to-end.
 
 Required outputs:
 - analysis summaries/plots needed for downstream interpretation.

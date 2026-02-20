@@ -17,6 +17,8 @@ from dce_postfit_analysis import (  # noqa: E402
     compute_aic,
     compute_ftest,
     get_sse_and_fp,
+    run_aic_analysis,
+    run_ftest_analysis,
     voxel_values_to_volume,
     write_aic_roi_csv,
     write_ftest_roi_csv,
@@ -123,3 +125,52 @@ def test_voxel_values_to_volume_maps_1_based_indices() -> None:
     flat = out.reshape(-1)
     np.testing.assert_allclose(flat[[0, 4, 7]], values, rtol=0.0, atol=0.0)
     assert flat[1] == pytest.approx(-1.0)
+
+
+@pytest.mark.unit
+def test_run_ftest_analysis_writes_roi_artifacts(tmp_path: Path) -> None:
+    lower = DceFitStats(
+        model_name="tofts",
+        timer=np.linspace(0.0, 4.0, 15),
+        roi_results=_build_result_matrix([10.0, 11.0], sse_col_1based=3),
+        roi_names=["roi_1", "roi_2"],
+    )
+    higher = DceFitStats(
+        model_name="ex_tofts",
+        timer=np.linspace(0.0, 4.0, 15),
+        roi_results=_build_result_matrix([7.0, 8.0], sse_col_1based=4),
+        roi_names=["roi_1", "roi_2"],
+    )
+
+    out = run_ftest_analysis(lower, higher, region="roi", output_dir=tmp_path / "ftest")
+    assert Path(out["summary_json_path"]).exists()
+    assert Path(out["p_values_vector_path"]).exists()
+    assert Path(out["roi_csv_path"]).exists()
+
+
+@pytest.mark.unit
+def test_run_aic_analysis_writes_voxel_artifacts_with_volume_maps(tmp_path: Path) -> None:
+    timer = np.linspace(0.0, 3.0, 10)
+    tumind = np.asarray([1, 8], dtype=np.int64)
+    dims = (2, 2, 2)
+    tofts = DceFitStats(
+        model_name="tofts",
+        timer=timer,
+        fitting_results=_build_result_matrix([5.0, 3.0], sse_col_1based=3),
+        tumind_1based=tumind,
+        dimensions=dims,
+    )
+    ex_tofts = DceFitStats(
+        model_name="ex_tofts",
+        timer=timer,
+        fitting_results=_build_result_matrix([4.0, 4.0], sse_col_1based=4),
+        tumind_1based=tumind,
+        dimensions=dims,
+    )
+
+    out = run_aic_analysis([tofts, ex_tofts], region="voxel", output_dir=tmp_path / "aic")
+    assert Path(out["summary_json_path"]).exists()
+    assert Path(out["aic_matrix_path"]).exists()
+    assert Path(out["best_model_index_path"]).exists()
+    assert Path(out["best_model_index_map_path"]).exists()
+    assert Path(out["best_vs_second_map_path"]).exists()

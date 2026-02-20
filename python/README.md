@@ -161,6 +161,7 @@ Key expectations:
 Part E work-in-progress:
 - Python post-fit statistical core is available in `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_postfit_analysis.py`.
 - Current coverage includes f-test and AIC/relative-likelihood helpers plus ROI CSV and voxel-map reconstruction utilities.
+- Reproducible output helpers are available via `run_ftest_analysis(...)` and `run_aic_analysis(...)` (JSON/CSV/NPY artifacts).
 
 Preference precedence:
 - explicit `stage_overrides` value
