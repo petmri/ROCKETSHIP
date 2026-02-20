@@ -124,6 +124,20 @@ def _stage_d_prefs_for_model(model_name: str) -> dict[str, Any]:
     return prefs
 
 
+def get_fast_backend_case_series(model_name: str) -> dict[str, Any]:
+    """Return one representative OSIPI case row and parsed series for a model."""
+    if model_name not in FAST_BACKEND_CASES:
+        raise KeyError(f"Unsupported fast backend model '{model_name}'.")
+    case = FAST_BACKEND_CASES[model_name]
+    row = _rows(DCE_DATA_DIR / case["dataset"])[0]
+    return {
+        "row": row,
+        "signal": _series(row[case["signal_col"]]),
+        "aif": _series(row[case["aif_col"]]),
+        "timer": _series(row[case["time_col"]]),
+    }
+
+
 def _accelerated_fit_row(
     *,
     model_name: str,
@@ -147,6 +161,39 @@ def _accelerated_fit_row(
     assert out is not None, f"Expected accelerated output for {model_name} but got None"
     assert out.shape[0] == 1, f"Expected one accelerated fit row for {model_name}, got {out.shape}"
     return np.asarray(out[0], dtype=np.float64)
+
+
+def fit_fast_backend_model_case(model_name: str, acceleration_backend: str) -> dict[str, float]:
+    """Return accelerated primary-model fit outputs for one representative OSIPI case."""
+    case = FAST_BACKEND_CASES.get(model_name)
+    if case is None:
+        raise KeyError(f"Unsupported fast backend model '{model_name}'.")
+    data = get_fast_backend_case_series(model_name)
+    row = data["row"]
+    fit = _accelerated_fit_row(
+        model_name=model_name,
+        row=row,
+        signal_col=case["signal_col"],
+        aif_col=case["aif_col"],
+        time_col=case["time_col"],
+        acceleration_backend=acceleration_backend,
+    )
+    if model_name == "tofts":
+        return {"ktrans_per_sec": float(fit[0]), "ve": float(fit[1])}
+    if model_name == "ex_tofts":
+        return {"ktrans_per_sec": float(fit[0]), "ve": float(fit[1]), "vp": float(fit[2])}
+    if model_name == "patlak":
+        return {"ktrans_per_sec": float(fit[0]), "vp": float(fit[1])}
+    if model_name == "2cxm":
+        return {
+            "ktrans_per_sec": float(fit[0]),
+            "ve": float(fit[1]),
+            "vp": float(fit[2]),
+            "fp_per_sec": float(fit[3]),
+        }
+    if model_name == "tissue_uptake":
+        return {"ktrans_per_sec": float(fit[0]), "fp_per_sec": float(fit[1]), "vp": float(fit[2])}
+    raise KeyError(f"Unsupported fast backend model '{model_name}'.")
 
 
 def require_cpufit_backend() -> str:

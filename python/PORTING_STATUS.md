@@ -7,7 +7,7 @@
 
 Current automated baseline:
 - Command: `.venv/bin/python -m pytest tests/python -q`
-- Result: `104 passed, 11 skipped, 2 xfailed`
+- Result: `105 passed, 12 skipped, 2 xfailed`
 - Current non-blocking xfails:
   - `tests/python/test_osipi_pycpufit.py::test_osipi_pycpufit_2cxm_fast`
   - `tests/python/test_osipi_pycpufit.py::test_osipi_pycpufit_tissue_uptake_fast`
@@ -30,7 +30,7 @@ Current automated baseline:
 | MATLAB area | Representative MATLAB files | Python status | Category | Notes |
 |---|---|---|---|---|
 | DCE CLI pipeline A/B/D | `run_dce_cli.m`, `dce/A_make_R1maps_func.m`, `dce/B_AIF_fitting_func.m`, `dce/D_fit_voxels_func.m` | Implemented via `python/dce_pipeline.py` + `python/dce_cli.py` | done | Core in-memory CLI flow exists and is tested. |
-| DCE primary models | `dce/model_tofts*.m`, `dce/model_patlak*.m`, `dce/model_extended_tofts*.m` | Implemented in `python/dce_models.py` and wired into pipeline | primary | Edge-case regression tests now cover low-SNR, non-uniform timer inputs, and bounds; strict gating thresholds are still pending. |
+| DCE primary models | `dce/model_tofts*.m`, `dce/model_patlak*.m`, `dce/model_extended_tofts*.m` | Implemented in `python/dce_models.py` and wired into pipeline | primary | Edge-case regression tests cover low-SNR/non-uniform timer/bounds; strict OSIPI reliability thresholds are merge-gated; backend-consistency checks exist for CPU/CPUfit/GPUfit where available. |
 | DCE unstable models | `dce/model_2cxm*.m`, `dce/model_tissue_uptake*.m` | Implemented but still unstable in some parity/reliability paths | secondary | Keep improving; not a blocker for first dev merge unless promoted. |
 | DCE optional models | `dce/model_fxr*.m`, `dce/auc_helper.m`, `nested`, `FXL_rr` pathways | Partial (`fxr`, `auc` present; `nested`/`FXL_rr` not executed) | secondary | Decide post-primary whether to fully support or deprecate. |
 | DCE Part E post-fit analysis | `dce/fitting_analysis.m`, `dce/compare_fits.m`, `dce/compare_gui.m` | Not ported as workflow | primary | Explicit user priority for transition completeness. |
@@ -48,8 +48,7 @@ Current automated baseline:
 ## Primary Gaps Blocking Dev Merge Trial
 1. Python T1 mapping workflow parity with MATLAB usage (including GUI).
 2. Python Part E analysis workflow availability.
-3. Strict reliability gating and backend consistency for primary DCE models.
-4. Real-data qualification runbook and results for Python workflows.
+3. Real-data qualification runbook and results for Python workflows.
 
 ## Secondary Gaps
 - 2CXM and tissue uptake robustness across CPU/CPUfit/GPUfit.

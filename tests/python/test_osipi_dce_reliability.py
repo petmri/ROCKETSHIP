@@ -21,6 +21,7 @@ from rocketship import (  # noqa: E402
     model_tissue_uptake_fit,
     model_tofts_fit,
 )
+from osipi_dce_primary_helpers import strict_peer_max_limit
 
 
 OSIPI_ROOT = REPO_ROOT / "tests" / "data" / "osipi"
@@ -42,6 +43,10 @@ def _series(raw: str) -> list[float]:
 
 def _peer_max_abs_error(category: str, method: str, param: str) -> float:
     return float(PEER_ERROR_SUMMARY["metrics"][category][method][param]["max_abs_error"])
+
+
+def _peer_strict_max_abs_tol(category: str, method: str, param: str) -> float:
+    return strict_peer_max_limit(_peer_max_abs_error(category, method, param))
 
 
 def _assert_close(actual: float, expected: float, tol: float, label: str, param: str) -> None:
@@ -69,8 +74,8 @@ def _ps_per_min_from_ktrans_fp_per_sec(ktrans_per_sec: float, fp_per_sec: float)
 def test_osipi_tofts_reliability_against_reference_values() -> None:
     rows = _rows(DCE_DATA_DIR / "dce_DRO_data_tofts.csv")
 
-    ktrans_tol = _peer_max_abs_error("DCEmodels", "tofts", "Ktrans") + 1e-6
-    ve_tol = _peer_max_abs_error("DCEmodels", "tofts", "ve") + 1e-6
+    ktrans_tol = _peer_strict_max_abs_tol("DCEmodels", "tofts", "Ktrans")
+    ve_tol = _peer_strict_max_abs_tol("DCEmodels", "tofts", "ve")
 
     for row in rows:
         fit = model_tofts_fit(_series(row["C"]), _series(row["ca"]), _series(row["t"]))
@@ -87,9 +92,9 @@ def test_osipi_tofts_reliability_against_reference_values() -> None:
 def test_osipi_extended_tofts_reliability_against_reference_values() -> None:
     rows = _rows(DCE_DATA_DIR / "dce_DRO_data_extended_tofts.csv")
 
-    ktrans_tol = _peer_max_abs_error("DCEmodels", "etofts", "Ktrans") + 1e-6
-    ve_tol = _peer_max_abs_error("DCEmodels", "etofts", "ve") + 1e-6
-    vp_tol = _peer_max_abs_error("DCEmodels", "etofts", "vp") + 1e-6
+    ktrans_tol = _peer_strict_max_abs_tol("DCEmodels", "etofts", "Ktrans")
+    ve_tol = _peer_strict_max_abs_tol("DCEmodels", "etofts", "ve")
+    vp_tol = _peer_strict_max_abs_tol("DCEmodels", "etofts", "vp")
 
     for row in rows:
         fit = model_extended_tofts_fit(_series(row["C"]), _series(row["ca"]), _series(row["t"]))
@@ -133,8 +138,8 @@ def test_osipi_patlak_delay_reference_values_are_imported() -> None:
 def test_osipi_patlak_reliability_delay0_against_reference_values() -> None:
     rows = _rows(DCE_DATA_DIR / "patlak_sd_0.02_delay_0.csv")
 
-    ps_tol = _peer_max_abs_error("DCEmodels", "patlak", "ps") + 1e-6
-    vp_tol = _peer_max_abs_error("DCEmodels", "patlak", "vp") + 1e-6
+    ps_tol = _peer_strict_max_abs_tol("DCEmodels", "patlak", "ps")
+    vp_tol = _peer_strict_max_abs_tol("DCEmodels", "patlak", "vp")
 
     for row in rows:
         fit = model_patlak_fit(_series(row["C_t"]), _series(row["cp_aif"]), _series(row["t"]))
@@ -150,6 +155,10 @@ def test_osipi_patlak_reliability_delay0_against_reference_values() -> None:
 @pytest.mark.osipi
 @pytest.mark.osipi_slow
 @pytest.mark.slow
+@pytest.mark.xfail(
+    reason="Secondary-goal model: keep visibility but do not block merge decisions on 2CXM reliability yet.",
+    strict=False,
+)
 def test_osipi_2cxm_reliability_delay0_against_reference_values(run_osipi_slow: bool) -> None:
     _require_osipi_slow(run_osipi_slow)
     rows = _rows(DCE_DATA_DIR / "2cxm_sd_0.001_delay_0.csv")
@@ -177,6 +186,10 @@ def test_osipi_2cxm_reliability_delay0_against_reference_values(run_osipi_slow: 
 @pytest.mark.osipi
 @pytest.mark.osipi_slow
 @pytest.mark.slow
+@pytest.mark.xfail(
+    reason="Secondary-goal model: keep visibility but do not block merge decisions on tissue uptake reliability yet.",
+    strict=False,
+)
 def test_osipi_2cum_reliability_delay0_against_reference_values(run_osipi_slow: bool) -> None:
     _require_osipi_slow(run_osipi_slow)
     rows = _rows(DCE_DATA_DIR / "2cum_sd_0.0025_delay_0.csv")

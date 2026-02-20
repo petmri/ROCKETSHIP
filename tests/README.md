@@ -148,13 +148,13 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
   -v
 ```
 
-Run OSIPI SI-to-concentration merge-gate summary (prints thresholds vs ours and writes JSON):
+Run OSIPI primary merge-gate reliability summary (prints SI-to-conc and primary DCE thresholds vs ours and writes JSON):
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python tests/python/run_osipi_reliability.py \
-  --suite si-to-conc \
-  --summary-json /tmp/osipi_si_to_conc_summary.json
+  --suite all \
+  --summary-json /tmp/osipi_primary_reliability_summary.json
 ```
 
 Run fast OSIPI backend checks only:
@@ -165,6 +165,13 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
   tests/python/test_osipi_pycpufit.py \
   tests/python/test_osipi_pygpufit.py \
   -m fast -v
+```
+
+Run primary-model backend consistency checks (`cpu` vs `cpufit`/`gpufit`, with skip when unavailable):
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python -m pytest tests/python/test_osipi_backend_consistency.py -v
 ```
 
 Enable long OSIPI fits:

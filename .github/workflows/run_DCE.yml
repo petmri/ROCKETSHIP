@@ -36,17 +36,17 @@ jobs:
             --cov-report=xml \
             --cov-fail-under=60
 
-      - name: Run OSIPI SI-to-concentration merge-gate summary
+      - name: Run OSIPI primary merge-gate reliability summary
         run: |
           python tests/python/run_osipi_reliability.py \
-            --suite si-to-conc \
-            --summary-json /tmp/osipi_si_to_conc_summary.json
+            --suite all \
+            --summary-json /tmp/osipi_primary_reliability_summary.json
 
-      - name: Upload OSIPI SI-to-concentration summary
+      - name: Upload OSIPI primary reliability summary
         uses: actions/upload-artifact@v4
         with:
-          name: osipi-si-to-conc-summary
-          path: /tmp/osipi_si_to_conc_summary.json
+          name: osipi-primary-reliability-summary
+          path: /tmp/osipi_primary_reliability_summary.json
           retention-days: 7
           if-no-files-found: error
 

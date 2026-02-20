@@ -263,13 +263,20 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
   -v
 ```
 
-### OSIPI SI-to-concentration merge-gate summary
+### OSIPI primary backend consistency checks
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python -m pytest tests/python/test_osipi_backend_consistency.py -v
+```
+
+### OSIPI primary merge-gate reliability summary
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python tests/python/run_osipi_reliability.py \
-  --suite si-to-conc \
-  --summary-json /tmp/osipi_si_to_conc_summary.json
+  --suite all \
+  --summary-json /tmp/osipi_primary_reliability_summary.json
 ```
 
 ## CI behavior (high level)

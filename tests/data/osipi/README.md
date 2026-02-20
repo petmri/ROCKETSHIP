@@ -55,7 +55,8 @@ These values are computed from OSIPI `TestResults` CSV outputs and used by the O
 - `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/test_osipi_dce_reliability.py`
 - `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/test_osipi_t1_reliability.py` (linear, nonlinear, two-FA)
 - `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/test_osipi_si_to_conc_reliability.py`
-- `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/run_osipi_reliability.py` (merge-gate summary runner for SI-to-concentration thresholds)
+- `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/test_osipi_backend_consistency.py` (CPU vs CPUfit/GPUfit for primary DCE models where available)
+- `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/run_osipi_reliability.py` (merge-gate summary runner for SI-to-concentration + primary DCE thresholds)
 
 All tests are labeled with `@pytest.mark.osipi`.
 
@@ -73,11 +74,11 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python -m pytest tests/python -m osipi -v --osipi-slow
 ```
 
-Run SI-to-concentration merge-gate summary directly:
+Run primary merge-gate reliability summary directly:
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python tests/python/run_osipi_reliability.py \
-  --suite si-to-conc \
-  --summary-json /tmp/osipi_si_to_conc_summary.json
+  --suite all \
+  --summary-json /tmp/osipi_primary_reliability_summary.json
 ```

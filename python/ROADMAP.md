@@ -42,7 +42,9 @@ Scope:
 
 Current status:
 - Edge-case regression coverage exists for low-SNR data, non-uniform timer spacing, and custom fit bounds in `tests/python/test_dce_models.py`.
-- Remaining work is strict threshold gating and cross-backend consistency enforcement.
+- Strict OSIPI reliability thresholds for primary DCE models are now merge-gated via `tests/python/test_osipi_dce_reliability.py` and `tests/python/run_osipi_reliability.py`.
+- Backend-consistency checks now cover CPU vs CPUfit/GPUfit (where available) in `tests/python/test_osipi_backend_consistency.py`.
+- Remaining work is real-data backend qualification in end-to-end workflows.
 
 Required outputs:
 - strict pass/fail criteria on primary model parity and reliability tests.

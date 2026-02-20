@@ -17,8 +17,8 @@ Finish the Python transition to the point that it can be merged to `dev` and tes
 - [x] Add contract-runner integration for non-linear VFA T1 parity.
 
 2. DCE primary model readiness (`patlak`, `tofts`, `ex_tofts`)
-- [ ] Tighten parity/reliability thresholds and make primary model checks strict merge gates.
-- [ ] Ensure backend consistency across `cpu`, `cpufit`, and `gpufit` where available.
+- [x] Tighten parity/reliability thresholds and make primary model checks strict merge gates.
+- [x] Ensure backend consistency across `cpu`, `cpufit`, and `gpufit` where available.
 - [x] Add regression tests for known edge cases (bounds, low SNR, non-uniform timer inputs).
 
 3. Part E post-fitting analysis
@@ -70,3 +70,5 @@ Current handling in main suite:
 - OSIPI SI-to-concentration reliability test added (`tests/python/test_osipi_si_to_conc_reliability.py`).
 - OSIPI SI-to-concentration merge-gate reporting runner added (`tests/python/run_osipi_reliability.py`) and wired in CI.
 - Primary DCE edge-case regression tests added for non-uniform timer, low-SNR fits, and custom bounds (`tests/python/test_dce_models.py`).
+- Primary DCE OSIPI thresholds tightened to strict peer-max limits and integrated into merge-gate reporting (`tests/python/test_osipi_dce_reliability.py`, `tests/python/run_osipi_reliability.py`).
+- Primary DCE backend consistency checks added across CPU/CPUfit/GPUfit where available (`tests/python/test_osipi_backend_consistency.py`).

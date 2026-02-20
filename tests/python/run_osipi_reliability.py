@@ -8,7 +8,16 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from osipi_si_to_conc_helpers import as_summary_payload, compute_si_to_conc_metrics, peer_si_to_conc_metrics
+from osipi_dce_primary_helpers import (
+    as_summary_payload as dce_primary_summary_payload,
+    compute_dce_primary_metrics,
+    peer_dce_primary_metrics,
+)
+from osipi_si_to_conc_helpers import (
+    as_summary_payload as si_to_conc_summary_payload,
+    compute_si_to_conc_metrics,
+    peer_si_to_conc_metrics,
+)
 
 
 def _repo_root() -> Path:
@@ -19,9 +28,9 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--suite",
-        choices=["si-to-conc"],
-        default="si-to-conc",
-        help="OSIPI reliability suite to run (default: si-to-conc).",
+        choices=["all", "si-to-conc", "dce-primary"],
+        default="all",
+        help="OSIPI reliability suite to run (default: all).",
     )
     parser.add_argument(
         "--epsilon",
@@ -92,28 +101,79 @@ def _print_si_to_conc_summary(payload: dict[str, Any]) -> None:
     print(_render_table(rows, ["metric", "ours", "peer", "limit", "pass"]))
 
 
+def _print_dce_primary_summary(payload: dict[str, Any]) -> None:
+    rows: list[dict[str, str]] = []
+    for check in payload["checks"]:
+        rows.append(
+            {
+                "method": str(check["method"]),
+                "param": str(check["param"]),
+                "ours_max": _format_float(check["ours_max_abs_error"]),
+                "peer_max": _format_float(check["peer_max_abs_error"]),
+                "limit_max": _format_float(check["limit_max_abs_error"]),
+                "pass": str(bool(check["pass"])).lower(),
+            }
+        )
+    print("[OSIPI-RELIABILITY] suite=dce-primary")
+    print(_render_table(rows, ["method", "param", "ours_max", "peer_max", "limit_max", "pass"]))
+
+
+def _write_summary(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
 def main() -> int:
     root = _repo_root()
     args = _parse_args()
 
-    if args.suite != "si-to-conc":
-        print(f"Unsupported suite: {args.suite}", file=sys.stderr)
-        return 2
-
-    ours = compute_si_to_conc_metrics()
-    peer = peer_si_to_conc_metrics()
-    payload = as_summary_payload(ours, peer, epsilon=float(args.epsilon))
-
     summary_path = Path(args.summary_json).expanduser()
     if not summary_path.is_absolute():
         summary_path = (root / summary_path).resolve()
-    summary_path.parent.mkdir(parents=True, exist_ok=True)
-    summary_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
-    _print_si_to_conc_summary(payload)
-    print(f"[OSIPI-RELIABILITY] summary_json={summary_path}")
+    if args.suite == "si-to-conc":
+        ours = compute_si_to_conc_metrics()
+        peer = peer_si_to_conc_metrics()
+        payload = si_to_conc_summary_payload(ours, peer, epsilon=float(args.epsilon))
+        _write_summary(summary_path, payload)
+        _print_si_to_conc_summary(payload)
+        print(f"[OSIPI-RELIABILITY] summary_json={summary_path}")
+        return 0 if bool(payload["passed"]) else 1
 
-    return 0 if bool(payload["passed"]) else 1
+    if args.suite == "dce-primary":
+        ours = compute_dce_primary_metrics()
+        peer = peer_dce_primary_metrics()
+        payload = dce_primary_summary_payload(ours, peer)
+        _write_summary(summary_path, payload)
+        _print_dce_primary_summary(payload)
+        print(f"[OSIPI-RELIABILITY] summary_json={summary_path}")
+        return 0 if bool(payload["passed"]) else 1
+
+    if args.suite == "all":
+        si_ours = compute_si_to_conc_metrics()
+        si_peer = peer_si_to_conc_metrics()
+        si_payload = si_to_conc_summary_payload(si_ours, si_peer, epsilon=float(args.epsilon))
+
+        dce_ours = compute_dce_primary_metrics()
+        dce_peer = peer_dce_primary_metrics()
+        dce_payload = dce_primary_summary_payload(dce_ours, dce_peer)
+
+        payload = {
+            "suite": "all",
+            "passed": bool(si_payload["passed"]) and bool(dce_payload["passed"]),
+            "suites": {
+                "si-to-conc": si_payload,
+                "dce-primary": dce_payload,
+            },
+        }
+        _write_summary(summary_path, payload)
+        _print_si_to_conc_summary(si_payload)
+        _print_dce_primary_summary(dce_payload)
+        print(f"[OSIPI-RELIABILITY] summary_json={summary_path}")
+        return 0 if bool(payload["passed"]) else 1
+
+    print(f"Unsupported suite: {args.suite}", file=sys.stderr)
+    return 2
 
 
 if __name__ == "__main__":
