@@ -17,6 +17,15 @@
       "inputs": ["parameter", "si", "tr"],
       "outputs": ["T1", "M0", "r_squared", "sse"],
       "tolerance_profile": "fit_recovery"
+    },
+    {
+      "id": "t1_fa_fit",
+      "function": "fitParameter",
+      "fit_type": "t1_fa_fit",
+      "inputs": ["parameter", "si", "tr"],
+      "outputs": ["T1", "M0", "r_squared", "ci_low", "ci_high", "sse"],
+      "compare_indices": [0, 1, 2, 5],
+      "tolerance_profile": "fit_recovery"
     }
   ]
 }

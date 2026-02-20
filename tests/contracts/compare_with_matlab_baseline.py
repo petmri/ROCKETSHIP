@@ -54,6 +54,7 @@ CONTRACT_BASELINE_PATHS: Dict[str, str] = {
     "ssvd_deconvolution": "dsc.ssvd_deconvolution",
     "t2_linear_fast": "parametric.t2_linear_fast",
     "t1_fa_linear_fit": "parametric.t1_fa_linear_fit",
+    "t1_fa_fit": "parametric.t1_fa_fit",
 }
 
 
@@ -267,6 +268,27 @@ def run_compare(
             missing_count += 1
             print(f"{contract_id} | MISSING | 0 | n/a | n/a | python result not found")
             continue
+
+        compare_indices = case.get("compare_indices")
+        if compare_indices is not None:
+            if not isinstance(expected, list) or not isinstance(actual, list):
+                fail_count += 1
+                print(
+                    f"{contract_id} | FAIL | 1 | n/a | n/a | compare_indices requires list expected/actual values"
+                )
+                continue
+            try:
+                indices = [int(idx) for idx in compare_indices]
+                expected = [expected[idx] for idx in indices]
+                actual = [actual[idx] for idx in indices]
+            except (TypeError, ValueError):
+                fail_count += 1
+                print(f"{contract_id} | FAIL | 1 | n/a | n/a | invalid compare_indices configuration")
+                continue
+            except IndexError:
+                fail_count += 1
+                print(f"{contract_id} | FAIL | 1 | n/a | n/a | compare_indices out of range")
+                continue
 
         stats = compare_values(expected, actual, float(profile["atol"]), float(profile["rtol"]))
         if stats.passed:

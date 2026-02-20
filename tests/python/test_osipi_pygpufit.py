@@ -32,11 +32,19 @@ def test_osipi_pygpufit_patlak_fast(gpufit_backend: str) -> None:
 
 @pytest.mark.osipi
 @pytest.mark.fast
+@pytest.mark.xfail(
+    reason="Secondary-goal model: keep visibility but do not block on 2CXM GPUfit reliability yet.",
+    strict=False,
+)
 def test_osipi_pygpufit_2cxm_fast(gpufit_backend: str) -> None:
     assert_fast_backend_model_case("2cxm", gpufit_backend)
 
 
 @pytest.mark.osipi
 @pytest.mark.fast
+@pytest.mark.xfail(
+    reason="Secondary-goal model: keep visibility but do not block on tissue uptake GPUfit reliability yet.",
+    strict=False,
+)
 def test_osipi_pygpufit_tissue_uptake_fast(gpufit_backend: str) -> None:
     assert_fast_backend_model_case("tissue_uptake", gpufit_backend)

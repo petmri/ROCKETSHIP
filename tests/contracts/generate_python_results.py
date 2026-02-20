@@ -54,6 +54,7 @@ def main() -> int:
         model_vp_cfit,
         model_vp_fit,
         previous_aif,
+        t1_fa_nonlinear_fit,
         t1_fa_linear_fit,
         t2_linear_fast,
     )
@@ -154,6 +155,7 @@ def main() -> int:
                 "dsc_convolution_ssvd",
                 "t2_linear_fast",
                 "t1_fa_linear_fit",
+                "t1_fa_fit",
             ],
         },
         "results": {
@@ -231,6 +233,7 @@ def main() -> int:
             },
             "t2_linear_fast": t2_linear_fast(te, si_t2),
             "t1_fa_linear_fit": t1_fa_linear_fit(fa, si_t1, tr),
+            "t1_fa_fit": t1_fa_nonlinear_fit(fa, si_t1, tr),
         },
     }
 

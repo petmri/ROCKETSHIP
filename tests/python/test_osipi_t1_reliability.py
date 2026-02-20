@@ -14,6 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "python"))
 
 from rocketship import t1_fa_linear_fit  # noqa: E402
+from rocketship import t1_fa_nonlinear_fit, t1_fa_two_point_fit  # noqa: E402
 
 
 OSIPI_ROOT = REPO_ROOT / "tests" / "data" / "osipi"
@@ -82,5 +83,61 @@ def test_osipi_t1_linear_error_distribution_matches_peer_results() -> None:
     )
     assert within_fraction >= 0.95, (
         "OSIPI T1 linear error distribution fell below peer-aligned threshold: "
+        f"{within_fraction:.3f} within {near_peer_band:.8g}"
+    )
+
+
+@pytest.mark.osipi
+def test_osipi_t1_nonlinear_error_distribution_matches_peer_results() -> None:
+    cases = _iter_t1_cases()
+
+    peer = PEER_ERROR_SUMMARY["metrics"]["T1mapping"]["nonlinear"]["r1"]
+    peer_p95 = float(peer["p95_abs_error"])
+    peer_max = float(peer["max_abs_error"])
+    near_peer_band = peer_p95 * 1.2
+
+    errors: list[float] = []
+    for case_type, row in cases:
+        tr_ms, r1_ref = _reference_r1(case_type, row)
+        t1_ms = float(t1_fa_nonlinear_fit(_series(row["FA"]), _series(row["s"]), tr_ms)[0])
+        r1_measured = 1000.0 / t1_ms
+        errors.append(abs(r1_measured - r1_ref))
+
+    within_band = sum(1 for err in errors if err <= near_peer_band)
+    within_fraction = within_band / len(errors)
+
+    assert max(errors) <= (peer_max + 1e-6), (
+        f"Max OSIPI T1 nonlinear error {max(errors):.8g} exceeded peer max {peer_max:.8g}"
+    )
+    assert within_fraction >= 0.95, (
+        "OSIPI T1 nonlinear error distribution fell below peer-aligned threshold: "
+        f"{within_fraction:.3f} within {near_peer_band:.8g}"
+    )
+
+
+@pytest.mark.osipi
+def test_osipi_t1_two_fa_error_distribution_matches_peer_results() -> None:
+    cases = _iter_t1_cases()
+
+    peer = PEER_ERROR_SUMMARY["metrics"]["T1mapping"]["two-FA"]["r1"]
+    peer_p95 = float(peer["p95_abs_error"])
+    peer_max = float(peer["max_abs_error"])
+    near_peer_band = peer_p95 * 1.2
+
+    errors: list[float] = []
+    for case_type, row in cases:
+        tr_ms, r1_ref = _reference_r1(case_type, row)
+        t1_ms = float(t1_fa_two_point_fit(_series(row["FA"]), _series(row["s"]), tr_ms)[0])
+        r1_measured = 1000.0 / t1_ms
+        errors.append(abs(r1_measured - r1_ref))
+
+    within_band = sum(1 for err in errors if err <= near_peer_band)
+    within_fraction = within_band / len(errors)
+
+    assert max(errors) <= (peer_max + 1e-6), (
+        f"Max OSIPI T1 two-FA error {max(errors):.8g} exceeded peer max {peer_max:.8g}"
+    )
+    assert within_fraction >= 0.95, (
+        "OSIPI T1 two-FA error distribution fell below peer-aligned threshold: "
         f"{within_fraction:.3f} within {near_peer_band:.8g}"
     )

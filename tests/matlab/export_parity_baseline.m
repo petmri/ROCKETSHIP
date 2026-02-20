@@ -93,6 +93,7 @@ m0 = 1100;
 theta = fa .* (pi / 180);
 siT1 = m0 .* ((1 - exp(-tr ./ trueT1)) .* sin(theta)) ./ (1 - exp(-tr ./ trueT1) .* cos(theta));
 baseline.parametric.t1_fa_linear_fit = fitParameter(fa, 't1_fa_linear_fit', siT1, tr, '', 0, '', 0, 0);
+baseline.parametric.t1_fa_fit = fitParameter(fa, 't1_fa_fit', siT1, tr, '', 0, '', 0, 0);
 
 matPath = fullfile(outputDir, 'matlab_reference_v1.mat');
 jsonPath = fullfile(outputDir, 'matlab_reference_v1.json');
