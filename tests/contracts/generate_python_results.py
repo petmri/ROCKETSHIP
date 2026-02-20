@@ -10,18 +10,23 @@ from pathlib import Path
 import sys
 
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_BASELINE_JSON = REPO_ROOT / "tests" / "contracts" / "baselines" / "matlab_reference_v1.json"
+DEFAULT_OUTPUT_JSON = REPO_ROOT / "tests" / "contracts" / "python_results.json"
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--baseline",
         type=Path,
-        default=Path("tests/contracts/baselines/matlab_reference_v1.json"),
+        default=DEFAULT_BASELINE_JSON,
         help="MATLAB baseline JSON path.",
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("tests/python/python_results.json"),
+        default=DEFAULT_OUTPUT_JSON,
         help="Output JSON path for Python results.",
     )
     return parser.parse_args()
@@ -30,8 +35,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
 
-    repo_root = Path(__file__).resolve().parents[2]
-    sys.path.insert(0, str(repo_root / "python"))
+    sys.path.insert(0, str(REPO_ROOT / "python"))
 
     from rocketship import (  # pylint: disable=import-outside-toplevel
         dsc_convolution_ssvd,

@@ -157,8 +157,8 @@ Confirmed in-scope requirements to retain:
 From `.venv`:
 
 ```bash
-.venv/bin/python tests/python/generate_python_results.py --output /tmp/python_results.json
-.venv/bin/python tests/python/compare_with_matlab_baseline.py --python-results /tmp/python_results.json --require-all
+.venv/bin/python tests/contracts/generate_python_results.py --output /tmp/python_results.json
+.venv/bin/python tests/contracts/compare_with_matlab_baseline.py --python-results /tmp/python_results.json --require-all
 ```
 
 Expected summary right now:
@@ -172,8 +172,8 @@ Expected summary right now:
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python -m pytest tests/python -q
-.venv/bin/python tests/python/generate_python_results.py --output /tmp/python_results.json
-.venv/bin/python tests/python/compare_with_matlab_baseline.py --python-results /tmp/python_results.json --require-all
+.venv/bin/python tests/contracts/generate_python_results.py --output /tmp/python_results.json
+.venv/bin/python tests/contracts/compare_with_matlab_baseline.py --python-results /tmp/python_results.json --require-all
 ```
 
 ## Environment notes

@@ -50,14 +50,18 @@ Recently completed
 - Hardened OSIPI fast-backend test gating:
   - `test_osipi_pygpufit.py` now skips unless CUDA GPUfit is actually available
   - avoids running gpufit fallback-path checks as if they were CUDA GPUfit reliability checks
+- Improved parity/benchmark CLI output + naming consistency:
+  - restored `run_dce_parity` post-run summary tables (corr/MSE/MAE + related parity metrics)
+  - added `run_dce_benchmark.py` naming-aligned benchmark runner
+- Moved contract parity tooling from `tests/python` to `tests/contracts`:
+  - moved `generate_python_results.py` and `compare_with_matlab_baseline.py`
+  - updated CI and docs to use new script paths
+  - normalized script defaults to repo-root-based contract paths
 
 Highest priority next
-- Make some tests with detailed CLI outputs, give consistent naming scheme to id them (run_*, or something else)
-  - Fix run_dce_parity to output correlation and MSE again (see old version)
-  - Rename benchmark to new naming scheme
-- Fix 2cxm and uptake, confirm forward model, look at OSIPI code for fix 
-  - when finished delete tune_dce_unstable_models
+- Fix 2cxm and uptake in cpufit and gpufit
 - Promote unstable-model parity checks to strict gating once stable:
+  - probably won't fix matlab, so remove parity checks between these models and matlab
   - promote `tissue_uptake` from diagnostic to required
   - promote `2cxm` from diagnostic to required
 - Add tiny fixture edge-case variants:

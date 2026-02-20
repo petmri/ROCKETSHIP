@@ -46,8 +46,8 @@ jobs:
 
       - name: Run Python contract parity checks
         run: |
-          python tests/python/generate_python_results.py --output /tmp/python_results.json
-          python tests/python/compare_with_matlab_baseline.py --python-results /tmp/python_results.json --require-all
+          python tests/contracts/generate_python_results.py --output /tmp/python_results.json
+          python tests/contracts/compare_with_matlab_baseline.py --python-results /tmp/python_results.json --require-all
 
       - name: Run Python DCE pipeline parity (downsample fixture)
         run: |

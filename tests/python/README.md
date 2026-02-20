@@ -47,9 +47,9 @@ Temporary bypass (until release bundles are updated):
 ```
 
 ## Script
-- `compare_with_matlab_baseline.py`
-- `generate_python_results.py`
-- `benchmark_dce_pipeline.py` (full-pipeline runtime benchmark across MATLAB/Python backends)
+- `tests/contracts/compare_with_matlab_baseline.py`
+- `tests/contracts/generate_python_results.py`
+- `run_dce_benchmark.py` (full-pipeline runtime benchmark across MATLAB/Python backends)
 - `run_dce_python_cli.py` (repo root wrapper for in-memory A->B->D pipeline)
 - `run_dce_python_gui.py` (repo root wrapper for PySide6 GUI)
 
@@ -60,13 +60,13 @@ Benchmark as many backend configurations as are available on the machine:
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python tests/python/benchmark_dce_pipeline.py
+.venv/bin/python tests/python/run_dce_benchmark.py
 ```
 
 Useful options:
 
 ```bash
-.venv/bin/python tests/python/benchmark_dce_pipeline.py \
+.venv/bin/python tests/python/run_dce_benchmark.py \
   --repeats 3 \
   --models patlak \
   --configs matlab_cpu,python_cpu,python_cpufit,python_gpufit \
@@ -155,7 +155,7 @@ Coverage run (terminal summary + XML):
 ## Generate Python outputs from current ports
 
 ```bash
-.venv/bin/python tests/python/generate_python_results.py \
+.venv/bin/python tests/contracts/generate_python_results.py \
   --output /tmp/python_results_tofts.json
 ```
 
@@ -163,14 +163,14 @@ Coverage run (terminal summary + XML):
 Use this before implementing Python models:
 
 ```bash
-python3 tests/python/compare_with_matlab_baseline.py \
-  --write-template tests/python/python_results_template.json
+python3 tests/contracts/compare_with_matlab_baseline.py \
+  --write-template tests/contracts/python_results_template.json
 ```
 
 ## Compare Python results against MATLAB baseline
 
 ```bash
-.venv/bin/python tests/python/compare_with_matlab_baseline.py \
+.venv/bin/python tests/contracts/compare_with_matlab_baseline.py \
   --python-results /tmp/python_results_tofts.json
 ```
 
@@ -334,6 +334,7 @@ python tests/python/run_dce_parity.py -s multi-model -w
 ```
 
 The runner suppresses deprecation warnings by default to keep parity output readable.
+It also prints a post-run corr/MSE/MAE summary from pytest parity artifacts.
 
 Synthetic stability sweeps for unstable models (no MATLAB required):
 

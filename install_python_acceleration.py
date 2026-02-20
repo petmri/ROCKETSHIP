@@ -60,7 +60,7 @@ def _print_post_install_next_steps(repo_root: Path, venv_python: Path) -> None:
     print("\n\nInstallation was successful!")
     print("Next steps:")
     print(f"  1) Activate env: {activate_cmd}")
-    print("  2) Run Benchmarks: python tests/python/benchmark_dce_pipeline.py")
+    print("  2) Run Benchmarks: python tests/python/run_dce_benchmark.py")
     print("  3) Run Python CLI: python run_dce_python_cli.py --help")
     print("  4) Run MATLAB CLI: matlab -batch \"cd(pwd); run_dce_cli('<subject_source_path>','<subject_tp_path>');\"")
 

@@ -23,6 +23,11 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CONTRACTS_DIR = REPO_ROOT / "tests" / "contracts"
+DEFAULT_BASELINE_JSON = DEFAULT_CONTRACTS_DIR / "baselines" / "matlab_reference_v1.json"
+
+
 CONTRACT_FILES = [
     "dce_core_contracts.json",
     "dsc_core_contracts.json",
@@ -295,13 +300,13 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument(
         "--baseline",
         type=Path,
-        default=Path("tests/contracts/baselines/matlab_reference_v1.json"),
+        default=DEFAULT_BASELINE_JSON,
         help="Path to MATLAB baseline JSON.",
     )
     parser.add_argument(
         "--contracts-dir",
         type=Path,
-        default=Path("tests/contracts"),
+        default=DEFAULT_CONTRACTS_DIR,
         help="Directory containing *_contracts.json and tolerance_profiles.json.",
     )
     parser.add_argument(

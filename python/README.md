@@ -170,8 +170,8 @@ pipeline output/event contract checks (`tests/python/test_install_python_acceler
 
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python tests/python/generate_python_results.py --output /tmp/python_results.json
-.venv/bin/python tests/python/compare_with_matlab_baseline.py --python-results /tmp/python_results.json --require-all
+.venv/bin/python tests/contracts/generate_python_results.py --output /tmp/python_results.json
+.venv/bin/python tests/contracts/compare_with_matlab_baseline.py --python-results /tmp/python_results.json --require-all
 ```
 
 ### Dataset-backed DCE pipeline parity (Tofts `Ktrans` + `ve`)

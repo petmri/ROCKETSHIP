@@ -16,3 +16,15 @@ export_parity_baseline();
 ```
 
 The output in `baselines/` is the source of truth for Python parity checks until explicit re-baselining is approved.
+
+## Contract parity scripts
+- `generate_python_results.py`: produces Python outputs in contract-result JSON format.
+- `compare_with_matlab_baseline.py`: compares Python results against MATLAB baseline values.
+
+Example:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python tests/contracts/generate_python_results.py --output /tmp/python_results.json
+.venv/bin/python tests/contracts/compare_with_matlab_baseline.py --python-results /tmp/python_results.json --require-all
+```

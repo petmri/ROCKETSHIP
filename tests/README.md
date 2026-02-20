@@ -81,18 +81,18 @@ matlab -batch "cd('/Users/samuelbarnes/code/ROCKETSHIP'); addpath('tests/matlab'
 ```
 
 ## MATLAB-vs-Python parity runner
-Use the lightweight Python comparator in `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/`:
+Use the lightweight Python comparator in `/Users/samuelbarnes/code/ROCKETSHIP/tests/contracts/`:
 
 ```bash
-python3 tests/python/compare_with_matlab_baseline.py \
-  --write-template tests/python/python_results_template.json
+python3 tests/contracts/compare_with_matlab_baseline.py \
+  --write-template tests/contracts/python_results_template.json
 ```
 
 Then compare Python outputs by contract:
 
 ```bash
-python3 tests/python/compare_with_matlab_baseline.py \
-  --python-results tests/python/python_results_template.json
+python3 tests/contracts/compare_with_matlab_baseline.py \
+  --python-results tests/contracts/python_results_template.json
 ```
 
 Current Python ports are under `/Users/samuelbarnes/code/ROCKETSHIP/python/`.
