@@ -24,6 +24,12 @@ Scope:
 - Port required `calculateMap`/`fitParameter` pathway components for T1 map production.
 - Provide Python GUI support for T1 fitting workflow (file selection, parameter controls, run status, QC preview).
 
+Current status:
+- CLI v1 for linear VFA T1 mapping is implemented (`run_parametric_python_cli.py`, `python/parametric_cli.py`, `python/parametric_pipeline.py`).
+- Fixture-backed integration tests for map outputs and naming are in place (`tests/python/test_parametric_pipeline.py`).
+- OSIPI reliability coverage now includes linear, nonlinear, and two-FA T1 checks (`tests/python/test_osipi_t1_reliability.py`).
+- Remaining work is GUI support, map-level parity hardening, and completion of remaining MATLAB behavior/pathways.
+
 Required outputs:
 - T1 map files in expected naming/location patterns.
 - run summary + QC artifacts comparable to existing MATLAB usage.
@@ -33,6 +39,10 @@ Scope:
 - Stabilize and tighten gating for `tofts`, `patlak`, and `ex_tofts`.
 - Keep backend behavior consistent across `cpu`, `cpufit`, and `gpufit` when available.
 - Keep dataset-backed parity and OSIPI reliability tests as merge gates for these models.
+
+Current status:
+- Edge-case regression coverage exists for low-SNR data, non-uniform timer spacing, and custom fit bounds in `tests/python/test_dce_models.py`.
+- Remaining work is strict threshold gating and cross-backend consistency enforcement.
 
 Required outputs:
 - strict pass/fail criteria on primary model parity and reliability tests.
@@ -56,6 +66,20 @@ Required outputs:
 - qualification report for `dev` merge decision.
 - issue list split into blocker vs follow-up.
 
+### 5. OSIPI Verification Expansion (Primary)
+Scope:
+- Keep OSIPI verification additive and explicitly sourced from local mirrors:
+  - `/Users/samuelbarnes/code/DCE-DSC-MRI_CodeCollection`
+  - `/Users/samuelbarnes/code/DCE-DSC-MRI_TestResults`
+- Maintain T1 verification coverage for linear, nonlinear, and two-FA peer comparisons.
+- Add SI-to-concentration reliability checks as explicit merge evidence for signal-conversion math.
+
+Required outputs:
+- OSIPI-labeled T1 + SI-to-concentration reliability tests under `tests/python/`.
+- Data provenance and source commit references documented in `tests/data/osipi/README.md`.
+- Peer-aligned error summaries integrated into transition reporting docs and CI merge-gate reporting (`tests/python/run_osipi_reliability.py`).
+- Explicit MATLAB-vs-Python parity coverage for primary parametric fitters (including non-linear VFA T1) in automated test paths and contract-runner checks.
+
 ## Secondary Workstreams
 - Refine `2cxm` and `tissue_uptake` numerical stability and backend consistency.
 - Expand DSC beyond current core parity (`oSVD`, larger workflow coverage).
@@ -70,7 +94,8 @@ Required outputs:
 
 ## Sequence to Merge
 1. Close primary DCE reliability gates.
-2. Complete T1 CLI + GUI workflow.
-3. Complete Part E analysis workflow.
-4. Run real-data qualification and resolve blockers.
-5. Merge to `dev` for broader user testing.
+2. Complete remaining T1 workflow gaps (GUI + residual MATLAB behavior).
+3. Complete OSIPI T1 + SI-to-concentration verification expansion.
+4. Complete Part E analysis workflow.
+5. Run real-data qualification and resolve blockers.
+6. Merge to `dev` for broader user testing.

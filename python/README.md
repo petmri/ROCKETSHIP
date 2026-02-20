@@ -7,12 +7,17 @@ currently in this repository.
 
 - Primary Python entrypoint for DCE pipeline:
   - `/Users/samuelbarnes/code/ROCKETSHIP/run_dce_python_cli.py`
+- Primary Python entrypoint for parametric T1 pipeline:
+  - `/Users/samuelbarnes/code/ROCKETSHIP/run_parametric_python_cli.py`
 - Optional GUI entrypoint:
   - `/Users/samuelbarnes/code/ROCKETSHIP/run_dce_python_gui.py`
 - Current implemented workflow focus:
   - DCE parts `A -> B -> D` (single-process, in-memory handoff; CLI-first with optional GUI wrapper)
+  - Parametric linear VFA T1 mapping (CLI v1)
 - Current parity focus:
   - MATLAB-vs-Python parity for model contracts and dataset-backed Tofts maps (`Ktrans`, `ve`)
+  - MATLAB-vs-Python parity tests for parametric core fitters (`t2_linear_fast`, `t1_fa_linear_fit`, `t1_fa_fit`) via unit parity tests and contract-runner checks
+  - OSIPI-labeled reliability tests for DCE, T1, and SI-to-concentration conversion
 
 For detailed port status and todo items, see:
 - `/Users/samuelbarnes/code/ROCKETSHIP/python/ROADMAP.md`
@@ -104,6 +109,24 @@ Typical outputs:
 - DCE model maps (NIfTI when possible; fallback `.npy`)
 - ROI spreadsheet output (`.xls`) for ROI-enabled runs
 - QC figures for Stage A/B real runs
+
+## Run the Python Parametric T1 CLI
+
+Run with built-in default config template:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python run_parametric_python_cli.py
+```
+
+Default template location:
+- `/Users/samuelbarnes/code/ROCKETSHIP/python/parametric_default.json`
+
+Typical outputs:
+- Run summary JSON: `<output_dir>/parametric_t1_run.json`
+- Event log JSONL: `<output_dir>/parametric_t1_events.jsonl`
+- T1 map NIfTI: `<output_dir>/T1_map_t1_fa_linear_fit_<label>.nii.gz`
+- R-squared map NIfTI: `<output_dir>/Rsquared_t1_fa_linear_fit_<label>.nii.gz`
 
 ## Input expectations (DCE)
 
@@ -228,6 +251,25 @@ Default downsample fixture used for parity:
 cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python tests/data/scripts/generate_tiny_dce_settings_fixture.py --clean
 .venv/bin/python -m pytest tests/python/test_dce_pipeline_settings_matrix.py -v
+```
+
+### OSIPI T1 + SI-to-concentration checks
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python -m pytest \
+  tests/python/test_osipi_t1_reliability.py \
+  tests/python/test_osipi_si_to_conc_reliability.py \
+  -v
+```
+
+### OSIPI SI-to-concentration merge-gate summary
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python tests/python/run_osipi_reliability.py \
+  --suite si-to-conc \
+  --summary-json /tmp/osipi_si_to_conc_summary.json
 ```
 
 ## CI behavior (high level)

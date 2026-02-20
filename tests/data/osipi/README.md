@@ -27,6 +27,11 @@ Reference data and peer result summaries were imported from:
   - `t1_brain_data.csv`
   - `t1_quiba_data.csv`
   - `t1_prostate_data.csv`
+- SI-to-concentration dataset: `/Users/samuelbarnes/code/ROCKETSHIP/tests/data/osipi/si_to_conc/`
+  - `SI2Conc_data.csv`
+- Imported OSIPI peer result tables:
+  - T1 mapping: `/Users/samuelbarnes/code/ROCKETSHIP/tests/data/osipi/reference/t1_mapping_results/`
+  - SI-to-concentration: `/Users/samuelbarnes/code/ROCKETSHIP/tests/data/osipi/reference/si_to_conc_results/`
 
 ## Patlak Delay Values (Imported Now)
 
@@ -48,7 +53,9 @@ These values are computed from OSIPI `TestResults` CSV outputs and used by the O
 ## Test Modules
 
 - `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/test_osipi_dce_reliability.py`
-- `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/test_osipi_t1_reliability.py`
+- `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/test_osipi_t1_reliability.py` (linear, nonlinear, two-FA)
+- `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/test_osipi_si_to_conc_reliability.py`
+- `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/run_osipi_reliability.py` (merge-gate summary runner for SI-to-concentration thresholds)
 
 All tests are labeled with `@pytest.mark.osipi`.
 
@@ -64,4 +71,13 @@ Run OSIPI tests including long-running fits:
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python -m pytest tests/python -m osipi -v --osipi-slow
+```
+
+Run SI-to-concentration merge-gate summary directly:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python tests/python/run_osipi_reliability.py \
+  --suite si-to-conc \
+  --summary-json /tmp/osipi_si_to_conc_summary.json
 ```

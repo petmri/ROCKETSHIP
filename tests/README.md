@@ -95,6 +95,11 @@ python3 tests/contracts/compare_with_matlab_baseline.py \
   --python-results tests/contracts/python_results_template.json
 ```
 
+Contract parity currently includes parametric fitters:
+- `t2_linear_fast`
+- `t1_fa_linear_fit`
+- `t1_fa_fit`
+
 Current Python ports are under `/Users/samuelbarnes/code/ROCKETSHIP/python/`.
 
 ## Running Python tests
@@ -131,6 +136,25 @@ Run OSIPI tests:
 ```bash
 cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python -m pytest tests/python -m osipi -v
+```
+
+Run OSIPI T1 + SI-to-concentration reliability checks only:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python -m pytest \
+  tests/python/test_osipi_t1_reliability.py \
+  tests/python/test_osipi_si_to_conc_reliability.py \
+  -v
+```
+
+Run OSIPI SI-to-concentration merge-gate summary (prints thresholds vs ours and writes JSON):
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python tests/python/run_osipi_reliability.py \
+  --suite si-to-conc \
+  --summary-json /tmp/osipi_si_to_conc_summary.json
 ```
 
 Run fast OSIPI backend checks only:

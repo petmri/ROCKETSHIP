@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 import random
 import sys
@@ -17,6 +18,7 @@ from rocketship import (  # noqa: E402
     model_2cxm_cfit,
     model_2cxm_fit,
     model_extended_tofts_cfit,
+    model_extended_tofts_fit,
     model_fxr_cfit,
     model_fxr_fit,
     model_patlak_cfit,
@@ -33,6 +35,10 @@ from rocketship import (  # noqa: E402
 
 def _within_tol(actual: float, expected: float, atol: float, rtol: float) -> bool:
     return abs(actual - expected) <= (atol + rtol * abs(expected))
+
+
+def _mse(a: list[float], b: list[float]) -> float:
+    return sum((float(x) - float(y)) ** 2 for x, y in zip(a, b)) / len(a)
 
 
 @pytest.mark.unit
@@ -481,3 +487,97 @@ def test_model_fit_rejects_algorithm_override_prefs() -> None:
 
     with pytest.raises(ValueError, match="does not support 'fit_algorithm'"):
         model_tissue_uptake_fit(ct, cp, timer, {"fit_algorithm": "osipi_quick"})
+
+
+@pytest.mark.unit
+def test_primary_dce_fits_handle_nonuniform_timer_and_low_snr() -> None:
+    timer = [0.0, 0.07, 0.11, 0.19, 0.31, 0.47, 0.66, 0.88, 1.17, 1.53, 1.96]
+    cp = [0.0, 0.25, 0.65, 1.05, 1.2, 1.08, 0.9, 0.72, 0.53, 0.38, 0.27]
+    rng = random.Random(31)
+
+    tofts_clean = model_tofts_cfit(0.045, 0.32, cp, timer)
+    ex_clean = model_extended_tofts_cfit(0.04, 0.28, 0.06, cp, timer)
+    patlak_clean = model_patlak_cfit(0.018, 0.04, cp, timer)
+
+    def _noisy(signal: list[float], frac: float = 0.012) -> list[float]:
+        sigma = max(signal) * frac
+        return [float(v + rng.gauss(0.0, sigma)) for v in signal]
+
+    tofts_noisy = _noisy(tofts_clean)
+    tofts_fit = model_tofts_fit(tofts_noisy, cp, timer)
+    tofts_pred = model_tofts_cfit(float(tofts_fit[0]), float(tofts_fit[1]), cp, timer)
+    tofts_baseline = model_tofts_cfit(2e-4, 0.2, cp, timer)
+
+    ex_noisy = _noisy(ex_clean)
+    ex_fit = model_extended_tofts_fit(ex_noisy, cp, timer)
+    ex_pred = model_extended_tofts_cfit(float(ex_fit[0]), float(ex_fit[1]), float(ex_fit[2]), cp, timer)
+    ex_baseline = model_extended_tofts_cfit(2e-4, 0.2, 0.02, cp, timer)
+
+    patlak_noisy = _noisy(patlak_clean)
+    patlak_fit = model_patlak_fit(patlak_noisy, cp, timer)
+    patlak_pred = model_patlak_cfit(float(patlak_fit[0]), float(patlak_fit[1]), cp, timer)
+    patlak_baseline = model_patlak_cfit(2e-4, 0.02, cp, timer)
+
+    assert all(math.isfinite(float(v)) for v in tofts_fit[:2])
+    assert all(math.isfinite(float(v)) for v in ex_fit[:3])
+    assert all(math.isfinite(float(v)) for v in patlak_fit[:2])
+
+    # Regression guard: even on low-SNR inputs with irregular timing, optimized fits
+    # should materially improve reconstruction versus default seed parameters.
+    assert _mse(tofts_pred, tofts_noisy) <= (_mse(tofts_baseline, tofts_noisy) * 0.05)
+    assert _mse(ex_pred, ex_noisy) <= (_mse(ex_baseline, ex_noisy) * 0.05)
+    assert _mse(patlak_pred, patlak_noisy) <= (_mse(patlak_baseline, patlak_noisy) * 0.05)
+
+
+@pytest.mark.unit
+def test_primary_dce_fits_honor_custom_bounds() -> None:
+    timer = [0.0, 0.07, 0.11, 0.19, 0.31, 0.47, 0.66, 0.88, 1.17, 1.53, 1.96]
+    cp = [0.0, 0.25, 0.65, 1.05, 1.2, 1.08, 0.9, 0.72, 0.53, 0.38, 0.27]
+    rng = random.Random(23)
+
+    def _noisy(signal: list[float], frac: float = 0.012) -> list[float]:
+        sigma = max(signal) * frac
+        return [float(v + rng.gauss(0.0, sigma)) for v in signal]
+
+    tofts_ct = _noisy(model_tofts_cfit(0.045, 0.32, cp, timer))
+    tofts_prefs = {
+        "lower_limit_ktrans": 0.03,
+        "upper_limit_ktrans": 0.06,
+        "initial_value_ktrans": 0.04,
+        "lower_limit_ve": 0.22,
+        "upper_limit_ve": 0.45,
+        "initial_value_ve": 0.3,
+    }
+    tofts_fit = model_tofts_fit(tofts_ct, cp, timer, tofts_prefs)
+    assert tofts_prefs["lower_limit_ktrans"] <= float(tofts_fit[0]) <= tofts_prefs["upper_limit_ktrans"]
+    assert tofts_prefs["lower_limit_ve"] <= float(tofts_fit[1]) <= tofts_prefs["upper_limit_ve"]
+
+    ex_ct = _noisy(model_extended_tofts_cfit(0.04, 0.28, 0.06, cp, timer))
+    ex_prefs = {
+        "lower_limit_ktrans": 0.025,
+        "upper_limit_ktrans": 0.06,
+        "initial_value_ktrans": 0.038,
+        "lower_limit_ve": 0.12,
+        "upper_limit_ve": 0.8,
+        "initial_value_ve": 0.25,
+        "lower_limit_vp": 0.03,
+        "upper_limit_vp": 0.12,
+        "initial_value_vp": 0.05,
+    }
+    ex_fit = model_extended_tofts_fit(ex_ct, cp, timer, ex_prefs)
+    assert ex_prefs["lower_limit_ktrans"] <= float(ex_fit[0]) <= ex_prefs["upper_limit_ktrans"]
+    assert ex_prefs["lower_limit_ve"] <= float(ex_fit[1]) <= ex_prefs["upper_limit_ve"]
+    assert ex_prefs["lower_limit_vp"] <= float(ex_fit[2]) <= ex_prefs["upper_limit_vp"]
+
+    patlak_ct = _noisy(model_patlak_cfit(0.018, 0.04, cp, timer))
+    patlak_prefs = {
+        "lower_limit_ktrans": 0.01,
+        "upper_limit_ktrans": 0.03,
+        "initial_value_ktrans": 0.015,
+        "lower_limit_vp": 0.02,
+        "upper_limit_vp": 0.08,
+        "initial_value_vp": 0.03,
+    }
+    patlak_fit = model_patlak_fit(patlak_ct, cp, timer, patlak_prefs)
+    assert patlak_prefs["lower_limit_ktrans"] <= float(patlak_fit[0]) <= patlak_prefs["upper_limit_ktrans"]
+    assert patlak_prefs["lower_limit_vp"] <= float(patlak_fit[1]) <= patlak_prefs["upper_limit_vp"]
