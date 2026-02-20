@@ -58,6 +58,11 @@ Scope:
 - Port necessary functionality from `dce/fitting_analysis.m`, `dce/compare_fits.m`, and related analysis helpers.
 - Support ROI and voxel-level post-fit review used in current analysis workflows.
 
+Current status:
+- Initial non-GUI statistical core is now in Python (`python/dce_postfit_analysis.py`) with MATLAB-style model support checks, SSE extraction, f-test, AIC/relative-likelihood comparison, ROI CSV writers, and voxel-map reconstruction helpers.
+- Unit coverage for this core is in place (`tests/python/test_dce_postfit_analysis.py`).
+- Remaining work is full workflow wiring (fit-result loading, artifact generation, and plotting/report flow) to replace MATLAB Part E usage end-to-end.
+
 Required outputs:
 - analysis summaries/plots needed for downstream interpretation.
 - reproducible analysis execution without MATLAB GUI dependencies.

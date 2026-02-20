@@ -158,6 +158,10 @@ Key expectations:
 - Supported AIF curve modes: `auto`, `fitted`, `raw`, `imported`
 - Static blood-T1 override for Stage A is available via `stage_overrides.blood_t1_ms` (or `blood_t1_sec`)
 
+Part E work-in-progress:
+- Python post-fit statistical core is available in `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_postfit_analysis.py`.
+- Current coverage includes f-test and AIC/relative-likelihood helpers plus ROI CSV and voxel-map reconstruction utilities.
+
 Preference precedence:
 - explicit `stage_overrides` value
 - `dce_preferences.txt` value
