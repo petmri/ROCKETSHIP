@@ -38,7 +38,7 @@ Current automated baseline:
 | DCE neuroecon/email/manual AIF UX | `dce/run_neuroecon_job.m`, manual GUI AIF flows | Not ported | will not port | Previously marked out of scope. |
 | Parametric core model math | `parametric_scripts/fitParameter.m` (`t2_linear_fast`, `t1_fa_linear_fit`, `t1_fa_fit`) | Partial in `python/parametric_models.py` | primary | Linear + nonlinear + two-point VFA are implemented; MATLAB contract parity now covers `t2_linear_fast`, `t1_fa_linear_fit`, and `t1_fa_fit` with automated runner checks in Python tests. |
 | Parametric T1 mapping workflow | `parametric_scripts/custom_scripts/T1mapping_fit.m`, `parametric_scripts/calculateMap.m` | Partial (`python/parametric_pipeline.py`, `python/parametric_cli.py`, `run_parametric_python_cli.py`) | primary | Linear VFA CLI path is implemented and fixture-tested; GUI and remaining MATLAB-path behavior are still pending. |
-| Parametric GUI workflow | `parametric_scripts/fitting_gui.m`, `run_parametric.m` | Not ported | primary | Explicit requirement: T1 fitting must have GUI support. |
+| Parametric GUI workflow | `parametric_scripts/fitting_gui.m`, `run_parametric.m` | Partial (`python/parametric_gui.py`, `run_parametric_python_gui.py`) | primary | GUI v1 exists for file selection/run/progress/summary; additional MATLAB behavior and QC parity may still be needed. |
 | SI->Concentration conversion | `dce/A_make_R1maps_func.m` signal-to-R1/concentration steps | Partial (`python/dce_pipeline.py` Stage A + `python/dce_signal.py`) | primary | OSIPI SI2Conc reliability test and merge-gate summary runner are in place (`tests/python/test_osipi_si_to_conc_reliability.py`, `tests/python/run_osipi_reliability.py`). |
 | DSC core functions | `dsc/import_AIF.m`, `dsc/previous_AIF.m`, `dsc/DSC_convolution_sSVD.m` | Implemented (`python/dsc_helpers.py`, `python/dsc_models.py`) | done | Core parity contract coverage exists. |
 | DSC extended workflow | `dsc/dsc_process.m`, `dsc/DSC_convolution_oSVD.m`, `run_dsc.m` | Partial | secondary | Expand after primary DCE + T1 + Part E closure. |
@@ -46,7 +46,7 @@ Current automated baseline:
 | Contract and parity tooling | MATLAB baseline export + compare scripts | Active in `tests/contracts/` and pytest parity tests | done | Runner and artifact organization recently improved. |
 
 ## Primary Gaps Blocking Dev Merge Trial
-1. Python T1 mapping workflow parity with MATLAB usage (including GUI).
+1. Python T1 mapping workflow parity with MATLAB usage (remaining behavior + real-data validation).
 2. Python Part E analysis workflow availability.
 3. Real-data qualification runbook and results for Python workflows.
 

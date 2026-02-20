@@ -7,7 +7,7 @@ Finish the Python transition to the point that it can be merged to `dev` and tes
 1. Parametric maps and T1 fitting workflow
 - [ ] Port remaining workflow behavior from `parametric_scripts/custom_scripts/T1mapping_fit.m` and required `calculateMap` path components.
 - [x] Add Python CLI entrypoint for T1 mapping workflow with clear config schema and run summary output.
-- [ ] Add Python GUI support for T1 fitting workflow (file selection, run controls, progress, QC).
+- [x] Add Python GUI support for T1 fitting workflow (file selection, run controls, progress, QC).
 - [ ] Add real-data tests for T1 output integrity and expected file naming.
 - [x] Add fixture-backed tests for T1 output integrity and expected file naming.
 - [x] Add OSIPI T1 mapping reliability checks beyond current linear-only coverage (nonlinear and two-FA comparators).
@@ -72,3 +72,4 @@ Current handling in main suite:
 - Primary DCE edge-case regression tests added for non-uniform timer, low-SNR fits, and custom bounds (`tests/python/test_dce_models.py`).
 - Primary DCE OSIPI thresholds tightened to strict peer-max limits and integrated into merge-gate reporting (`tests/python/test_osipi_dce_reliability.py`, `tests/python/run_osipi_reliability.py`).
 - Primary DCE backend consistency checks added across CPU/CPUfit/GPUfit where available (`tests/python/test_osipi_backend_consistency.py`).
+- Parametric T1 GUI v1 added (`run_parametric_python_gui.py`, `python/parametric_gui.py`) with run controls, event progress, and summary/artifact display.

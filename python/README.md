@@ -9,8 +9,9 @@ currently in this repository.
   - `/Users/samuelbarnes/code/ROCKETSHIP/run_dce_python_cli.py`
 - Primary Python entrypoint for parametric T1 pipeline:
   - `/Users/samuelbarnes/code/ROCKETSHIP/run_parametric_python_cli.py`
-- Optional GUI entrypoint:
+- Optional GUI entrypoints:
   - `/Users/samuelbarnes/code/ROCKETSHIP/run_dce_python_gui.py`
+  - `/Users/samuelbarnes/code/ROCKETSHIP/run_parametric_python_gui.py`
 - Current implemented workflow focus:
   - DCE parts `A -> B -> D` (single-process, in-memory handoff; CLI-first with optional GUI wrapper)
   - Parametric linear VFA T1 mapping (CLI v1)
@@ -308,6 +309,13 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python run_dce_python_gui.py
 ```
 
+Launch parametric T1 GUI:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python run_parametric_python_gui.py
+```
+
 One-click test run:
 - Launch the GUI and click `Run DCE` without changing fields.
 - It uses `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_default.json` and the tiny fixture by default.
@@ -319,3 +327,8 @@ GUI v1 behavior:
 - Displays QC PNG figures when generated.
 - Provides `Browse...` dialogs for all path/file input fields in the form.
 - If `aif_mode=imported` is needed, set `imported_aif_path` in JSON config (current GUI form does not expose it yet).
+
+Parametric GUI v1 behavior:
+- Edits the parametric T1 config (`vfa_files`, flip angles, TR, thresholds, output controls).
+- Runs `run_parametric_python_cli.py` in a subprocess and streams event progress.
+- Shows summary metrics from `parametric_t1_run.json` and lists output artifact paths.

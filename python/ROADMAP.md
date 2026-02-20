@@ -26,9 +26,10 @@ Scope:
 
 Current status:
 - CLI v1 for linear VFA T1 mapping is implemented (`run_parametric_python_cli.py`, `python/parametric_cli.py`, `python/parametric_pipeline.py`).
+- GUI v1 is implemented for parametric T1 (`run_parametric_python_gui.py`, `python/parametric_gui.py`).
 - Fixture-backed integration tests for map outputs and naming are in place (`tests/python/test_parametric_pipeline.py`).
 - OSIPI reliability coverage now includes linear, nonlinear, and two-FA T1 checks (`tests/python/test_osipi_t1_reliability.py`).
-- Remaining work is GUI support, map-level parity hardening, and completion of remaining MATLAB behavior/pathways.
+- Remaining work is map-level parity hardening, completion of remaining MATLAB behavior/pathways, and real-data workflow validation.
 
 Required outputs:
 - T1 map files in expected naming/location patterns.
