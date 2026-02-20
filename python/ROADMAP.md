@@ -27,6 +27,7 @@ Scope:
 Current status:
 - CLI v1 for VFA T1 mapping is implemented (`run_parametric_python_cli.py`, `python/parametric_cli.py`, `python/parametric_pipeline.py`) with linear/nonlinear/two-point fit support.
 - Optional B1-scaled FA handling is implemented in the Python parametric pipeline (explicit `b1_map_file` or auto-detected `B1_scaled_FAreg.nii(.gz)` in VFA directory).
+- MATLAB-style TR fallback is implemented for parametric T1 when sidecar TR is absent (`script_preferences.txt` key `tr`, with optional explicit `script_preferences_path`).
 - GUI v1 is implemented for parametric T1 (`run_parametric_python_gui.py`, `python/parametric_gui.py`).
 - Fixture-backed and BIDS-based integration tests for map outputs and naming are in place (`tests/python/test_parametric_pipeline.py`).
 - OSIPI reliability coverage now includes linear, nonlinear, and two-FA T1 checks (`tests/python/test_osipi_t1_reliability.py`).

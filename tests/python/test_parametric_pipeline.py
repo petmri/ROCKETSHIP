@@ -301,3 +301,28 @@ def test_parametric_t1_pipeline_auto_detects_default_b1_map_name(tmp_path: Path)
     summary = run_parametric_t1_pipeline(ParametricT1Config.from_dict(payload))
     assert summary["resolved_inputs"]["b1_mode"] == "auto"
     assert Path(summary["resolved_inputs"]["b1_map_path"]) == b1_path.resolve()
+
+
+@pytest.mark.integration
+def test_parametric_t1_pipeline_uses_script_preferences_tr_when_tr_missing(tmp_path: Path) -> None:
+    vfa_path = tmp_path / "tiny_script_prefs_vfa.nii.gz"
+    flip_angles, _ = _write_tiny_vfa_fixture(vfa_path)
+    script_prefs = tmp_path / "script_preferences.txt"
+    script_prefs.write_text("tr = 9.5\n", encoding="utf-8")
+
+    payload = {
+        "output_dir": str(tmp_path / "out_script_prefs"),
+        "vfa_files": [str(vfa_path)],
+        "flip_angles_deg": flip_angles,
+        "fit_type": "t1_fa_linear_fit",
+        "output_basename": "T1_map",
+        "output_label": "tiny_script_prefs",
+        "rsquared_threshold": 0.2,
+        "write_r_squared": True,
+        "write_rho_map": False,
+        "script_preferences_path": str(script_prefs),
+    }
+
+    summary = run_parametric_t1_pipeline(ParametricT1Config.from_dict(payload))
+    assert summary["resolved_inputs"]["tr_source"] == "script_preferences"
+    assert summary["resolved_inputs"]["tr_ms"] == pytest.approx(9.5)

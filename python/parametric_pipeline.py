@@ -58,6 +58,7 @@ class ParametricT1Config:
     invalid_fill_value: float = -1.0
     mask_file: Optional[Path] = None
     b1_map_file: Optional[Path] = None
+    script_preferences_path: Optional[Path] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any], base_dir: Optional[Path] = None) -> "ParametricT1Config":
@@ -85,6 +86,9 @@ class ParametricT1Config:
             invalid_fill_value=float(data.get("invalid_fill_value", -1.0)),
             mask_file=_resolve_path(data["mask_file"], base_dir) if data.get("mask_file") else None,
             b1_map_file=_resolve_path(data["b1_map_file"], base_dir) if data.get("b1_map_file") else None,
+            script_preferences_path=(
+                _resolve_path(data["script_preferences_path"], base_dir) if data.get("script_preferences_path") else None
+            ),
         )
 
     def validate(self) -> None:
@@ -109,6 +113,8 @@ class ParametricT1Config:
             raise FileNotFoundError(f"mask_file not found: {self.mask_file}")
         if self.b1_map_file is not None and not self.b1_map_file.exists():
             raise FileNotFoundError(f"b1_map_file not found: {self.b1_map_file}")
+        if self.script_preferences_path is not None and not self.script_preferences_path.exists():
+            raise FileNotFoundError(f"script_preferences_path not found: {self.script_preferences_path}")
 
     def to_dict(self) -> Dict[str, Any]:
         payload = asdict(self)
@@ -190,7 +196,60 @@ def _load_vfa_data(config: ParametricT1Config) -> Tuple[np.ndarray, Any, Any]:
     return stacked, affine, header
 
 
-def _resolve_flip_angles_and_tr_ms(config: ParametricT1Config, n_flips: int) -> Tuple[np.ndarray, float, List[Path]]:
+def _parse_preference_file(path: Path) -> Dict[str, str]:
+    prefs: Dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("%"):
+            continue
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip().lower()
+        if not key:
+            continue
+        value = value.split("%", 1)[0].strip()
+        prefs[key] = value
+    return prefs
+
+
+def _resolve_script_preferences_path(config: ParametricT1Config) -> Optional[Path]:
+    if config.script_preferences_path is not None:
+        return config.script_preferences_path
+
+    repo_default = Path(__file__).resolve().parents[1] / "script_preferences.txt"
+    if repo_default.exists():
+        return repo_default
+
+    cwd_default = Path.cwd() / "script_preferences.txt"
+    if cwd_default.exists():
+        return cwd_default
+
+    return None
+
+
+def _load_script_preference_tr_ms(config: ParametricT1Config) -> Optional[float]:
+    prefs_path = _resolve_script_preferences_path(config)
+    if prefs_path is None:
+        return None
+
+    prefs = _parse_preference_file(prefs_path)
+    tr_raw = prefs.get("tr")
+    if tr_raw is None:
+        return None
+
+    try:
+        tr_ms = float(tr_raw)
+    except ValueError:
+        return None
+    if tr_ms <= 0.0 or not math.isfinite(tr_ms):
+        return None
+    return tr_ms
+
+
+def _resolve_flip_angles_and_tr_ms(
+    config: ParametricT1Config, n_flips: int
+) -> Tuple[np.ndarray, float, List[Path], str]:
     sidecars: List[Path] = []
     sidecar_payloads: List[Dict[str, Any]] = []
     for vfa_path in config.vfa_files:
@@ -227,19 +286,28 @@ def _resolve_flip_angles_and_tr_ms(config: ParametricT1Config, n_flips: int) -> 
 
     if config.tr_ms is not None:
         tr_ms = float(config.tr_ms)
+        tr_source = "config"
     else:
         tr_values_ms = [float(payload["RepetitionTime"]) * 1000.0 for payload in sidecar_payloads if "RepetitionTime" in payload]
-        if not tr_values_ms:
-            raise ValueError("tr_ms is required when RepetitionTime sidecar metadata is unavailable")
-        tr_ms = float(tr_values_ms[0])
-        for value in tr_values_ms[1:]:
-            if not math.isclose(float(value), tr_ms, rel_tol=0.0, abs_tol=1e-9):
-                raise ValueError("RepetitionTime values across VFA sidecars are inconsistent")
+        if tr_values_ms:
+            tr_ms = float(tr_values_ms[0])
+            for value in tr_values_ms[1:]:
+                if not math.isclose(float(value), tr_ms, rel_tol=0.0, abs_tol=1e-9):
+                    raise ValueError("RepetitionTime values across VFA sidecars are inconsistent")
+            tr_source = "sidecar"
+        else:
+            pref_tr_ms = _load_script_preference_tr_ms(config)
+            if pref_tr_ms is None:
+                raise ValueError(
+                    "tr_ms is required when RepetitionTime sidecar metadata is unavailable and script_preferences.txt has no valid tr"
+                )
+            tr_ms = float(pref_tr_ms)
+            tr_source = "script_preferences"
 
     if tr_ms <= 0.0 or not math.isfinite(tr_ms):
         raise ValueError("tr_ms must be a positive finite value")
 
-    return flip_angles, tr_ms, sidecars
+    return flip_angles, tr_ms, sidecars, tr_source
 
 
 def _autodetect_b1_map_path(config: ParametricT1Config) -> Optional[Path]:
@@ -525,12 +593,13 @@ def run_parametric_t1_pipeline(
     vfa_data, affine, header = _load_vfa_data(config)
     n_flips = int(vfa_data.shape[-1])
 
-    flip_angles_deg, tr_ms, sidecars = _resolve_flip_angles_and_tr_ms(config, n_flips)
+    flip_angles_deg, tr_ms, sidecars, tr_source = _resolve_flip_angles_and_tr_ms(config, n_flips)
     _emit_event(
         event_callback,
         "inputs_resolved",
         n_flips=n_flips,
         tr_ms=float(tr_ms),
+        tr_source=tr_source,
         flip_angles_deg=[float(v) for v in flip_angles_deg],
         sidecars=[str(path) for path in sidecars],
     )
@@ -615,6 +684,7 @@ def run_parametric_t1_pipeline(
         "config": config.to_dict(),
         "resolved_inputs": {
             "tr_ms": float(tr_ms),
+            "tr_source": tr_source,
             "flip_angles_deg": [float(v) for v in flip_angles_deg],
             "n_flips": int(n_flips),
             "sidecars": [str(path) for path in sidecars],
