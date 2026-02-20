@@ -44,6 +44,68 @@ class DceFitStats:
     dimensions: Sequence[int] | None = None
 
 
+def _as_optional_2d_float(value: Any) -> np.ndarray | None:
+    if value is None:
+        return None
+    arr = np.asarray(value, dtype=np.float64)
+    if arr.ndim == 1:
+        return arr.reshape(1, -1)
+    if arr.ndim != 2:
+        raise ValueError(f"expected 2D array-like value, got shape {arr.shape}")
+    return arr
+
+
+def _as_optional_str_list(value: Any) -> List[str] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return [value]
+    arr = np.asarray(value, dtype=object).reshape(-1)
+    return [str(v) for v in arr.tolist()]
+
+
+def load_dce_fit_stats_from_npz(path: Path) -> DceFitStats:
+    """Load Part E-ready fit arrays exported by Stage D (`*_postfit_arrays.npz`)."""
+    npz_path = Path(path).expanduser().resolve()
+    if not npz_path.exists():
+        raise FileNotFoundError(f"NPZ file not found: {npz_path}")
+
+    with np.load(npz_path) as payload:
+        if "model_name" not in payload:
+            raise ValueError(f"{npz_path} is missing 'model_name'")
+        if "timer_min" not in payload:
+            raise ValueError(f"{npz_path} is missing 'timer_min'")
+
+        model_name = str(np.asarray(payload["model_name"]).reshape(-1)[0])
+        timer = np.asarray(payload["timer_min"], dtype=np.float64).reshape(-1)
+        if timer.size == 0:
+            raise ValueError(f"{npz_path} has empty timer_min")
+
+        fitting_results = _as_optional_2d_float(payload["voxel_results"]) if "voxel_results" in payload else None
+        roi_results = _as_optional_2d_float(payload["roi_results"]) if "roi_results" in payload else None
+        roi_names = _as_optional_str_list(payload["roi_names"]) if "roi_names" in payload else None
+
+        tumind_1based = None
+        if "tumind_1based" in payload:
+            tumind_1based = np.asarray(payload["tumind_1based"], dtype=np.int64).reshape(-1)
+        elif "tumind_0based" in payload:
+            tumind_1based = np.asarray(payload["tumind_0based"], dtype=np.int64).reshape(-1) + 1
+
+        dimensions = None
+        if "dimensions_xyz" in payload:
+            dimensions = tuple(int(v) for v in np.asarray(payload["dimensions_xyz"], dtype=np.int64).reshape(-1).tolist())
+
+    return DceFitStats(
+        model_name=model_name,
+        timer=timer,
+        fitting_results=fitting_results,
+        roi_results=roi_results,
+        roi_names=roi_names,
+        tumind_1based=tumind_1based,
+        dimensions=dimensions,
+    )
+
+
 def is_valid_model(model_name: str) -> bool:
     return str(model_name).strip().lower() in _MODEL_META
 
@@ -254,12 +316,139 @@ def _ensure_roi_names(names: Sequence[str] | None, n_rows: int) -> List[str]:
     return [f"roi_{idx + 1:03d}" for idx in range(n_rows)]
 
 
+def summarize_ftest_result(result: Dict[str, np.ndarray | float]) -> Dict[str, Any]:
+    p_values = np.asarray(result["p_values"], dtype=np.float64).reshape(-1)
+    f_stat = np.asarray(result["f_stat"], dtype=np.float64).reshape(-1)
+
+    finite_p = p_values[np.isfinite(p_values)]
+    finite_f = f_stat[np.isfinite(f_stat)]
+    summary: Dict[str, Any] = {
+        "n_total": int(p_values.size),
+        "n_finite_p": int(finite_p.size),
+        "n_nan_p": int(p_values.size - finite_p.size),
+        "n_significant_p_lt_0_05": int(np.count_nonzero(finite_p < 0.05)),
+        "n_significant_p_lt_0_01": int(np.count_nonzero(finite_p < 0.01)),
+        "mean_p": float(np.nanmean(p_values)) if finite_p.size > 0 else float("nan"),
+        "median_p": float(np.nanmedian(p_values)) if finite_p.size > 0 else float("nan"),
+        "max_f_stat": float(np.nanmax(f_stat)) if finite_f.size > 0 else float("nan"),
+    }
+    return summary
+
+
+def summarize_aic_result(aic_result: Dict[str, np.ndarray | List[str]]) -> Dict[str, Any]:
+    model_names = [str(v) for v in np.asarray(aic_result["model_names"], dtype=object).tolist()]
+    best_names = [str(v) for v in np.asarray(aic_result["best_model_names"], dtype=object).tolist()]
+    like12 = np.asarray(aic_result["relative_likelihood_best_vs_second"], dtype=np.float64).reshape(-1)
+    finite_like12 = like12[np.isfinite(like12)]
+
+    best_counts = {name: int(best_names.count(name)) for name in model_names}
+    summary: Dict[str, Any] = {
+        "n_total": int(len(best_names)),
+        "best_model_counts": best_counts,
+        "best_model_fraction": {
+            name: (float(count) / float(len(best_names)) if best_names else float("nan")) for name, count in best_counts.items()
+        },
+        "mean_best_vs_second_relative_likelihood": (
+            float(np.nanmean(like12)) if finite_like12.size > 0 else float("nan")
+        ),
+        "median_best_vs_second_relative_likelihood": (
+            float(np.nanmedian(like12)) if finite_like12.size > 0 else float("nan")
+        ),
+        "max_best_vs_second_relative_likelihood": (
+            float(np.nanmax(like12)) if finite_like12.size > 0 else float("nan")
+        ),
+    }
+    return summary
+
+
+def _try_import_matplotlib():
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt  # type: ignore
+
+        return plt
+    except Exception:
+        return None
+
+
+def _write_ftest_plots(output_dir: Path, region: Region, p_values: np.ndarray) -> Dict[str, str]:
+    plt = _try_import_matplotlib()
+    if plt is None:
+        return {}
+    finite_p = np.asarray(p_values, dtype=np.float64).reshape(-1)
+    finite_p = finite_p[np.isfinite(finite_p)]
+    if finite_p.size == 0:
+        return {}
+
+    path = output_dir / f"ftest_{region}_p_values_hist.png"
+    fig, ax = plt.subplots(figsize=(7.0, 4.0))
+    ax.hist(finite_p, bins=20, color="#2A7F62", edgecolor="black", alpha=0.85)
+    ax.axvline(0.05, color="#C73E1D", linestyle="--", linewidth=1.5, label="p=0.05")
+    ax.set_title(f"F-test p-value distribution ({region})")
+    ax.set_xlabel("p-value")
+    ax.set_ylabel("count")
+    ax.grid(alpha=0.2, linewidth=0.5)
+    ax.legend(loc="upper right")
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    return {"p_value_histogram_plot_path": str(path)}
+
+
+def _write_aic_plots(
+    output_dir: Path,
+    region: Region,
+    aic_result: Dict[str, np.ndarray | List[str]],
+    stats_summary: Dict[str, Any],
+) -> Dict[str, str]:
+    plt = _try_import_matplotlib()
+    if plt is None:
+        return {}
+
+    out: Dict[str, str] = {}
+    model_names = [str(v) for v in np.asarray(aic_result["model_names"], dtype=object).tolist()]
+    best_counts = dict(stats_summary.get("best_model_counts", {}))
+    counts = [int(best_counts.get(name, 0)) for name in model_names]
+    if model_names:
+        counts_path = output_dir / f"aic_{region}_best_model_counts.png"
+        fig, ax = plt.subplots(figsize=(7.0, 4.0))
+        ax.bar(model_names, counts, color="#3A6EA5", edgecolor="black", alpha=0.9)
+        ax.set_title(f"AIC best-model counts ({region})")
+        ax.set_xlabel("model")
+        ax.set_ylabel("count")
+        ax.grid(alpha=0.2, linewidth=0.5, axis="y")
+        fig.tight_layout()
+        fig.savefig(counts_path, dpi=150)
+        plt.close(fig)
+        out["best_model_counts_plot_path"] = str(counts_path)
+
+    like12 = np.asarray(aic_result["relative_likelihood_best_vs_second"], dtype=np.float64).reshape(-1)
+    finite_like12 = like12[np.isfinite(like12)]
+    if finite_like12.size > 0:
+        like_path = output_dir / f"aic_{region}_best_vs_second_hist.png"
+        fig, ax = plt.subplots(figsize=(7.0, 4.0))
+        ax.hist(finite_like12, bins=20, color="#7A9E9F", edgecolor="black", alpha=0.85)
+        ax.set_title(f"AIC best-vs-second relative likelihood ({region})")
+        ax.set_xlabel("relative likelihood")
+        ax.set_ylabel("count")
+        ax.grid(alpha=0.2, linewidth=0.5)
+        fig.tight_layout()
+        fig.savefig(like_path, dpi=150)
+        plt.close(fig)
+        out["best_vs_second_histogram_plot_path"] = str(like_path)
+
+    return out
+
+
 def run_ftest_analysis(
     lower_model: DceFitStats,
     higher_model: DceFitStats,
     *,
     region: Region,
     output_dir: Path,
+    write_plots: bool = True,
 ) -> Dict[str, Any]:
     """Run f-test analysis and write reproducible output artifacts."""
     output_dir = Path(output_dir).expanduser().resolve()
@@ -275,9 +464,14 @@ def run_ftest_analysis(
     }
 
     p_values = np.asarray(result["p_values"], dtype=np.float64)
+    f_stat = np.asarray(result["f_stat"], dtype=np.float64)
     p_vector_path = output_dir / f"ftest_{region}_p_values.npy"
+    f_vector_path = output_dir / f"ftest_{region}_f_stat.npy"
     np.save(p_vector_path, p_values)
+    np.save(f_vector_path, f_stat)
     payload["p_values_vector_path"] = str(p_vector_path)
+    payload["f_stat_vector_path"] = str(f_vector_path)
+    payload["stats"] = summarize_ftest_result(result)
 
     if region == "roi":
         sse_lower, _, _ = get_sse_and_fp(lower_model, "roi")
@@ -300,6 +494,9 @@ def run_ftest_analysis(
             np.save(p_volume_path, p_volume)
             payload["voxel_map_path"] = str(p_volume_path)
 
+    if write_plots:
+        payload.update(_write_ftest_plots(output_dir, region, p_values))
+
     summary_path = output_dir / f"ftest_{region}_summary.json"
     summary_path.write_text(json.dumps(payload, indent=2, default=_json_default), encoding="utf-8")
     payload["summary_json_path"] = str(summary_path)
@@ -311,6 +508,7 @@ def run_aic_analysis(
     *,
     region: Region,
     output_dir: Path,
+    write_plots: bool = True,
 ) -> Dict[str, Any]:
     """Run AIC analysis and write reproducible output artifacts."""
     output_dir = Path(output_dir).expanduser().resolve()
@@ -336,6 +534,7 @@ def run_aic_analysis(
     payload["aic_matrix_path"] = str(aic_path)
     payload["relative_likelihood_path"] = str(like_path)
     payload["best_vs_second_path"] = str(like12_path)
+    payload["stats"] = summarize_aic_result(result)
 
     if region == "roi":
         roi_names = _ensure_roi_names(models[0].roi_names, aic.shape[0])
@@ -360,6 +559,9 @@ def run_aic_analysis(
             np.save(like12_vol_path, like12_vol)
             payload["best_model_index_map_path"] = str(best_index_vol_path)
             payload["best_vs_second_map_path"] = str(like12_vol_path)
+
+    if write_plots:
+        payload.update(_write_aic_plots(output_dir, region, result, payload["stats"]))
 
     summary_path = output_dir / f"aic_{region}_summary.json"
     summary_path.write_text(json.dumps(payload, indent=2, default=_json_default), encoding="utf-8")

@@ -56,6 +56,8 @@ class ParametricT1Config:
     write_r_squared: bool = True
     write_rho_map: bool = False
     invalid_fill_value: float = -1.0
+    odd_echoes: bool = False
+    xy_smooth_sigma: float = 0.0
     mask_file: Optional[Path] = None
     b1_map_file: Optional[Path] = None
     script_preferences_path: Optional[Path] = None
@@ -71,6 +73,9 @@ class ParametricT1Config:
         tr_value = data.get("tr_ms")
         if tr_value is None and data.get("tr") is not None:
             tr_value = data.get("tr")
+        xy_smooth_raw = data.get("xy_smooth_sigma")
+        if xy_smooth_raw is None:
+            xy_smooth_raw = data.get("xy_smooth_size", 0.0)
 
         return cls(
             output_dir=_resolve_path(data["output_dir"], base_dir),
@@ -84,6 +89,8 @@ class ParametricT1Config:
             write_r_squared=bool(data.get("write_r_squared", True)),
             write_rho_map=bool(data.get("write_rho_map", False)),
             invalid_fill_value=float(data.get("invalid_fill_value", -1.0)),
+            odd_echoes=bool(data.get("odd_echoes", False)),
+            xy_smooth_sigma=float(xy_smooth_raw),
             mask_file=_resolve_path(data["mask_file"], base_dir) if data.get("mask_file") else None,
             b1_map_file=_resolve_path(data["b1_map_file"], base_dir) if data.get("b1_map_file") else None,
             script_preferences_path=(
@@ -104,6 +111,8 @@ class ParametricT1Config:
 
         if not (0.0 <= self.rsquared_threshold <= 1.0):
             raise ValueError("rsquared_threshold must be between 0 and 1")
+        if self.xy_smooth_sigma < 0.0 or not math.isfinite(float(self.xy_smooth_sigma)):
+            raise ValueError("xy_smooth_sigma must be a non-negative finite value")
 
         for path in self.vfa_files:
             if not path.exists():
@@ -344,6 +353,41 @@ def _resolve_b1_scale_map(config: ParametricT1Config, spatial_shape: Tuple[int, 
             f"{b1_mode} b1_map_file shape {b1_map.shape} does not match VFA spatial shape {spatial_shape}"
         )
     return b1_map, b1_path
+
+
+def _apply_odd_echo_selection(vfa_data: np.ndarray, flip_angles_deg: np.ndarray) -> Tuple[np.ndarray, np.ndarray, List[int]]:
+    n_flips = int(vfa_data.shape[-1])
+    keep_idx = list(range(0, n_flips, 2))
+    if not keep_idx:
+        raise ValueError("odd_echoes selection left zero flip-angle frames")
+    return (
+        np.asarray(vfa_data[..., keep_idx], dtype=np.float64),
+        np.asarray(flip_angles_deg[keep_idx], dtype=np.float64),
+        keep_idx,
+    )
+
+
+def _apply_xy_smoothing(vfa_data: np.ndarray, xy_smooth_sigma: float) -> np.ndarray:
+    sigma = float(xy_smooth_sigma)
+    if sigma <= 0.0:
+        return np.asarray(vfa_data, dtype=np.float64)
+
+    try:
+        from scipy.ndimage import gaussian_filter  # type: ignore
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError("scipy is required for xy_smooth_sigma filtering") from exc
+
+    out = np.empty_like(vfa_data, dtype=np.float64)
+    for flip_idx in range(vfa_data.shape[-1]):
+        frame = np.asarray(vfa_data[..., flip_idx], dtype=np.float64)
+        if frame.ndim == 2:
+            frame_sigma = (sigma, sigma)
+        elif frame.ndim == 3:
+            frame_sigma = (sigma, sigma, 0.0)
+        else:
+            raise ValueError(f"Unexpected VFA frame rank for smoothing: {frame.ndim}")
+        out[..., flip_idx] = gaussian_filter(frame, sigma=frame_sigma, mode="nearest")
+    return out
 
 
 def _fit_t1_fa_linear_map(
@@ -591,17 +635,27 @@ def run_parametric_t1_pipeline(
     )
 
     vfa_data, affine, header = _load_vfa_data(config)
+    n_flips_input = int(vfa_data.shape[-1])
+
+    flip_angles_deg, tr_ms, sidecars, tr_source = _resolve_flip_angles_and_tr_ms(config, n_flips_input)
+    odd_echo_indices: List[int] = []
+    if config.odd_echoes:
+        vfa_data, flip_angles_deg, odd_echo_indices = _apply_odd_echo_selection(vfa_data, flip_angles_deg)
+    vfa_data = _apply_xy_smoothing(vfa_data, float(config.xy_smooth_sigma))
     n_flips = int(vfa_data.shape[-1])
 
-    flip_angles_deg, tr_ms, sidecars, tr_source = _resolve_flip_angles_and_tr_ms(config, n_flips)
     _emit_event(
         event_callback,
         "inputs_resolved",
+        n_flips_input=n_flips_input,
         n_flips=n_flips,
         tr_ms=float(tr_ms),
         tr_source=tr_source,
         flip_angles_deg=[float(v) for v in flip_angles_deg],
         sidecars=[str(path) for path in sidecars],
+        odd_echoes_applied=bool(config.odd_echoes),
+        odd_echo_indices_0based=odd_echo_indices,
+        xy_smooth_sigma=float(config.xy_smooth_sigma),
     )
 
     mask = None
@@ -686,8 +740,12 @@ def run_parametric_t1_pipeline(
             "tr_ms": float(tr_ms),
             "tr_source": tr_source,
             "flip_angles_deg": [float(v) for v in flip_angles_deg],
+            "n_flips_input": int(n_flips_input),
             "n_flips": int(n_flips),
             "sidecars": [str(path) for path in sidecars],
+            "odd_echoes_applied": bool(config.odd_echoes),
+            "odd_echo_indices_0based": odd_echo_indices,
+            "xy_smooth_sigma": float(config.xy_smooth_sigma),
             "b1_mode": b1_mode,
             "b1_map_path": str(b1_map_path) if b1_map_path else None,
         },

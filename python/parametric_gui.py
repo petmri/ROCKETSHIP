@@ -135,9 +135,11 @@ class ParametricGuiWindow(QMainWindow):
         self.tr_ms_edit = QLineEdit("")
         self.rsq_threshold_edit = QLineEdit("0.6")
         self.invalid_fill_edit = QLineEdit("-1.0")
+        self.xy_smooth_sigma_edit = QLineEdit("0.0")
         self.mask_file_edit = QLineEdit("")
         self.b1_map_file_edit = QLineEdit("")
         self.script_preferences_edit = QLineEdit("")
+        self.odd_echoes_check = QCheckBox()
         self.write_rsq_check = QCheckBox()
         self.write_rho_check = QCheckBox()
 
@@ -154,6 +156,8 @@ class ParametricGuiWindow(QMainWindow):
         form.addRow("tr_ms", self.tr_ms_edit)
         form.addRow("rsquared_threshold", self.rsq_threshold_edit)
         form.addRow("invalid_fill_value", self.invalid_fill_edit)
+        form.addRow("xy_smooth_sigma", self.xy_smooth_sigma_edit)
+        form.addRow("odd_echoes", self.odd_echoes_check)
         form.addRow(
             "mask_file",
             self._line_edit_with_browse(
@@ -333,9 +337,11 @@ class ParametricGuiWindow(QMainWindow):
         self.tr_ms_edit.setText("" if payload.get("tr_ms") is None else str(payload.get("tr_ms")))
         self.rsq_threshold_edit.setText(str(payload.get("rsquared_threshold", 0.6)))
         self.invalid_fill_edit.setText(str(payload.get("invalid_fill_value", -1.0)))
+        self.xy_smooth_sigma_edit.setText(str(payload.get("xy_smooth_sigma", payload.get("xy_smooth_size", 0.0))))
         self.mask_file_edit.setText(str(payload.get("mask_file", "")))
         self.b1_map_file_edit.setText(str(payload.get("b1_map_file", "")))
         self.script_preferences_edit.setText(str(payload.get("script_preferences_path", "")))
+        self.odd_echoes_check.setChecked(bool(payload.get("odd_echoes", False)))
         self.write_rsq_check.setChecked(bool(payload.get("write_r_squared", True)))
         self.write_rho_check.setChecked(bool(payload.get("write_rho_map", False)))
         self.vfa_files_edit.setPlainText(_paths_to_text(list(payload.get("vfa_files", []))))
@@ -348,6 +354,8 @@ class ParametricGuiWindow(QMainWindow):
             "output_basename": self.output_basename_edit.text().strip() or "T1_map",
             "output_label": self.output_label_edit.text().strip(),
             "rsquared_threshold": float(self.rsq_threshold_edit.text().strip() or "0.6"),
+            "odd_echoes": bool(self.odd_echoes_check.isChecked()),
+            "xy_smooth_sigma": float(self.xy_smooth_sigma_edit.text().strip() or "0.0"),
             "write_r_squared": bool(self.write_rsq_check.isChecked()),
             "write_rho_map": bool(self.write_rho_check.isChecked()),
             "invalid_fill_value": float(self.invalid_fill_edit.text().strip() or "-1.0"),

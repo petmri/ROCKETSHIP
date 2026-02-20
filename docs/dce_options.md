@@ -46,6 +46,7 @@ For options in `stage_overrides`:
 - `stage_d_mode`: `real|scaffold|auto`
 - `rootname`: output name prefix
 - `write_param_maps`: bool for map writing
+- `write_postfit_arrays`: bool for optional Part E array export (`*_postfit_arrays.npz`)
 
 ### Preferences bridging
 - `use_dce_preferences`: bool to enable `dce_preferences.txt` defaults

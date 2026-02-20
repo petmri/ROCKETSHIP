@@ -9,6 +9,8 @@
   "output_basename": "T1_map",
   "output_label": "bids_test",
   "rsquared_threshold": 0.6,
+  "odd_echoes": false,
+  "xy_smooth_sigma": 0.0,
   "write_r_squared": true,
   "write_rho_map": false,
   "invalid_fill_value": -1.0,

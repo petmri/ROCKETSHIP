@@ -15,12 +15,18 @@ from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 import numpy as np
 
 from dce_models import (
+    model_2cxm_cfit,
     model_2cxm_fit,
+    model_extended_tofts_cfit,
     model_extended_tofts_fit,
+    model_fxr_cfit,
     model_fxr_fit,
+    model_patlak_cfit,
     model_patlak_fit,
     model_patlak_linear,
+    model_tissue_uptake_cfit,
     model_tissue_uptake_fit,
+    model_tofts_cfit,
     model_tofts_fit,
 )
 
@@ -2156,6 +2162,189 @@ def _fit_model_curve(
     raise ValueError(f"Unsupported model '{model_name}'")
 
 
+def _predict_curve_from_fit_row(
+    model_name: str,
+    fit_row: np.ndarray,
+    cp: np.ndarray,
+    timer: np.ndarray,
+    *,
+    r1o: Optional[float],
+    relaxivity: float,
+    fw: float,
+) -> Optional[np.ndarray]:
+    row = np.asarray(fit_row, dtype=np.float64).reshape(-1)
+    if row.size == 0 or np.any(~np.isfinite(row[: min(4, row.size)])):
+        return None
+    cp_list = [float(v) for v in cp]
+    timer_list = [float(v) for v in timer]
+
+    try:
+        if model_name == "tofts":
+            return np.asarray(model_tofts_cfit(float(row[0]), float(row[1]), cp_list, timer_list), dtype=np.float64)
+        if model_name == "ex_tofts":
+            return np.asarray(
+                model_extended_tofts_cfit(float(row[0]), float(row[1]), float(row[2]), cp_list, timer_list),
+                dtype=np.float64,
+            )
+        if model_name == "patlak":
+            return np.asarray(model_patlak_cfit(float(row[0]), float(row[1]), cp_list, timer_list), dtype=np.float64)
+        if model_name == "tissue_uptake":
+            ktrans = float(row[0])
+            fp = float(row[1])
+            vp = float(row[2])
+            if not (math.isfinite(ktrans) and math.isfinite(fp) and math.isfinite(vp)):
+                return None
+            if abs(fp) <= 1e-12:
+                return None
+            tp = vp / fp
+            if not math.isfinite(tp) or tp <= 0.0:
+                return None
+            return np.asarray(model_tissue_uptake_cfit(ktrans, fp, tp, cp_list, timer_list), dtype=np.float64)
+        if model_name == "2cxm":
+            return np.asarray(
+                model_2cxm_cfit(float(row[0]), float(row[1]), float(row[2]), float(row[3]), cp_list, timer_list),
+                dtype=np.float64,
+            )
+        if model_name == "fxr":
+            if r1o is None or not math.isfinite(float(r1o)):
+                return None
+            return np.asarray(
+                model_fxr_cfit(
+                    float(row[0]),
+                    float(row[1]),
+                    float(row[2]),
+                    cp_list,
+                    timer_list,
+                    float(r1o),
+                    float(r1o),
+                    float(relaxivity),
+                    float(fw),
+                ),
+                dtype=np.float64,
+            )
+    except Exception:
+        return None
+    return None
+
+
+def _compute_fit_residuals(
+    *,
+    model_name: str,
+    ct: np.ndarray,
+    fit_results: np.ndarray,
+    cp: np.ndarray,
+    timer: np.ndarray,
+    r1o_vector: Optional[np.ndarray],
+    relaxivity: float,
+    fw: float,
+) -> Optional[np.ndarray]:
+    if model_name == "auc":
+        return None
+    ct_use = np.asarray(ct, dtype=np.float64)
+    fit_use = np.asarray(fit_results, dtype=np.float64)
+    if ct_use.ndim != 2 or fit_use.ndim != 2:
+        return None
+    if ct_use.shape[1] != fit_use.shape[0]:
+        return None
+
+    residuals = np.full_like(ct_use, np.nan, dtype=np.float64)
+    for idx in range(fit_use.shape[0]):
+        r1o = None
+        if r1o_vector is not None and idx < r1o_vector.size:
+            r1o = float(r1o_vector[idx])
+        pred = _predict_curve_from_fit_row(
+            model_name,
+            fit_use[idx, :],
+            cp,
+            timer,
+            r1o=r1o,
+            relaxivity=relaxivity,
+            fw=fw,
+        )
+        if pred is None:
+            continue
+        if pred.shape[0] != ct_use.shape[0]:
+            continue
+        if np.any(~np.isfinite(pred)):
+            continue
+        residuals[:, idx] = ct_use[:, idx] - pred
+    return residuals
+
+
+def _write_postfit_arrays(
+    *,
+    config: DcePipelineConfig,
+    rootname: str,
+    model_name: str,
+    param_names: List[str],
+    timer: np.ndarray,
+    cp_use: np.ndarray,
+    ct_voxel: np.ndarray,
+    voxel_results: np.ndarray,
+    tumind: np.ndarray,
+    spatial_shape: Optional[Tuple[int, int, int]],
+    roi_names: List[str],
+    roi_curve: Optional[np.ndarray],
+    roi_results: np.ndarray,
+    r1o_voxel: Optional[np.ndarray],
+    r1o_roi: Optional[np.ndarray],
+    relaxivity: float,
+    fw: float,
+) -> Optional[str]:
+    write_arrays = _to_bool(_stage_override(config, "write_postfit_arrays", False), False)
+    if not write_arrays:
+        return None
+
+    results_base = config.output_dir / f"{rootname}_{model_name}_fit"
+    out_path = Path(str(results_base) + "_postfit_arrays.npz")
+
+    payload: Dict[str, Any] = {
+        "model_name": np.asarray(model_name),
+        "param_names": np.asarray(param_names, dtype="<U64"),
+        "timer_min": np.asarray(timer, dtype=np.float64),
+        "cp_mM": np.asarray(cp_use, dtype=np.float64),
+        "ct_voxel_mM": np.asarray(ct_voxel, dtype=np.float64),
+        "voxel_results": np.asarray(voxel_results, dtype=np.float64),
+        "tumind_0based": np.asarray(tumind, dtype=np.int64),
+        "tumind_1based": np.asarray(tumind, dtype=np.int64) + 1,
+    }
+    if spatial_shape is not None:
+        payload["dimensions_xyz"] = np.asarray(spatial_shape, dtype=np.int64)
+
+    voxel_residuals = _compute_fit_residuals(
+        model_name=model_name,
+        ct=np.asarray(ct_voxel, dtype=np.float64),
+        fit_results=np.asarray(voxel_results, dtype=np.float64),
+        cp=np.asarray(cp_use, dtype=np.float64),
+        timer=np.asarray(timer, dtype=np.float64),
+        r1o_vector=r1o_voxel,
+        relaxivity=relaxivity,
+        fw=fw,
+    )
+    if voxel_residuals is not None:
+        payload["voxel_residuals"] = voxel_residuals
+
+    if roi_results.shape[0] > 0 and roi_curve is not None:
+        payload["roi_ct_mM"] = np.asarray(roi_curve, dtype=np.float64)
+        payload["roi_results"] = np.asarray(roi_results, dtype=np.float64)
+        payload["roi_names"] = np.asarray(roi_names, dtype="<U128")
+        roi_residuals = _compute_fit_residuals(
+            model_name=model_name,
+            ct=np.asarray(roi_curve, dtype=np.float64),
+            fit_results=np.asarray(roi_results, dtype=np.float64),
+            cp=np.asarray(cp_use, dtype=np.float64),
+            timer=np.asarray(timer, dtype=np.float64),
+            r1o_vector=r1o_roi,
+            relaxivity=relaxivity,
+            fw=fw,
+        )
+        if roi_residuals is not None:
+            payload["roi_residuals"] = roi_residuals
+
+    np.savez_compressed(out_path, **payload)
+    return str(out_path)
+
+
 def _load_fit_module_for_acceleration(acceleration_backend: str) -> Any:
     if acceleration_backend == "cpufit_cpu":
         import pycpufit.cpufit as fit_module  # type: ignore
@@ -2673,9 +2862,10 @@ def _run_stage_d_real(
         )
 
         roi_results = np.empty((0, voxel_results.shape[1]), dtype=np.float64)
+        roi_curve: Optional[np.ndarray] = None
+        roi_r1o: Optional[np.ndarray] = None
         if roi_columns:
             roi_curve = np.stack([np.mean(ct_source[:, cols], axis=1) for cols in roi_columns], axis=1)
-            roi_r1o = None
             if model_name == "fxr" and r1o is not None:
                 roi_r1o = np.asarray([float(np.mean(r1o[cols])) for cols in roi_columns], dtype=np.float64)
             roi_sttum = None
@@ -2722,6 +2912,26 @@ def _run_stage_d_real(
             _write_tsv_xls(xls_target, rows)
             xls_path = str(xls_target)
 
+        postfit_arrays_path = _write_postfit_arrays(
+            config=config,
+            rootname=rootname,
+            model_name=model_name,
+            param_names=param_names,
+            timer=timer,
+            cp_use=cp_use,
+            ct_voxel=ct_source,
+            voxel_results=voxel_results,
+            tumind=tumind,
+            spatial_shape=spatial_shape,
+            roi_names=roi_names,
+            roi_curve=roi_curve,
+            roi_results=roi_results,
+            r1o_voxel=r1o,
+            r1o_roi=roi_r1o,
+            relaxivity=relaxivity,
+            fw=fw,
+        )
+
         stage_arrays[f"{model_name}_voxel_results"] = voxel_results
         if roi_results.shape[0] > 0:
             stage_arrays[f"{model_name}_roi_results"] = roi_results
@@ -2732,6 +2942,7 @@ def _run_stage_d_real(
             "roi_result_shape": list(roi_results.shape),
             "map_paths": map_paths,
             "xls_path": xls_path,
+            "postfit_arrays_path": postfit_arrays_path,
         }
         _emit_progress(
             event_callback,
@@ -2961,6 +3172,17 @@ def _emit_stage_artifacts(
                 artifact_type="roi_xls",
                 name="roi_xls",
                 path=xls_path,
+            )
+        postfit_arrays_path = output.get("postfit_arrays_path")
+        if isinstance(postfit_arrays_path, str) and postfit_arrays_path:
+            _emit_progress(
+                event_callback,
+                "artifact_written",
+                stage="D",
+                model=str(model_name),
+                artifact_type="postfit_arrays",
+                name="postfit_arrays",
+                path=postfit_arrays_path,
             )
 
 

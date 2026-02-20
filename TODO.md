@@ -5,7 +5,7 @@ Finish the Python transition to the point that it can be merged to `dev` and tes
 
 ## Primary (Blockers for Dev-Branch Trial)
 1. Parametric maps and T1 fitting workflow
-- [ ] Port remaining workflow behavior from `parametric_scripts/custom_scripts/T1mapping_fit.m` and required `calculateMap` path components.
+- [x] Port remaining workflow behavior from `parametric_scripts/custom_scripts/T1mapping_fit.m` and required `calculateMap` path components.
 - [x] Add Python CLI entrypoint for T1 mapping workflow with clear config schema and run summary output.
 - [x] Add Python GUI support for T1 fitting workflow (file selection, run controls, progress, QC).
 - [x] Add real-data tests for T1 output integrity and expected file naming.
@@ -22,14 +22,16 @@ Finish the Python transition to the point that it can be merged to `dev` and tes
 - [x] Add regression tests for known edge cases (bounds, low SNR, non-uniform timer inputs).
 
 3. Part E post-fitting analysis
-- [ ] Port required workflow from `dce/fitting_analysis.m`, `dce/compare_fits.m`, and supporting analysis helpers.
-- [ ] Implement reproducible Python outputs for ROI/voxel fit review used in current workflows.
-- [ ] Add automated tests for analysis outputs and plotting/stat summary generation.
+- [x] Port required workflow from `dce/fitting_analysis.m`, `dce/compare_fits.m`, and supporting analysis helpers.
+- [x] Implement reproducible Python outputs for ROI/voxel fit review used in current workflows.
+- [x] Add automated tests for analysis outputs and plotting/stat summary generation.
 
 4. Real-data workflow qualification
 - [ ] Run end-to-end Python DCE + T1 workflows on representative real datasets.
 - [ ] Record blocker issues and classify them as fix-now vs post-merge follow-up.
 - [ ] Prepare merge packet: command recipes, known differences, troubleshooting notes.
+
+5. Update license to GPL-3 before `dev` merge
 
 ## Secondary (Important, Not Blocking First Dev Merge)
 - [ ] Improve `2cxm` and `tissue_uptake` stability/accuracy across all fit backends.
@@ -77,4 +79,7 @@ Current handling in main suite:
 - Parametric pipeline now supports nonlinear and two-point VFA fit types in addition to linear, with tiny-fixture integration tests (`python/parametric_pipeline.py`, `tests/python/test_parametric_pipeline.py`).
 - Parametric pipeline now supports optional B1-scaled flip-angle fitting (`b1_map_file` explicit or auto-detected `B1_scaled_FAreg.nii(.gz)`) with integration coverage (`python/parametric_pipeline.py`, `tests/python/test_parametric_pipeline.py`).
 - Parametric pipeline now supports MATLAB-style TR fallback from `script_preferences.txt` (`tr`) when sidecar TR is unavailable, including explicit `script_preferences_path` config support and integration coverage (`python/parametric_pipeline.py`, `tests/python/test_parametric_pipeline.py`).
+- Parametric pipeline now supports MATLAB-style `odd_echoes` frame selection and optional XY Gaussian smoothing (`xy_smooth_sigma` / `xy_smooth_size`), including integration coverage and GUI/config wiring (`python/parametric_pipeline.py`, `python/parametric_gui.py`, `tests/python/test_parametric_pipeline.py`).
 - Part E statistical core port started: Python helpers now cover MATLAB-style model support checks, SSE extraction, f-test, AIC/relative-likelihood comparison, ROI CSV outputs, voxel-vector-to-volume reconstruction, and artifact writers for reproducible JSON/CSV/NPY outputs (`python/dce_postfit_analysis.py`, `tests/python/test_dce_postfit_analysis.py`).
+- Stage D optional Part E array export added via `stage_overrides.write_postfit_arrays` (`*_postfit_arrays.npz`), with NPZ loader/runner path in `python/dce_postfit_analysis.py` and `tests/python/run_dce_postfit_analysis.py`, plus regression coverage in `tests/python/test_dce_postfit_analysis.py` and `tests/python/test_dce_pipeline.py`.
+- Part E analysis outputs now include statistical summary fields and optional PNG plots (F-test p-value histograms, AIC best-model/likelihood distributions) with automated coverage (`python/dce_postfit_analysis.py`, `tests/python/test_dce_postfit_analysis.py`).

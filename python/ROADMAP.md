@@ -28,10 +28,11 @@ Current status:
 - CLI v1 for VFA T1 mapping is implemented (`run_parametric_python_cli.py`, `python/parametric_cli.py`, `python/parametric_pipeline.py`) with linear/nonlinear/two-point fit support.
 - Optional B1-scaled FA handling is implemented in the Python parametric pipeline (explicit `b1_map_file` or auto-detected `B1_scaled_FAreg.nii(.gz)` in VFA directory).
 - MATLAB-style TR fallback is implemented for parametric T1 when sidecar TR is absent (`script_preferences.txt` key `tr`, with optional explicit `script_preferences_path`).
+- MATLAB-style `odd_echoes` selection and XY Gaussian smoothing (`xy_smooth_sigma` / `xy_smooth_size`) are implemented in the Python parametric pipeline.
 - GUI v1 is implemented for parametric T1 (`run_parametric_python_gui.py`, `python/parametric_gui.py`).
 - Fixture-backed and BIDS-based integration tests for map outputs and naming are in place (`tests/python/test_parametric_pipeline.py`).
 - OSIPI reliability coverage now includes linear, nonlinear, and two-FA T1 checks (`tests/python/test_osipi_t1_reliability.py`).
-- Remaining work is map-level parity hardening, completion of remaining MATLAB behavior/pathways, and real-data workflow validation.
+- Remaining work is map-level parity hardening and real-data workflow validation.
 
 Required outputs:
 - T1 map files in expected naming/location patterns.
@@ -61,8 +62,11 @@ Scope:
 Current status:
 - Initial non-GUI statistical core is now in Python (`python/dce_postfit_analysis.py`) with MATLAB-style model support checks, SSE extraction, f-test, AIC/relative-likelihood comparison, ROI CSV writers, and voxel-map reconstruction helpers.
 - Reproducible output helpers are available for Part E statistics (`run_ftest_analysis`, `run_aic_analysis`) that emit JSON/CSV/NPY artifacts for ROI and voxel review.
-- Unit coverage for this core and output path is in place (`tests/python/test_dce_postfit_analysis.py`).
-- Remaining work is fit-result loading from workflow artifacts and plot/report flow to replace MATLAB Part E usage end-to-end.
+- Stage D now supports optional Part E array export (`stage_overrides.write_postfit_arrays=true`) to `*_postfit_arrays.npz`, including model metadata, timer/AIF curves, voxel+ROI fit outputs, voxel indexing, and residual arrays.
+- The Python Part E runner (`tests/python/run_dce_postfit_analysis.py`) now consumes these NPZ artifacts directly (no `.mat` dependency).
+- Part E outputs now include statistical summaries plus optional plot artifacts (F-test p-value histogram, AIC model-count/likelihood histograms).
+- Unit coverage for this core, NPZ-based input path, and plot/stat-output generation is in place (`tests/python/test_dce_postfit_analysis.py`, `tests/python/test_dce_pipeline.py`).
+- Remaining work is full workflow handoff and real-data qualification to replace MATLAB Part E usage end-to-end.
 
 Required outputs:
 - analysis summaries/plots needed for downstream interpretation.

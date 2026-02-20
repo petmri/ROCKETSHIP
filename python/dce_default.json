@@ -76,6 +76,7 @@
     "time_smoothing": "none",
     "time_smoothing_window": 0,
     "write_param_maps": true,
+    "write_postfit_arrays": false,
     "force_cpu": 0,
     "gpu_tolerance": 1e-12,
     "gpu_max_n_iterations": 200,

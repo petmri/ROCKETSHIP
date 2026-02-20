@@ -774,6 +774,52 @@ class TestDcePipeline:
             assert tofts_out["xls_path"]
             assert Path(tofts_out["xls_path"]).exists()
 
+    def test_stage_d_real_optional_postfit_array_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            roi_path = config.subject_tp_path / "roi_mask_for_part_e.nii.gz"
+            roi_path.write_text("")
+            config.roi_files = [roi_path]
+            config.stage_overrides = {
+                "stage_b_mode": "real",
+                "stage_d_mode": "real",
+                "aif_curve_mode": "raw",
+                "write_param_maps": True,
+                "write_postfit_arrays": True,
+            }
+            config.model_flags = {"tofts": 1}
+
+            stage_a = _make_stage_a_payload()
+            stage_b = _run_stage_b_real(config, stage_a)
+
+            roi_mask = np.zeros((7, 1, 1), dtype=float)
+            roi_mask[:4, 0, 0] = 1.0
+
+            def fake_load(path: Path):
+                if str(path).endswith("roi_mask_for_part_e.nii.gz"):
+                    return roi_mask
+                raise AssertionError(f"Unexpected path {path}")
+
+            with patch("dce_pipeline._load_nifti_data", side_effect=fake_load):
+                stage_d = _run_stage_d_real(config, stage_a, stage_b)
+
+            tofts_out = stage_d["model_outputs"]["tofts"]
+            postfit_path = Path(tofts_out["postfit_arrays_path"])
+            assert postfit_path.exists()
+
+            with np.load(postfit_path) as payload:
+                assert "timer_min" in payload
+                assert "cp_mM" in payload
+                assert "ct_voxel_mM" in payload
+                assert "voxel_results" in payload
+                assert "voxel_residuals" in payload
+                assert "tumind_1based" in payload
+                assert "dimensions_xyz" in payload
+                assert "roi_ct_mM" in payload
+                assert "roi_results" in payload
+                assert "roi_residuals" in payload
+                assert "roi_names" in payload
+
     def test_pipeline_end_to_end_real_abd(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))

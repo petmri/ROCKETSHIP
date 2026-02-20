@@ -240,3 +240,19 @@ Benchmark helper:
 cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python tests/python/run_dce_benchmark.py
 ```
+
+Part E post-fit comparison helper from Stage-D postfit NPZ outputs:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python tests/python/run_dce_postfit_analysis.py \
+  --analysis ftest \
+  --region roi \
+  --result /path/to/lower_model_fit_postfit_arrays.npz \
+  --result /path/to/higher_model_fit_postfit_arrays.npz \
+  --output-dir /tmp/dce_postfit_ftest \
+  --print-summary-json
+```
+
+Generate those NPZ inputs from Stage D by setting `stage_overrides.write_postfit_arrays=true`.
+Use `--no-plots` to skip optional PNG artifact generation.

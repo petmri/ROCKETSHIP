@@ -16,8 +16,17 @@ sys.path.insert(0, str(REPO_ROOT / "python"))
 from parametric_pipeline import ParametricT1Config, run_parametric_t1_pipeline  # noqa: E402
 
 
-def _write_tiny_vfa_fixture(path: Path, *, shape: tuple[int, int] = (4, 4), tr_ms: float = 8.0) -> tuple[list[float], float]:
-    flip_angles = [2.0, 10.0, 15.0]
+def _write_tiny_vfa_fixture(
+    path: Path,
+    *,
+    shape: tuple[int, int] = (4, 4),
+    tr_ms: float = 8.0,
+    flip_angles: list[float] | None = None,
+    noise_std: float = 0.0,
+) -> tuple[list[float], float]:
+    if flip_angles is None:
+        flip_angles = [2.0, 10.0, 15.0]
+    rng = np.random.default_rng(42)
     true_t1 = 1300.0
     rho = 1000.0
     stack = []
@@ -25,7 +34,10 @@ def _write_tiny_vfa_fixture(path: Path, *, shape: tuple[int, int] = (4, 4), tr_m
         theta = np.deg2rad(float(fa))
         e1 = np.exp(-tr_ms / true_t1)
         signal = rho * (((1.0 - e1) * np.sin(theta)) / (1.0 - e1 * np.cos(theta)))
-        stack.append(np.full(shape, float(signal), dtype=np.float32))
+        frame = np.full(shape, float(signal), dtype=np.float32)
+        if noise_std > 0.0:
+            frame = frame + rng.normal(loc=0.0, scale=float(noise_std), size=shape).astype(np.float32)
+        stack.append(frame)
     volume = np.stack(stack, axis=-1)
     nii = nib.Nifti1Image(volume, np.eye(4))
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -326,3 +338,72 @@ def test_parametric_t1_pipeline_uses_script_preferences_tr_when_tr_missing(tmp_p
     summary = run_parametric_t1_pipeline(ParametricT1Config.from_dict(payload))
     assert summary["resolved_inputs"]["tr_source"] == "script_preferences"
     assert summary["resolved_inputs"]["tr_ms"] == pytest.approx(9.5)
+
+
+@pytest.mark.integration
+def test_parametric_t1_pipeline_applies_odd_echoes_selection(tmp_path: Path) -> None:
+    vfa_path = tmp_path / "tiny_odd_echoes_vfa.nii.gz"
+    flip_angles, tr_ms = _write_tiny_vfa_fixture(vfa_path, flip_angles=[2.0, 5.0, 10.0, 12.0, 15.0])
+
+    payload = {
+        "output_dir": str(tmp_path / "out_odd_echoes"),
+        "vfa_files": [str(vfa_path)],
+        "flip_angles_deg": flip_angles,
+        "tr_ms": tr_ms,
+        "fit_type": "t1_fa_linear_fit",
+        "output_basename": "T1_map",
+        "output_label": "tiny_odd_echoes",
+        "rsquared_threshold": 0.2,
+        "odd_echoes": True,
+        "write_r_squared": True,
+        "write_rho_map": False,
+    }
+
+    summary = run_parametric_t1_pipeline(ParametricT1Config.from_dict(payload))
+    assert summary["resolved_inputs"]["odd_echoes_applied"] is True
+    assert summary["resolved_inputs"]["n_flips_input"] == 5
+    assert summary["resolved_inputs"]["n_flips"] == 3
+    assert summary["resolved_inputs"]["odd_echo_indices_0based"] == [0, 2, 4]
+    np.testing.assert_allclose(summary["resolved_inputs"]["flip_angles_deg"], [2.0, 10.0, 15.0], rtol=0.0, atol=0.0)
+    assert Path(summary["outputs"]["t1_map_path"]).exists()
+
+
+@pytest.mark.integration
+def test_parametric_t1_pipeline_applies_xy_smoothing(tmp_path: Path) -> None:
+    vfa_path = tmp_path / "tiny_xy_smoothing_vfa.nii.gz"
+    flip_angles, tr_ms = _write_tiny_vfa_fixture(vfa_path, shape=(16, 16), noise_std=3.0)
+
+    payload_base = {
+        "vfa_files": [str(vfa_path)],
+        "flip_angles_deg": flip_angles,
+        "tr_ms": tr_ms,
+        "fit_type": "t1_fa_linear_fit",
+        "output_basename": "T1_map",
+        "output_label": "tiny_xy_smoothing",
+        "rsquared_threshold": 0.2,
+        "write_r_squared": False,
+        "write_rho_map": False,
+    }
+    summary_raw = run_parametric_t1_pipeline(
+        ParametricT1Config.from_dict(
+            {
+                **payload_base,
+                "output_dir": str(tmp_path / "out_xy_smoothing_raw"),
+                "xy_smooth_sigma": 0.0,
+            }
+        )
+    )
+    summary_smoothed = run_parametric_t1_pipeline(
+        ParametricT1Config.from_dict(
+            {
+                **payload_base,
+                "output_dir": str(tmp_path / "out_xy_smoothing_on"),
+                "xy_smooth_sigma": 1.0,
+            }
+        )
+    )
+
+    assert summary_smoothed["resolved_inputs"]["xy_smooth_sigma"] == pytest.approx(1.0)
+    raw_t1 = nib.load(str(summary_raw["outputs"]["t1_map_path"])).get_fdata()
+    smoothed_t1 = nib.load(str(summary_smoothed["outputs"]["t1_map_path"])).get_fdata()
+    assert not np.allclose(raw_t1, smoothed_t1, rtol=0.0, atol=0.0)

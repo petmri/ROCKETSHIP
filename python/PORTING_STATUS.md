@@ -7,7 +7,7 @@
 
 Current automated baseline:
 - Command: `.venv/bin/python -m pytest tests/python -q`
-- Result: `109 passed, 12 skipped, 2 xfailed`
+- Result: `126 passed, 12 skipped, 2 xfailed`
 - Current non-blocking xfails:
   - `tests/python/test_osipi_pycpufit.py::test_osipi_pycpufit_2cxm_fast`
   - `tests/python/test_osipi_pycpufit.py::test_osipi_pycpufit_tissue_uptake_fast`
@@ -18,6 +18,9 @@ Current automated baseline:
 - CI entries `[3, 4]` are intentionally not gated yet:
   - Python currently returns CI placeholders (`-1`) while MATLAB returns fitted CI values.
   - Contract case uses `compare_indices` in `tests/contracts/parametric_core_contracts.json` to make this explicit.
+- Part E input contract is now Stage-D NPZ postfit arrays:
+  - enable with `stage_overrides.write_postfit_arrays = true`.
+  - Part E loader reads `*_postfit_arrays.npz` directly, avoiding `.mat`-format/version issues.
 
 ## Category Definitions
 - `done`: implemented and acceptable for current transition goals.
@@ -33,11 +36,11 @@ Current automated baseline:
 | DCE primary models | `dce/model_tofts*.m`, `dce/model_patlak*.m`, `dce/model_extended_tofts*.m` | Implemented in `python/dce_models.py` and wired into pipeline | primary | Edge-case regression tests cover low-SNR/non-uniform timer/bounds; strict OSIPI reliability thresholds are merge-gated; backend-consistency checks exist for CPU/CPUfit/GPUfit where available. |
 | DCE unstable models | `dce/model_2cxm*.m`, `dce/model_tissue_uptake*.m` | Implemented but still unstable in some parity/reliability paths | secondary | Keep improving; not a blocker for first dev merge unless promoted. |
 | DCE optional models | `dce/model_fxr*.m`, `dce/auc_helper.m`, `nested`, `FXL_rr` pathways | Partial (`fxr`, `auc` present; `nested`/`FXL_rr` not executed) | secondary | Decide post-primary whether to fully support or deprecate. |
-| DCE Part E post-fit analysis | `dce/fitting_analysis.m`, `dce/compare_fits.m`, `dce/compare_gui.m` | Partial (`python/dce_postfit_analysis.py`) | primary | Initial statistical core is ported (supported-model checks, SSE extraction, f-test, AIC/relative-likelihood, ROI CSV writers, voxel map reconstruction) plus reproducible JSON/CSV/NPY artifact writers (`run_ftest_analysis`, `run_aic_analysis`) with unit tests; end-to-end fit-result loading and plotting workflow remains pending. |
+| DCE Part E post-fit analysis | `dce/fitting_analysis.m`, `dce/compare_fits.m`, `dce/compare_gui.m` | Partial (`python/dce_postfit_analysis.py`, `tests/python/run_dce_postfit_analysis.py`) | primary | Statistical core is ported (supported-model checks, SSE extraction, f-test, AIC/relative-likelihood, ROI CSV writers, voxel map reconstruction) plus reproducible JSON/CSV/NPY artifact writers (`run_ftest_analysis`, `run_aic_analysis`), NPZ-based runner path (`load_dce_fit_stats_from_npz`) using Stage-D postfit exports (`write_postfit_arrays`), and optional plot/stat-summary outputs for troubleshooting; remaining gap is workflow qualification on real datasets. |
 | DCE legacy GUIDE GUI | `dce/dce.m`, `dce/RUNA.m`, `dce/RUNB.m`, `dce/RUND.m` | Not ported 1:1 | will not port | Python keeps CLI-first flow with modern GUI wrapper instead. |
 | DCE neuroecon/email/manual AIF UX | `dce/run_neuroecon_job.m`, manual GUI AIF flows | Not ported | will not port | Previously marked out of scope. |
 | Parametric core model math | `parametric_scripts/fitParameter.m` (`t2_linear_fast`, `t1_fa_linear_fit`, `t1_fa_fit`) | Partial in `python/parametric_models.py` | primary | Linear + nonlinear + two-point VFA are implemented; MATLAB contract parity now covers `t2_linear_fast`, `t1_fa_linear_fit`, and `t1_fa_fit` with automated runner checks in Python tests. |
-| Parametric T1 mapping workflow | `parametric_scripts/custom_scripts/T1mapping_fit.m`, `parametric_scripts/calculateMap.m` | Partial (`python/parametric_pipeline.py`, `python/parametric_cli.py`, `run_parametric_python_cli.py`) | primary | VFA linear/nonlinear/two-point fit types are available with fixture + BIDS-based naming/integrity tests; optional B1-scaled FA support (`b1_map_file` or auto-detected `B1_scaled_FAreg.nii(.gz)`) and MATLAB-style TR fallback (`script_preferences.txt` key `tr`, or explicit `script_preferences_path`) are implemented; remaining MATLAB-path behavior is still pending. |
+| Parametric T1 mapping workflow | `parametric_scripts/custom_scripts/T1mapping_fit.m`, `parametric_scripts/calculateMap.m` | Partial (`python/parametric_pipeline.py`, `python/parametric_cli.py`, `run_parametric_python_cli.py`) | primary | VFA linear/nonlinear/two-point fit types are available with fixture + BIDS-based naming/integrity tests; optional B1-scaled FA support (`b1_map_file` or auto-detected `B1_scaled_FAreg.nii(.gz)`), MATLAB-style TR fallback (`script_preferences.txt` key `tr`, or explicit `script_preferences_path`), MATLAB-style `odd_echoes` frame selection, and XY Gaussian smoothing (`xy_smooth_sigma` / `xy_smooth_size`) are implemented. |
 | Parametric GUI workflow | `parametric_scripts/fitting_gui.m`, `run_parametric.m` | Partial (`python/parametric_gui.py`, `run_parametric_python_gui.py`) | primary | GUI v1 exists for file selection/run/progress/summary; additional MATLAB behavior and QC parity may still be needed. |
 | SI->Concentration conversion | `dce/A_make_R1maps_func.m` signal-to-R1/concentration steps | Partial (`python/dce_pipeline.py` Stage A + `python/dce_signal.py`) | primary | OSIPI SI2Conc reliability test and merge-gate summary runner are in place (`tests/python/test_osipi_si_to_conc_reliability.py`, `tests/python/run_osipi_reliability.py`). |
 | DSC core functions | `dsc/import_AIF.m`, `dsc/previous_AIF.m`, `dsc/DSC_convolution_sSVD.m` | Implemented (`python/dsc_helpers.py`, `python/dsc_models.py`) | done | Core parity contract coverage exists. |
@@ -47,7 +50,7 @@ Current automated baseline:
 
 ## Primary Gaps Blocking Dev Merge Trial
 1. Python T1 mapping workflow parity with MATLAB usage (remaining behavior + real-data validation).
-2. Python Part E analysis workflow availability.
+2. Python Part E analysis workflow real-data qualification and handoff.
 3. Real-data qualification runbook and results for Python workflows.
 
 ## Secondary Gaps

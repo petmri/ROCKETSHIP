@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 import sys
 
 import numpy as np
@@ -17,6 +18,7 @@ from dce_postfit_analysis import (  # noqa: E402
     compute_aic,
     compute_ftest,
     get_sse_and_fp,
+    load_dce_fit_stats_from_npz,
     run_aic_analysis,
     run_ftest_analysis,
     voxel_values_to_volume,
@@ -31,6 +33,36 @@ def _build_result_matrix(sse_values: list[float], sse_col_1based: int) -> np.nda
     out = np.zeros((n_rows, n_cols), dtype=np.float64)
     out[:, sse_col_1based - 1] = np.asarray(sse_values, dtype=np.float64)
     return out
+
+
+def _write_sample_fit_npz(
+    path: Path,
+    *,
+    model_name: str,
+    timer: np.ndarray,
+    fitting_results: np.ndarray | None,
+    roi_results: np.ndarray | None,
+    roi_names: list[str] | None,
+    tumind_1based: np.ndarray | None,
+    dimensions: tuple[int, int, int] | None,
+) -> None:
+    payload: dict[str, object] = {
+        "model_name": np.asarray(model_name),
+        "timer_min": np.asarray(timer, dtype=np.float64),
+    }
+    if fitting_results is not None:
+        payload["voxel_results"] = np.asarray(fitting_results, dtype=np.float64)
+    if roi_results is not None:
+        payload["roi_results"] = np.asarray(roi_results, dtype=np.float64)
+    if roi_names is not None:
+        payload["roi_names"] = np.asarray(roi_names, dtype="<U128")
+    if tumind_1based is not None:
+        payload["tumind_1based"] = np.asarray(tumind_1based, dtype=np.int64)
+    if dimensions is not None:
+        payload["dimensions_xyz"] = np.asarray(dimensions, dtype=np.int64)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(path, **payload)
 
 
 @pytest.mark.unit
@@ -128,6 +160,30 @@ def test_voxel_values_to_volume_maps_1_based_indices() -> None:
 
 
 @pytest.mark.unit
+def test_load_dce_fit_stats_from_npz_reads_required_fields(tmp_path: Path) -> None:
+    npz_path = tmp_path / "tofts_fit_postfit_arrays.npz"
+    _write_sample_fit_npz(
+        npz_path,
+        model_name="tofts",
+        timer=np.linspace(0.0, 4.0, 15),
+        fitting_results=_build_result_matrix([10.0, 11.0], sse_col_1based=3),
+        roi_results=_build_result_matrix([4.0, 5.0], sse_col_1based=3),
+        roi_names=["roi_1", "roi_2"],
+        tumind_1based=np.asarray([1, 8], dtype=np.int64),
+        dimensions=(2, 2, 2),
+    )
+
+    loaded = load_dce_fit_stats_from_npz(npz_path)
+    assert loaded.model_name == "tofts"
+    assert loaded.timer.shape == (15,)
+    assert loaded.fitting_results is not None and loaded.fitting_results.shape[0] == 2
+    assert loaded.roi_results is not None and loaded.roi_results.shape[0] == 2
+    assert loaded.roi_names == ["roi_1", "roi_2"]
+    assert loaded.tumind_1based is not None and loaded.tumind_1based.tolist() == [1, 8]
+    assert tuple(loaded.dimensions or ()) == (2, 2, 2)
+
+
+@pytest.mark.unit
 def test_run_ftest_analysis_writes_roi_artifacts(tmp_path: Path) -> None:
     lower = DceFitStats(
         model_name="tofts",
@@ -142,10 +198,15 @@ def test_run_ftest_analysis_writes_roi_artifacts(tmp_path: Path) -> None:
         roi_names=["roi_1", "roi_2"],
     )
 
-    out = run_ftest_analysis(lower, higher, region="roi", output_dir=tmp_path / "ftest")
+    out = run_ftest_analysis(lower, higher, region="roi", output_dir=tmp_path / "ftest", write_plots=False)
     assert Path(out["summary_json_path"]).exists()
     assert Path(out["p_values_vector_path"]).exists()
+    assert Path(out["f_stat_vector_path"]).exists()
     assert Path(out["roi_csv_path"]).exists()
+    stats = dict(out["stats"])
+    assert stats["n_total"] == 2
+    assert stats["n_finite_p"] == 2
+    assert "n_significant_p_lt_0_05" in stats
 
 
 @pytest.mark.unit
@@ -168,9 +229,104 @@ def test_run_aic_analysis_writes_voxel_artifacts_with_volume_maps(tmp_path: Path
         dimensions=dims,
     )
 
-    out = run_aic_analysis([tofts, ex_tofts], region="voxel", output_dir=tmp_path / "aic")
+    out = run_aic_analysis([tofts, ex_tofts], region="voxel", output_dir=tmp_path / "aic", write_plots=False)
     assert Path(out["summary_json_path"]).exists()
     assert Path(out["aic_matrix_path"]).exists()
     assert Path(out["best_model_index_path"]).exists()
     assert Path(out["best_model_index_map_path"]).exists()
     assert Path(out["best_vs_second_map_path"]).exists()
+    stats = dict(out["stats"])
+    assert stats["n_total"] == 2
+    assert "best_model_counts" in stats
+
+
+@pytest.mark.unit
+def test_run_ftest_analysis_writes_plot_png_when_matplotlib_available(tmp_path: Path) -> None:
+    pytest.importorskip("matplotlib")
+    lower = DceFitStats(
+        model_name="tofts",
+        timer=np.linspace(0.0, 4.0, 15),
+        roi_results=_build_result_matrix([10.0, 11.0], sse_col_1based=3),
+        roi_names=["roi_1", "roi_2"],
+    )
+    higher = DceFitStats(
+        model_name="ex_tofts",
+        timer=np.linspace(0.0, 4.0, 15),
+        roi_results=_build_result_matrix([7.0, 8.0], sse_col_1based=4),
+        roi_names=["roi_1", "roi_2"],
+    )
+    out = run_ftest_analysis(lower, higher, region="roi", output_dir=tmp_path / "ftest_plot", write_plots=True)
+    assert Path(out["p_value_histogram_plot_path"]).exists()
+
+
+@pytest.mark.unit
+def test_run_aic_analysis_writes_plot_pngs_when_matplotlib_available(tmp_path: Path) -> None:
+    pytest.importorskip("matplotlib")
+    timer = np.linspace(0.0, 3.0, 10)
+    tofts = DceFitStats(
+        model_name="tofts",
+        timer=timer,
+        roi_results=_build_result_matrix([5.0, 3.0], sse_col_1based=3),
+        roi_names=["roi_a", "roi_b"],
+    )
+    ex_tofts = DceFitStats(
+        model_name="ex_tofts",
+        timer=timer,
+        roi_results=_build_result_matrix([4.0, 4.0], sse_col_1based=4),
+        roi_names=["roi_a", "roi_b"],
+    )
+    out = run_aic_analysis([tofts, ex_tofts], region="roi", output_dir=tmp_path / "aic_plot", write_plots=True)
+    assert Path(out["best_model_counts_plot_path"]).exists()
+    assert Path(out["best_vs_second_histogram_plot_path"]).exists()
+
+
+@pytest.mark.unit
+def test_run_dce_postfit_analysis_cli_ftest_from_npz_inputs(tmp_path: Path) -> None:
+    lower_path = tmp_path / "tofts_fit_postfit_arrays.npz"
+    higher_path = tmp_path / "ex_tofts_fit_postfit_arrays.npz"
+    timer = np.linspace(0.0, 4.0, 15)
+    _write_sample_fit_npz(
+        lower_path,
+        model_name="tofts",
+        timer=timer,
+        fitting_results=_build_result_matrix([10.0, 11.0], sse_col_1based=3),
+        roi_results=_build_result_matrix([10.0, 11.0], sse_col_1based=3),
+        roi_names=["roi_1", "roi_2"],
+        tumind_1based=np.asarray([1, 8], dtype=np.int64),
+        dimensions=(2, 2, 2),
+    )
+    _write_sample_fit_npz(
+        higher_path,
+        model_name="ex_tofts",
+        timer=timer,
+        fitting_results=_build_result_matrix([7.0, 8.0], sse_col_1based=4),
+        roi_results=_build_result_matrix([7.0, 8.0], sse_col_1based=4),
+        roi_names=["roi_1", "roi_2"],
+        tumind_1based=np.asarray([1, 8], dtype=np.int64),
+        dimensions=(2, 2, 2),
+    )
+
+    script_path = REPO_ROOT / "tests" / "python" / "run_dce_postfit_analysis.py"
+    output_dir = tmp_path / "out"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(script_path),
+            "--analysis",
+            "ftest",
+            "--region",
+            "roi",
+            "--result",
+            str(lower_path),
+            "--result",
+            str(higher_path),
+            "--output-dir",
+            str(output_dir),
+            "--print-summary-json",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "ftest_roi_summary.json" in completed.stdout
+    assert (output_dir / "ftest_roi_summary.json").exists()

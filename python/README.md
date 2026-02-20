@@ -21,6 +21,7 @@ currently in this repository.
   - OSIPI-labeled reliability tests for DCE, T1, and SI-to-concentration conversion
 
 For detailed port status and todo items, see:
+
 - `/Users/samuelbarnes/code/ROCKETSHIP/python/ROADMAP.md`
 - `/Users/samuelbarnes/code/ROCKETSHIP/python/PORTING_STATUS.md`
 - `/Users/samuelbarnes/code/ROCKETSHIP/TODO.md`
@@ -35,6 +36,7 @@ python3 install_python_acceleration.py
 ```
 
 What this script does:
+
 - creates/reuses `.venv` (use `--recreate-venv` to rebuild)
 - installs Python requirements (including GUI by default)
 - downloads latest stable release package from `ironictoo/Gpufit`
@@ -45,6 +47,7 @@ What this script does:
 - verifies imports and reports CUDA availability
 
 Common installer options:
+
 - `--release-tag <tag>`: pin to a specific Gpufit release
 - `--asset-id <id>`: force specific asset id
 - `--venv-path <path>`: custom venv path
@@ -87,6 +90,7 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 ```
 
 Default template location:
+
 - `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_default.json`
 - This default is prewired to the tiny fixture:
   - `/Users/samuelbarnes/code/ROCKETSHIP/tests/data/ci_fixtures/dce/tiny_settings_case`
@@ -104,6 +108,7 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 ```
 
 Typical outputs:
+
 - Stage summary JSON: `<output_dir>/dce_pipeline_run.json`
 - Event log JSONL: `<output_dir>/dce_pipeline_events.jsonl`
 - Stage checkpoints (optional): `<checkpoint_dir>/a_out.json`, `b_out.json`, `d_out.json`
@@ -121,37 +126,44 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 ```
 
 Default template location:
+
 - `/Users/samuelbarnes/code/ROCKETSHIP/python/parametric_default.json`
 
 Typical outputs:
+
 - Run summary JSON: `<output_dir>/parametric_t1_run.json`
 - Event log JSONL: `<output_dir>/parametric_t1_events.jsonl`
 - T1 map NIfTI: `<output_dir>/T1_map_<fit_type>_<label>.nii.gz`
 - R-squared map NIfTI: `<output_dir>/Rsquared_<fit_type>_<label>.nii.gz`
 
 Parametric input notes:
+
 - `fit_type` supports `t1_fa_linear_fit`, `t1_fa_fit`, and `t1_fa_two_point_fit`.
 - `b1_map_file` is optional; when provided, per-voxel effective flip angles are `flip_angles_deg * b1_scale`.
 - If `b1_map_file` is omitted, the pipeline auto-detects `B1_scaled_FAreg.nii` or `B1_scaled_FAreg.nii.gz` in the VFA directory.
 - `tr_ms` is optional if VFA sidecars contain `RepetitionTime`; otherwise the pipeline falls back to `script_preferences.txt` key `tr` (or explicit `script_preferences_path`).
+- `odd_echoes=true` keeps only odd-positioned samples from the VFA stack (indices `0,2,4,...`) before fitting, matching MATLAB workflow behavior.
+- `xy_smooth_sigma` (alias `xy_smooth_size`) applies optional per-frame XY Gaussian smoothing before fitting.
 
 ## Input expectations (DCE)
 
 Config fields are parsed by:
+
 - `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_cli.py`
 - `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_pipeline.py`
 
 Key expectations:
+
 - Dynamic image + ROI/AIF/T1/noise masks are provided (NIfTI path lists)
 - `stage_overrides` should provide TR/FA/timing parameters for parity-safe runs
 - MATLAB-style `dce_preferences.txt` defaults are loaded automatically from `/Users/samuelbarnes/code/ROCKETSHIP/dce/dce_preferences.txt` when present
 - Supported backend values: `auto`, `cpu`, `gpufit`
 - Backend selection behavior:
-  - `auto`: tries `pygpufit` with CUDA first, then `pycpufit` CPU backend, then `pygpufit` CPU fallback, then pure CPU path
+  - `auto`: tries `pygpufit` with CUDA first, then `pycpufit` CPU backend, then pure CPU path
   - `cpu`: forces pure Python/Scipy CPU fitting path (no gpufit/cpufit acceleration)
-  - `gpufit`: requires `pygpufit` import and then uses CUDA when available, otherwise fallback path
+  - `gpufit`: requires `pygpufit` import and then uses CUDA when available, otherwise fallback to `pycpufit`
 - Current acceleration coverage in Stage D:
-  - accelerated: `tofts`, `patlak`
+  - accelerated: `tofts`, `patlak`, `extended tofts`, `2cxm`, `tissue uptake`
   - non-accelerated (currently pure CPU path): other models
 - Stage D logs backend selection on each run:
   - `[DCE] Stage-D backend selection: requested=... selected=... acceleration=... reason=...`
@@ -159,16 +171,22 @@ Key expectations:
 - Static blood-T1 override for Stage A is available via `stage_overrides.blood_t1_ms` (or `blood_t1_sec`)
 
 Part E work-in-progress:
+
 - Python post-fit statistical core is available in `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_postfit_analysis.py`.
 - Current coverage includes f-test and AIC/relative-likelihood helpers plus ROI CSV and voxel-map reconstruction utilities.
 - Reproducible output helpers are available via `run_ftest_analysis(...)` and `run_aic_analysis(...)` (JSON/CSV/NPY artifacts).
+- Part E outputs now include statistical summary fields and optional plot PNGs for troubleshooting (`p` histograms, model-count histograms, best-vs-second likelihood histograms).
+- Stage D can optionally export Part E-ready fit arrays (`*_postfit_arrays.npz`) using `stage_overrides.write_postfit_arrays=true`.
+- NPZ loader is available via `load_dce_fit_stats_from_npz(...)` with runner script `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/run_dce_postfit_analysis.py`.
 
 Preference precedence:
+
 - explicit `stage_overrides` value
 - `dce_preferences.txt` value
 - Python built-in fallback default
 
 Shared options documentation for CLI + GUI:
+
 - `/Users/samuelbarnes/code/ROCKETSHIP/docs/dce_options.md`
 
 ## What is intentionally not supported in Python port scope
@@ -233,6 +251,7 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 ```
 
 Notes:
+
 - `--parity-ve-ktrans-min` default is `1e-6`
 - VE parity is evaluated only where both MATLAB and Python Ktrans exceed that threshold
 
@@ -255,6 +274,7 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 ```
 
 Default downsample fixture used for parity:
+
 - `/Users/samuelbarnes/code/ROCKETSHIP/tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3`
 
 ### Tiny settings matrix (fast)
@@ -294,9 +314,11 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 ## CI behavior (high level)
 
 Workflow:
+
 - `/Users/samuelbarnes/code/ROCKETSHIP/.github/workflows/run_DCE.yml`
 
 CI currently runs:
+
 - Python unit tests
 - Python contract parity checks
 - Python downsample dataset parity check
@@ -328,10 +350,12 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 ```
 
 One-click test run:
+
 - Launch the GUI and click `Run DCE` without changing fields.
 - It uses `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_default.json` and the tiny fixture by default.
 
 GUI v1 behavior:
+
 - Edits common top-level config fields + all `stage_overrides` keys.
 - Runs CLI in a subprocess and streams progress from stdout events.
 - Uses hard-stop process termination.
@@ -340,6 +364,7 @@ GUI v1 behavior:
 - If `aif_mode=imported` is needed, set `imported_aif_path` in JSON config (current GUI form does not expose it yet).
 
 Parametric GUI v1 behavior:
+
 - Edits the parametric T1 config (`vfa_files`, flip angles, TR, thresholds, B1 map, script-preferences path, output controls).
 - Runs `run_parametric_python_cli.py` in a subprocess and streams event progress.
 - Shows summary metrics from `parametric_t1_run.json` and lists output artifact paths.
