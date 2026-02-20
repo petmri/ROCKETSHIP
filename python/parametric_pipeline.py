@@ -1,4 +1,4 @@
-"""Parametric T1 mapping pipeline (VFA linear fit)."""
+"""Parametric T1 mapping pipeline (VFA fitting)."""
 
 from __future__ import annotations
 
@@ -57,6 +57,7 @@ class ParametricT1Config:
     write_rho_map: bool = False
     invalid_fill_value: float = -1.0
     mask_file: Optional[Path] = None
+    b1_map_file: Optional[Path] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any], base_dir: Optional[Path] = None) -> "ParametricT1Config":
@@ -83,6 +84,7 @@ class ParametricT1Config:
             write_rho_map=bool(data.get("write_rho_map", False)),
             invalid_fill_value=float(data.get("invalid_fill_value", -1.0)),
             mask_file=_resolve_path(data["mask_file"], base_dir) if data.get("mask_file") else None,
+            b1_map_file=_resolve_path(data["b1_map_file"], base_dir) if data.get("b1_map_file") else None,
         )
 
     def validate(self) -> None:
@@ -105,6 +107,8 @@ class ParametricT1Config:
 
         if self.mask_file is not None and not self.mask_file.exists():
             raise FileNotFoundError(f"mask_file not found: {self.mask_file}")
+        if self.b1_map_file is not None and not self.b1_map_file.exists():
+            raise FileNotFoundError(f"b1_map_file not found: {self.b1_map_file}")
 
     def to_dict(self) -> Dict[str, Any]:
         payload = asdict(self)
@@ -238,6 +242,42 @@ def _resolve_flip_angles_and_tr_ms(config: ParametricT1Config, n_flips: int) -> 
     return flip_angles, tr_ms, sidecars
 
 
+def _autodetect_b1_map_path(config: ParametricT1Config) -> Optional[Path]:
+    """Return the default MATLAB-style B1 map path when present."""
+    candidate_names = ("B1_scaled_FAreg.nii", "B1_scaled_FAreg.nii.gz")
+    seen_dirs: set[Path] = set()
+    for vfa_path in config.vfa_files:
+        parent = vfa_path.parent.resolve()
+        if parent in seen_dirs:
+            continue
+        seen_dirs.add(parent)
+        for name in candidate_names:
+            candidate = parent / name
+            if candidate.exists():
+                return candidate
+    return None
+
+
+def _resolve_b1_scale_map(config: ParametricT1Config, spatial_shape: Tuple[int, ...]) -> Tuple[Optional[np.ndarray], Optional[Path]]:
+    if config.b1_map_file is not None:
+        b1_path = config.b1_map_file
+        b1_mode = "explicit"
+    else:
+        b1_path = _autodetect_b1_map_path(config)
+        b1_mode = "auto"
+
+    if b1_path is None:
+        return None, None
+
+    b1_data, _, _ = _load_nifti(b1_path)
+    b1_map = np.squeeze(np.asarray(b1_data, dtype=np.float64))
+    if b1_map.shape != spatial_shape:
+        raise ValueError(
+            f"{b1_mode} b1_map_file shape {b1_map.shape} does not match VFA spatial shape {spatial_shape}"
+        )
+    return b1_map, b1_path
+
+
 def _fit_t1_fa_linear_map(
     vfa_data: np.ndarray,
     flip_angles_deg: np.ndarray,
@@ -245,22 +285,41 @@ def _fit_t1_fa_linear_map(
     rsquared_threshold: float,
     invalid_fill_value: float,
     mask: Optional[np.ndarray],
+    b1_scale_map: Optional[np.ndarray],
 ) -> Dict[str, Any]:
     spatial_shape = vfa_data.shape[:-1]
     n_voxels = int(np.prod(spatial_shape))
     n_flips = int(vfa_data.shape[-1])
 
     flat_signal = np.reshape(vfa_data, (n_voxels, n_flips)).astype(np.float64, copy=False)
+    b1_valid = np.ones((n_voxels,), dtype=bool)
+    invalid_flip_geom = np.zeros((n_voxels,), dtype=bool)
 
-    flip_rad = np.deg2rad(flip_angles_deg)
-    sin_flip = np.sin(flip_rad)
-    tan_flip = np.tan(flip_rad)
-    if np.any(np.isclose(sin_flip, 0.0)) or np.any(np.isclose(tan_flip, 0.0)):
-        raise ValueError("flip angles cannot contain values that produce zero sine/tangent")
-
-    with np.errstate(divide="ignore", invalid="ignore"):
-        y_lin = flat_signal / sin_flip
-        x_lin = flat_signal / tan_flip
+    if b1_scale_map is None:
+        flip_rad = np.deg2rad(flip_angles_deg)
+        sin_flip = np.sin(flip_rad)
+        tan_flip = np.tan(flip_rad)
+        if np.any(np.isclose(sin_flip, 0.0)) or np.any(np.isclose(tan_flip, 0.0)):
+            raise ValueError("flip angles cannot contain values that produce zero sine/tangent")
+        with np.errstate(divide="ignore", invalid="ignore"):
+            y_lin = flat_signal / sin_flip
+            x_lin = flat_signal / tan_flip
+    else:
+        flat_b1 = np.reshape(np.asarray(b1_scale_map, dtype=np.float64), (n_voxels,))
+        b1_valid = np.isfinite(flat_b1) & (flat_b1 > 0.0)
+        flip_rad = np.deg2rad(flip_angles_deg)[None, :] * flat_b1[:, None]
+        sin_flip = np.sin(flip_rad)
+        tan_flip = np.tan(flip_rad)
+        invalid_flip_geom = np.any(
+            (~np.isfinite(sin_flip))
+            | (~np.isfinite(tan_flip))
+            | np.isclose(sin_flip, 0.0)
+            | np.isclose(tan_flip, 0.0),
+            axis=1,
+        )
+        with np.errstate(divide="ignore", invalid="ignore"):
+            y_lin = flat_signal / sin_flip
+            x_lin = flat_signal / tan_flip
 
     x_bar = np.mean(x_lin, axis=1)
     y_bar = np.mean(y_lin, axis=1)
@@ -305,7 +364,14 @@ def _fit_t1_fa_linear_map(
         mask_flat = np.ones((n_voxels,), dtype=bool)
 
     threshold_failed = r_squared < rsquared_threshold
-    bad_fit = (~mask_flat) | (~finite_signal) | (~finite_outputs) | threshold_failed
+    bad_fit = (
+        (~mask_flat)
+        | (~finite_signal)
+        | (~finite_outputs)
+        | (~b1_valid)
+        | invalid_flip_geom
+        | threshold_failed
+    )
 
     t1_fit[bad_fit] = invalid_fill_value
     intercept[bad_fit] = invalid_fill_value
@@ -328,6 +394,7 @@ def _fit_t1_fa_linear_map(
             "valid_fits": int(valid_mask.sum()),
             "threshold_failed": int((threshold_failed & mask_flat).sum()),
             "finite_signal_voxels": int((finite_signal & mask_flat).sum()),
+            "b1_valid_voxels": int((b1_valid & mask_flat).sum()),
             "t1_mean_ms": float(np.mean(t1_fit[valid_mask])) if np.any(valid_mask) else float("nan"),
             "t1_median_ms": float(np.median(t1_fit[valid_mask])) if np.any(valid_mask) else float("nan"),
             "r2_mean": float(np.mean(r_squared[mask_flat])) if np.any(mask_flat) else float("nan"),
@@ -344,6 +411,7 @@ def _fit_t1_fa_model_map(
     rsquared_threshold: float,
     invalid_fill_value: float,
     mask: Optional[np.ndarray],
+    b1_scale_map: Optional[np.ndarray],
     fit_fn: Callable[[List[float], List[float], float], List[float]],
 ) -> Dict[str, Any]:
     spatial_shape = vfa_data.shape[:-1]
@@ -363,12 +431,24 @@ def _fit_t1_fa_model_map(
     r_squared = np.zeros((n_voxels,), dtype=np.float64)
     sse = np.full((n_voxels,), np.nan, dtype=np.float64)
     threshold_failed = np.zeros((n_voxels,), dtype=bool)
+    b1_valid = np.ones((n_voxels,), dtype=bool)
+    effective_flip_angles: Optional[np.ndarray] = None
+
+    if b1_scale_map is not None:
+        flat_b1 = np.reshape(np.asarray(b1_scale_map, dtype=np.float64), (n_voxels,))
+        b1_valid = np.isfinite(flat_b1) & (flat_b1 > 0.0)
+        effective_flip_angles = flat_b1[:, None] * flip_angles_deg[None, :]
+        b1_valid &= np.all(np.isfinite(effective_flip_angles), axis=1)
 
     fa_list = [float(v) for v in flip_angles_deg]
-    for idx in np.flatnonzero(mask_flat & finite_signal):
+    for idx in np.flatnonzero(mask_flat & finite_signal & b1_valid):
         si = [float(v) for v in flat_signal[idx, :]]
+        if effective_flip_angles is not None:
+            fa_values = [float(v) for v in effective_flip_angles[idx, :]]
+        else:
+            fa_values = fa_list
         try:
-            fit = fit_fn(fa_list, si, float(tr_ms))
+            fit = fit_fn(fa_values, si, float(tr_ms))
         except Exception:
             continue
 
@@ -409,6 +489,7 @@ def _fit_t1_fa_model_map(
             "valid_fits": int(valid_mask.sum()),
             "threshold_failed": int((threshold_failed & mask_flat).sum()),
             "finite_signal_voxels": int((finite_signal & mask_flat).sum()),
+            "b1_valid_voxels": int((b1_valid & mask_flat).sum()),
             "t1_mean_ms": float(np.mean(t1_fit[valid_mask])) if np.any(valid_mask) else float("nan"),
             "t1_median_ms": float(np.median(t1_fit[valid_mask])) if np.any(valid_mask) else float("nan"),
             "r2_mean": float(np.mean(r_squared[mask_flat])) if np.any(mask_flat) else float("nan"),
@@ -428,7 +509,7 @@ def run_parametric_t1_pipeline(
     config: ParametricT1Config,
     event_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
-    """Run the parametric T1 workflow for VFA linear fitting."""
+    """Run the parametric T1 workflow for VFA fitting."""
     config.validate()
     config.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -460,6 +541,16 @@ def run_parametric_t1_pipeline(
         mask = np.squeeze(mask_data)
         if mask.shape != vfa_data.shape[:-1]:
             raise ValueError(f"mask shape {mask.shape} does not match VFA spatial shape {vfa_data.shape[:-1]}")
+    b1_scale_map, b1_map_path = _resolve_b1_scale_map(config, vfa_data.shape[:-1])
+    b1_mode = "none"
+    if b1_map_path is not None:
+        b1_mode = "explicit" if config.b1_map_file is not None else "auto"
+    _emit_event(
+        event_callback,
+        "b1_map_resolved",
+        b1_mode=b1_mode,
+        b1_map_path=str(b1_map_path) if b1_map_path else None,
+    )
 
     fit_type = config.fit_type.strip().lower()
     if fit_type == "t1_fa_linear_fit":
@@ -470,6 +561,7 @@ def run_parametric_t1_pipeline(
             rsquared_threshold=float(config.rsquared_threshold),
             invalid_fill_value=float(config.invalid_fill_value),
             mask=mask,
+            b1_scale_map=b1_scale_map,
         )
     elif fit_type == "t1_fa_fit":
         fit_result = _fit_t1_fa_model_map(
@@ -479,6 +571,7 @@ def run_parametric_t1_pipeline(
             rsquared_threshold=float(config.rsquared_threshold),
             invalid_fill_value=float(config.invalid_fill_value),
             mask=mask,
+            b1_scale_map=b1_scale_map,
             fit_fn=t1_fa_nonlinear_fit,
         )
     else:
@@ -489,6 +582,7 @@ def run_parametric_t1_pipeline(
             rsquared_threshold=float(config.rsquared_threshold),
             invalid_fill_value=float(config.invalid_fill_value),
             mask=mask,
+            b1_scale_map=b1_scale_map,
             fit_fn=t1_fa_two_point_fit,
         )
 
@@ -512,7 +606,7 @@ def run_parametric_t1_pipeline(
     finished_at = datetime.now(timezone.utc)
     summary = {
         "meta": {
-            "pipeline": "parametric_t1_vfa_linear",
+            "pipeline": "parametric_t1_vfa",
             "status": "ok",
             "started_at": started_at.isoformat(),
             "finished_at": finished_at.isoformat(),
@@ -524,6 +618,8 @@ def run_parametric_t1_pipeline(
             "flip_angles_deg": [float(v) for v in flip_angles_deg],
             "n_flips": int(n_flips),
             "sidecars": [str(path) for path in sidecars],
+            "b1_mode": b1_mode,
+            "b1_map_path": str(b1_map_path) if b1_map_path else None,
         },
         "outputs": {
             "t1_map_path": str(t1_path),

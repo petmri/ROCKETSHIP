@@ -75,3 +75,4 @@ Current handling in main suite:
 - Parametric T1 GUI v1 added (`run_parametric_python_gui.py`, `python/parametric_gui.py`) with run controls, event progress, and summary/artifact display.
 - Parametric T1 real-data naming/integrity tests added for BIDS-based multifile and stacked inputs (`tests/python/test_parametric_pipeline.py`).
 - Parametric pipeline now supports nonlinear and two-point VFA fit types in addition to linear, with tiny-fixture integration tests (`python/parametric_pipeline.py`, `tests/python/test_parametric_pipeline.py`).
+- Parametric pipeline now supports optional B1-scaled flip-angle fitting (`b1_map_file` explicit or auto-detected `B1_scaled_FAreg.nii(.gz)`) with integration coverage (`python/parametric_pipeline.py`, `tests/python/test_parametric_pipeline.py`).

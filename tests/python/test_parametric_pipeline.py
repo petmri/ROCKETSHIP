@@ -33,6 +33,13 @@ def _write_tiny_vfa_fixture(path: Path, *, shape: tuple[int, int] = (4, 4), tr_m
     return flip_angles, tr_ms
 
 
+def _write_tiny_b1_fixture(path: Path, *, shape: tuple[int, int] = (4, 4), scale: float = 1.0) -> None:
+    b1 = np.full(shape, float(scale), dtype=np.float32)
+    nii = nib.Nifti1Image(b1, np.eye(4))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    nib.save(nii, str(path))
+
+
 @pytest.mark.integration
 def test_parametric_t1_pipeline_with_multifile_vfa_sidecars(tmp_path: Path) -> None:
     payload = {
@@ -233,3 +240,64 @@ def test_parametric_t1_pipeline_supports_two_point_fit_type_tiny_fixture(tmp_pat
     assert Path(summary["outputs"]["rsquared_map_path"]).exists()
     assert summary["outputs"]["rho_map_path"] is None
     assert summary["metrics"]["valid_fits"] > 0
+
+
+@pytest.mark.integration
+def test_parametric_t1_pipeline_b1_map_file_is_applied_to_flip_angles(tmp_path: Path) -> None:
+    vfa_path = tmp_path / "tiny_b1_vfa.nii.gz"
+    b1_path = tmp_path / "tiny_b1_map.nii.gz"
+    flip_angles, tr_ms = _write_tiny_vfa_fixture(vfa_path)
+    _write_tiny_b1_fixture(b1_path, scale=0.8)
+
+    payload_without_b1 = {
+        "output_dir": str(tmp_path / "out_no_b1"),
+        "vfa_files": [str(vfa_path)],
+        "flip_angles_deg": flip_angles,
+        "tr_ms": tr_ms,
+        "fit_type": "t1_fa_linear_fit",
+        "output_basename": "T1_map",
+        "output_label": "tiny_no_b1",
+        "rsquared_threshold": 0.2,
+        "write_r_squared": True,
+        "write_rho_map": False,
+    }
+    payload_with_b1 = {
+        **payload_without_b1,
+        "output_dir": str(tmp_path / "out_with_b1"),
+        "output_label": "tiny_with_b1",
+        "b1_map_file": str(b1_path),
+    }
+
+    summary_without_b1 = run_parametric_t1_pipeline(ParametricT1Config.from_dict(payload_without_b1))
+    summary_with_b1 = run_parametric_t1_pipeline(ParametricT1Config.from_dict(payload_with_b1))
+
+    mean_without_b1 = float(summary_without_b1["metrics"]["t1_mean_ms"])
+    mean_with_b1 = float(summary_with_b1["metrics"]["t1_mean_ms"])
+    assert not np.isclose(mean_without_b1, mean_with_b1)
+    assert summary_with_b1["resolved_inputs"]["b1_mode"] == "explicit"
+    assert Path(summary_with_b1["resolved_inputs"]["b1_map_path"]) == b1_path.resolve()
+
+
+@pytest.mark.integration
+def test_parametric_t1_pipeline_auto_detects_default_b1_map_name(tmp_path: Path) -> None:
+    vfa_path = tmp_path / "tiny_auto_b1_vfa.nii.gz"
+    b1_path = tmp_path / "B1_scaled_FAreg.nii.gz"
+    flip_angles, tr_ms = _write_tiny_vfa_fixture(vfa_path)
+    _write_tiny_b1_fixture(b1_path, scale=0.9)
+
+    payload = {
+        "output_dir": str(tmp_path / "out_auto_b1"),
+        "vfa_files": [str(vfa_path)],
+        "flip_angles_deg": flip_angles,
+        "tr_ms": tr_ms,
+        "fit_type": "t1_fa_linear_fit",
+        "output_basename": "T1_map",
+        "output_label": "tiny_auto_b1",
+        "rsquared_threshold": 0.2,
+        "write_r_squared": False,
+        "write_rho_map": False,
+    }
+
+    summary = run_parametric_t1_pipeline(ParametricT1Config.from_dict(payload))
+    assert summary["resolved_inputs"]["b1_mode"] == "auto"
+    assert Path(summary["resolved_inputs"]["b1_map_path"]) == b1_path.resolve()

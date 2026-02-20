@@ -136,6 +136,7 @@ class ParametricGuiWindow(QMainWindow):
         self.rsq_threshold_edit = QLineEdit("0.6")
         self.invalid_fill_edit = QLineEdit("-1.0")
         self.mask_file_edit = QLineEdit("")
+        self.b1_map_file_edit = QLineEdit("")
         self.write_rsq_check = QCheckBox()
         self.write_rho_check = QCheckBox()
 
@@ -157,6 +158,13 @@ class ParametricGuiWindow(QMainWindow):
             self._line_edit_with_browse(
                 self.mask_file_edit,
                 lambda: self._choose_file_for(self.mask_file_edit, "Select mask_file"),
+            ),
+        )
+        form.addRow(
+            "b1_map_file",
+            self._line_edit_with_browse(
+                self.b1_map_file_edit,
+                lambda: self._choose_file_for(self.b1_map_file_edit, "Select b1_map_file"),
             ),
         )
         form.addRow("write_r_squared", self.write_rsq_check)
@@ -318,6 +326,7 @@ class ParametricGuiWindow(QMainWindow):
         self.rsq_threshold_edit.setText(str(payload.get("rsquared_threshold", 0.6)))
         self.invalid_fill_edit.setText(str(payload.get("invalid_fill_value", -1.0)))
         self.mask_file_edit.setText(str(payload.get("mask_file", "")))
+        self.b1_map_file_edit.setText(str(payload.get("b1_map_file", "")))
         self.write_rsq_check.setChecked(bool(payload.get("write_r_squared", True)))
         self.write_rho_check.setChecked(bool(payload.get("write_rho_map", False)))
         self.vfa_files_edit.setPlainText(_paths_to_text(list(payload.get("vfa_files", []))))
@@ -342,6 +351,9 @@ class ParametricGuiWindow(QMainWindow):
         mask_text = self.mask_file_edit.text().strip()
         if mask_text:
             payload["mask_file"] = mask_text
+        b1_text = self.b1_map_file_edit.text().strip()
+        if b1_text:
+            payload["b1_map_file"] = b1_text
         return payload
 
     def _prepare_run_config_path(self, payload: Dict[str, Any]) -> Path:

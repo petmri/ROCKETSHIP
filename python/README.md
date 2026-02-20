@@ -129,6 +129,11 @@ Typical outputs:
 - T1 map NIfTI: `<output_dir>/T1_map_<fit_type>_<label>.nii.gz`
 - R-squared map NIfTI: `<output_dir>/Rsquared_<fit_type>_<label>.nii.gz`
 
+Parametric input notes:
+- `fit_type` supports `t1_fa_linear_fit`, `t1_fa_fit`, and `t1_fa_two_point_fit`.
+- `b1_map_file` is optional; when provided, per-voxel effective flip angles are `flip_angles_deg * b1_scale`.
+- If `b1_map_file` is omitted, the pipeline auto-detects `B1_scaled_FAreg.nii` or `B1_scaled_FAreg.nii.gz` in the VFA directory.
+
 ## Input expectations (DCE)
 
 Config fields are parsed by:
@@ -329,6 +334,6 @@ GUI v1 behavior:
 - If `aif_mode=imported` is needed, set `imported_aif_path` in JSON config (current GUI form does not expose it yet).
 
 Parametric GUI v1 behavior:
-- Edits the parametric T1 config (`vfa_files`, flip angles, TR, thresholds, output controls).
+- Edits the parametric T1 config (`vfa_files`, flip angles, TR, thresholds, B1 map, output controls).
 - Runs `run_parametric_python_cli.py` in a subprocess and streams event progress.
 - Shows summary metrics from `parametric_t1_run.json` and lists output artifact paths.
