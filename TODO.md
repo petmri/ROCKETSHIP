@@ -74,3 +74,4 @@ Current handling in main suite:
 - Primary DCE backend consistency checks added across CPU/CPUfit/GPUfit where available (`tests/python/test_osipi_backend_consistency.py`).
 - Parametric T1 GUI v1 added (`run_parametric_python_gui.py`, `python/parametric_gui.py`) with run controls, event progress, and summary/artifact display.
 - Parametric T1 real-data naming/integrity tests added for BIDS-based multifile and stacked inputs (`tests/python/test_parametric_pipeline.py`).
+- Parametric pipeline now supports nonlinear and two-point VFA fit types in addition to linear, with tiny-fixture integration tests (`python/parametric_pipeline.py`, `tests/python/test_parametric_pipeline.py`).

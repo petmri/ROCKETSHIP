@@ -16,6 +16,23 @@ sys.path.insert(0, str(REPO_ROOT / "python"))
 from parametric_pipeline import ParametricT1Config, run_parametric_t1_pipeline  # noqa: E402
 
 
+def _write_tiny_vfa_fixture(path: Path, *, shape: tuple[int, int] = (4, 4), tr_ms: float = 8.0) -> tuple[list[float], float]:
+    flip_angles = [2.0, 10.0, 15.0]
+    true_t1 = 1300.0
+    rho = 1000.0
+    stack = []
+    for fa in flip_angles:
+        theta = np.deg2rad(float(fa))
+        e1 = np.exp(-tr_ms / true_t1)
+        signal = rho * (((1.0 - e1) * np.sin(theta)) / (1.0 - e1 * np.cos(theta)))
+        stack.append(np.full(shape, float(signal), dtype=np.float32))
+    volume = np.stack(stack, axis=-1)
+    nii = nib.Nifti1Image(volume, np.eye(4))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    nib.save(nii, str(path))
+    return flip_angles, tr_ms
+
+
 @pytest.mark.integration
 def test_parametric_t1_pipeline_with_multifile_vfa_sidecars(tmp_path: Path) -> None:
     payload = {
@@ -164,3 +181,55 @@ def test_parametric_t1_pipeline_realdata_default_output_naming_stacked(tmp_path:
     assert expected_t1.exists()
     assert expected_rsq.exists()
     assert expected_rho.exists()
+
+
+@pytest.mark.integration
+def test_parametric_t1_pipeline_supports_nonlinear_fit_type_tiny_fixture(tmp_path: Path) -> None:
+    vfa_path = tmp_path / "tiny_nonlinear_vfa.nii.gz"
+    flip_angles, tr_ms = _write_tiny_vfa_fixture(vfa_path)
+    payload = {
+        "output_dir": str(tmp_path / "out_nonlinear"),
+        "vfa_files": [str(vfa_path)],
+        "flip_angles_deg": flip_angles,
+        "tr_ms": tr_ms,
+        "fit_type": "t1_fa_fit",
+        "output_basename": "T1_map",
+        "output_label": "tiny_nonlinear",
+        "rsquared_threshold": 0.2,
+        "write_r_squared": True,
+        "write_rho_map": True,
+    }
+
+    config = ParametricT1Config.from_dict(payload)
+    summary = run_parametric_t1_pipeline(config)
+
+    assert Path(summary["outputs"]["t1_map_path"]).exists()
+    assert Path(summary["outputs"]["rsquared_map_path"]).exists()
+    assert Path(summary["outputs"]["rho_map_path"]).exists()
+    assert summary["metrics"]["valid_fits"] > 0
+
+
+@pytest.mark.integration
+def test_parametric_t1_pipeline_supports_two_point_fit_type_tiny_fixture(tmp_path: Path) -> None:
+    vfa_path = tmp_path / "tiny_two_point_vfa.nii.gz"
+    flip_angles, tr_ms = _write_tiny_vfa_fixture(vfa_path)
+    payload = {
+        "output_dir": str(tmp_path / "out_two_point"),
+        "vfa_files": [str(vfa_path)],
+        "flip_angles_deg": flip_angles,
+        "tr_ms": tr_ms,
+        "fit_type": "t1_fa_two_point_fit",
+        "output_basename": "T1_map",
+        "output_label": "tiny_two_point",
+        "rsquared_threshold": 0.2,
+        "write_r_squared": True,
+        "write_rho_map": False,
+    }
+
+    config = ParametricT1Config.from_dict(payload)
+    summary = run_parametric_t1_pipeline(config)
+
+    assert Path(summary["outputs"]["t1_map_path"]).exists()
+    assert Path(summary["outputs"]["rsquared_map_path"]).exists()
+    assert summary["outputs"]["rho_map_path"] is None
+    assert summary["metrics"]["valid_fits"] > 0

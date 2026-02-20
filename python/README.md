@@ -14,7 +14,7 @@ currently in this repository.
   - `/Users/samuelbarnes/code/ROCKETSHIP/run_parametric_python_gui.py`
 - Current implemented workflow focus:
   - DCE parts `A -> B -> D` (single-process, in-memory handoff; CLI-first with optional GUI wrapper)
-  - Parametric linear VFA T1 mapping (CLI v1)
+  - Parametric VFA T1 mapping (linear, nonlinear, and two-point fit types; CLI + GUI v1)
 - Current parity focus:
   - MATLAB-vs-Python parity for model contracts and dataset-backed Tofts maps (`Ktrans`, `ve`)
   - MATLAB-vs-Python parity tests for parametric core fitters (`t2_linear_fast`, `t1_fa_linear_fit`, `t1_fa_fit`) via unit parity tests and contract-runner checks
@@ -126,8 +126,8 @@ Default template location:
 Typical outputs:
 - Run summary JSON: `<output_dir>/parametric_t1_run.json`
 - Event log JSONL: `<output_dir>/parametric_t1_events.jsonl`
-- T1 map NIfTI: `<output_dir>/T1_map_t1_fa_linear_fit_<label>.nii.gz`
-- R-squared map NIfTI: `<output_dir>/Rsquared_t1_fa_linear_fit_<label>.nii.gz`
+- T1 map NIfTI: `<output_dir>/T1_map_<fit_type>_<label>.nii.gz`
+- R-squared map NIfTI: `<output_dir>/Rsquared_<fit_type>_<label>.nii.gz`
 
 ## Input expectations (DCE)
 
