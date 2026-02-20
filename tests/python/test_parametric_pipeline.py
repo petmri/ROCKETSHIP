@@ -57,9 +57,9 @@ def test_parametric_t1_pipeline_with_multifile_vfa_sidecars(tmp_path: Path) -> N
     payload = {
         "output_dir": str(tmp_path / "out_multifile"),
         "vfa_files": [
-            "tests/data/BIDS_test/rawdata/sub-01/ses-01/anat/sub-01_ses-01_flip-01_VFA.nii.gz",
-            "tests/data/BIDS_test/rawdata/sub-01/ses-01/anat/sub-01_ses-01_flip-02_VFA.nii.gz",
-            "tests/data/BIDS_test/rawdata/sub-01/ses-01/anat/sub-01_ses-01_flip-03_VFA.nii.gz",
+            "tests/data/BIDS_example/rawdata/sub-01/ses-01/anat/sub-01_ses-01_flip-01_VFA.nii.gz",
+            "tests/data/BIDS_example/rawdata/sub-01/ses-01/anat/sub-01_ses-01_flip-02_VFA.nii.gz",
+            "tests/data/BIDS_example/rawdata/sub-01/ses-01/anat/sub-01_ses-01_flip-03_VFA.nii.gz",
         ],
         "output_basename": "T1_map",
         "output_label": "multifile",
@@ -97,7 +97,7 @@ def test_parametric_t1_pipeline_with_single_stacked_vfa_file(tmp_path: Path) -> 
     payload = {
         "output_dir": str(tmp_path / "out_stacked"),
         "vfa_files": [
-            "tests/data/BIDS_test/derivatives/sub-01/ses-01/anat/sub-01_ses-01_space-DCEref_desc-bfczunified_VFA.nii"
+            "tests/data/BIDS_example/derivatives/sub-01/ses-01/anat/sub-01_ses-01_space-DCEref_desc-bfczunified_VFA.nii"
         ],
         "flip_angles_deg": [2.0, 5.0, 10.0],
         "tr_ms": 8.012,
@@ -138,9 +138,9 @@ def test_parametric_t1_pipeline_realdata_default_output_naming_multifile(tmp_pat
     payload = {
         "output_dir": str(tmp_path / "out_default_multifile"),
         "vfa_files": [
-            "tests/data/BIDS_test/rawdata/sub-01/ses-01/anat/sub-01_ses-01_flip-01_VFA.nii.gz",
-            "tests/data/BIDS_test/rawdata/sub-01/ses-01/anat/sub-01_ses-01_flip-02_VFA.nii.gz",
-            "tests/data/BIDS_test/rawdata/sub-01/ses-01/anat/sub-01_ses-01_flip-03_VFA.nii.gz",
+            "tests/data/BIDS_example/rawdata/sub-01/ses-01/anat/sub-01_ses-01_flip-01_VFA.nii.gz",
+            "tests/data/BIDS_example/rawdata/sub-01/ses-01/anat/sub-01_ses-01_flip-02_VFA.nii.gz",
+            "tests/data/BIDS_example/rawdata/sub-01/ses-01/anat/sub-01_ses-01_flip-03_VFA.nii.gz",
         ],
         "output_basename": "T1_map",
         "fit_type": "t1_fa_linear_fit",
@@ -165,7 +165,7 @@ def test_parametric_t1_pipeline_realdata_default_output_naming_stacked(tmp_path:
     payload = {
         "output_dir": str(tmp_path / "out_default_stacked"),
         "vfa_files": [
-            "tests/data/BIDS_test/derivatives/sub-01/ses-01/anat/sub-01_ses-01_space-DCEref_desc-bfczunified_VFA.nii"
+            "tests/data/BIDS_example/derivatives/sub-01/ses-01/anat/sub-01_ses-01_space-DCEref_desc-bfczunified_VFA.nii"
         ],
         "flip_angles_deg": [2.0, 5.0, 10.0],
         "tr_ms": 8.012,

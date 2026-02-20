@@ -2386,6 +2386,31 @@ def _acceleration_backend_attempt_order(acceleration_backend: str) -> List[str]:
     return backends
 
 
+def _accelerated_output_has_usable_primary_params(model_name: str, output: np.ndarray) -> bool:
+    """Return whether accelerated output has any finite rows for core model parameters."""
+    arr = np.asarray(output, dtype=np.float64)
+    if arr.ndim != 2:
+        return False
+    if arr.shape[0] == 0:
+        return True
+
+    param_cols = {
+        "tofts": (0, 1),
+        "ex_tofts": (0, 1, 2),
+        "patlak": (0, 1),
+        "tissue_uptake": (0, 1, 2),
+        "2cxm": (0, 1, 2, 3),
+    }
+    cols = param_cols.get(model_name, tuple(range(arr.shape[1])))
+    max_col = max(cols) if cols else -1
+    if max_col >= arr.shape[1]:
+        return False
+
+    core = arr[:, cols]
+    finite_rows = np.all(np.isfinite(core), axis=1)
+    return bool(np.any(finite_rows))
+
+
 def _fit_stage_d_model_accelerated(
     model_name: str,
     ct: np.ndarray,
@@ -2720,7 +2745,22 @@ def _fit_stage_d_model(
                     acceleration_backend=backend_candidate,
                 )
                 if accelerated is not None:
-                    return accelerated
+                    if _accelerated_output_has_usable_primary_params(model_name, accelerated):
+                        return accelerated
+                    if idx + 1 < len(candidates):
+                        print(
+                            f"[DCE] Stage-D {model_name}: acceleration backend '{backend_candidate}' produced "
+                            "non-finite core parameter output; trying fallback acceleration backend "
+                            f"'{candidates[idx + 1]}'.",
+                            flush=True,
+                        )
+                    else:
+                        print(
+                            f"[DCE] Stage-D {model_name}: acceleration backend '{backend_candidate}' produced "
+                            "non-finite core parameter output; falling back to pure CPU.",
+                            flush=True,
+                        )
+                    continue
                 if idx + 1 < len(candidates):
                     print(
                         f"[DCE] Stage-D {model_name}: acceleration backend '{backend_candidate}' returned no result; "

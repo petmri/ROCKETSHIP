@@ -12,6 +12,8 @@ currently in this repository.
 - Optional GUI entrypoints:
   - `/Users/samuelbarnes/code/ROCKETSHIP/run_dce_python_gui.py`
   - `/Users/samuelbarnes/code/ROCKETSHIP/run_parametric_python_gui.py`
+- BIDS dataset/session discovery utility:
+  - `/Users/samuelbarnes/code/ROCKETSHIP/run_bids_discovery.py`
 - Current implemented workflow focus:
   - DCE parts `A -> B -> D` (single-process, in-memory handoff; CLI-first with optional GUI wrapper)
   - Parametric VFA T1 mapping (linear, nonlinear, and two-point fit types; CLI + GUI v1)
@@ -144,6 +146,21 @@ Parametric input notes:
 - `tr_ms` is optional if VFA sidecars contain `RepetitionTime`; otherwise the pipeline falls back to `script_preferences.txt` key `tr` (or explicit `script_preferences_path`).
 - `odd_echoes=true` keeps only odd-positioned samples from the VFA stack (indices `0,2,4,...`) before fitting, matching MATLAB workflow behavior.
 - `xy_smooth_sigma` (alias `xy_smooth_size`) applies optional per-frame XY Gaussian smoothing before fitting.
+
+## Discover BIDS datasets/sessions
+
+Generate a manifest of all discoverable sessions under a BIDS root:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python run_bids_discovery.py \
+  --bids-root tests/data/BIDS_test \
+  --output-json out/bids_manifest.json \
+  --print-json
+```
+
+This utility reads `rawdata/` and `derivatives/` and emits subject/session pairs that
+exist in both trees, so other tools can run over the same discovered set.
 
 ## Input expectations (DCE)
 

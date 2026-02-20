@@ -2,7 +2,7 @@ function manifest = generate_synthetic_datasets(varargin)
 % generate_synthetic_datasets Build deterministic synthetic fixtures.
 %
 % This function creates BIDS-like synthetic datasets by modifying the
-% existing test fixture at tests/data/BIDS_test:
+% existing test fixture at tests/data/BIDS_example:
 % 1) noisy_low      - low Gaussian noise on DCE + VFA images
 % 2) noisy_high     - higher Gaussian noise on DCE + VFA images
 % 3) downsample_x2  - 2x spatial downsample of DCE/anat derivatives + VFA
@@ -15,7 +15,7 @@ function manifest = generate_synthetic_datasets(varargin)
 repoRoot = add_rocketship_paths();
 
 p = inputParser;
-addParameter(p, 'sourceRoot', fullfile(repoRoot, 'tests/data', 'BIDS_test'), @ischar);
+addParameter(p, 'sourceRoot', fullfile(repoRoot, 'tests/data', 'BIDS_example'), @ischar);
 addParameter(p, 'outputRoot', fullfile(repoRoot, 'tests/data', 'synthetic', 'generated'), @ischar);
 addParameter(p, 'seed', 1729, @isscalar);
 addParameter(p, 'clean', true, @islogical);

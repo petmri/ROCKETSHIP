@@ -28,10 +28,10 @@ classdef TestReferenceDataFixtures < matlab.unittest.TestCase
 
         function testBidsFixtureFilesExist(testCase)
             requiredFiles = {
-                fullfile(testCase.RepoRoot, 'tests/data', 'BIDS_test', 'rawdata', 'sub-01', 'ses-01', 'dce', 'sub-01_ses-01_DCE.json')
-                fullfile(testCase.RepoRoot, 'tests/data', 'BIDS_test', 'rawdata', 'sub-01', 'ses-01', 'anat', 'sub-01_ses-01_flip-01_VFA.nii.gz')
-                fullfile(testCase.RepoRoot, 'tests/data', 'BIDS_test', 'rawdata', 'sub-01', 'ses-01', 'anat', 'sub-01_ses-01_flip-02_VFA.nii.gz')
-                fullfile(testCase.RepoRoot, 'tests/data', 'BIDS_test', 'rawdata', 'sub-01', 'ses-01', 'anat', 'sub-01_ses-01_flip-03_VFA.nii.gz')
+                fullfile(testCase.RepoRoot, 'tests/data', 'BIDS_example', 'rawdata', 'sub-01', 'ses-01', 'dce', 'sub-01_ses-01_DCE.json')
+                fullfile(testCase.RepoRoot, 'tests/data', 'BIDS_example', 'rawdata', 'sub-01', 'ses-01', 'anat', 'sub-01_ses-01_flip-01_VFA.nii.gz')
+                fullfile(testCase.RepoRoot, 'tests/data', 'BIDS_example', 'rawdata', 'sub-01', 'ses-01', 'anat', 'sub-01_ses-01_flip-02_VFA.nii.gz')
+                fullfile(testCase.RepoRoot, 'tests/data', 'BIDS_example', 'rawdata', 'sub-01', 'ses-01', 'anat', 'sub-01_ses-01_flip-03_VFA.nii.gz')
             };
 
             for i = 1:numel(requiredFiles)

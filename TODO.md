@@ -20,6 +20,9 @@ Finish the Python transition to the point that it can be merged to `dev` and tes
 - [x] Tighten parity/reliability thresholds and make primary model checks strict merge gates.
 - [x] Ensure backend consistency across `cpu`, `cpufit`, and `gpufit` where available.
 - [x] Add regression tests for known edge cases (bounds, low SNR, non-uniform timer inputs).
+- [x] Add qualification gating for non-finite primary-model parameter maps (see `python/qualification.py` and `tests/python/test_python_qualification.py`).
+- [x] Resolve qualification blocker from `ex_tofts` non-finite accelerated maps by falling back to next backend/CPU when accelerated output has no usable finite primary parameters (`python/dce_pipeline.py`, `tests/python/test_dce_pipeline.py`).
+- [ ] Upstream follow-up: investigate/fix `pycpufit` `TOFTS_EXTENDED` all-fit state=2 behavior on short-timer BIDS-test data (captured in CPUfit handoff items).
 
 3. Part E post-fitting analysis
 - [x] Port required workflow from `dce/fitting_analysis.m`, `dce/compare_fits.m`, and supporting analysis helpers.
@@ -27,13 +30,26 @@ Finish the Python transition to the point that it can be merged to `dev` and tes
 - [x] Add automated tests for analysis outputs and plotting/stat summary generation.
 
 4. Real-data workflow qualification
-- [ ] Run end-to-end Python DCE + T1 workflows on representative real datasets.
-- [ ] Record blocker issues and classify them as fix-now vs post-merge follow-up.
-- [ ] Prepare merge packet: command recipes, known differences, troubleshooting notes.
+- [x] Run end-to-end Python DCE + T1 workflows on representative real datasets.
+- [x] Record blocker issues and classify them as fix-now vs post-merge follow-up.
+- [x] Prepare merge packet: command recipes, known differences, troubleshooting notes.
+- Qualification artifacts (2026-02-20):
+  - `/Users/samuelbarnes/code/ROCKETSHIP/out/python_qualification_bids_test_auto/discovery_manifest.json`
+  - `/Users/samuelbarnes/code/ROCKETSHIP/out/python_qualification_bids_test_auto/qualification_summary.json`
+  - `/Users/samuelbarnes/code/ROCKETSHIP/out/python_qualification_bids_test_auto_gated/qualification_summary.json`
+  - `/Users/samuelbarnes/code/ROCKETSHIP/out/python_qualification_bids_test_auto_gated_fallback/qualification_summary.json`
+  - `/Users/samuelbarnes/code/ROCKETSHIP/python/QUALIFICATION_MERGE_PACKET.md`
 
 5. Update license to GPL-3 before `dev` merge
+- [x] Add license file
 
 ## Secondary (Important, Not Blocking First Dev Merge)
+1. Include robust example datasets, synthetic only
+- [ ] Get real NII BIDs data and replace matrix with all 0/1
+- [ ] Insert synthetic DCE curves into real nii files, maintaining original headers just replace all SI
+- [ ] Save ground truth Ktrans, vp, etc. files for synthetic datasets
+- [ ] In BIDS struture generate 3 subjects (low, medium, high SNR) with 2 meassurements (identical parameters with unique noise)
+2. Other
 - [ ] Improve `2cxm` and `tissue_uptake` stability/accuracy across all fit backends.
 - [ ] Expand DSC support beyond current core (`DSC_convolution_oSVD` and workflow-level parity).
 - [ ] Decide final status of `nested` and `FXL_rr` (full support vs explicit non-support and cleanup).
@@ -51,15 +67,34 @@ Current observed issues from `.venv/bin/python -m pytest tests/python -q` on 202
   - `vp` absolute error too large (`actual=0.070445478`, `expected=0.02`, tolerance `0.01857123`).
 - `test_osipi_pycpufit_tissue_uptake_fast`:
   - non-finite output (`vp=nan`) in fast backend path.
+- Qualification diagnostic (2026-02-20):
+  - `TOFTS_EXTENDED` on `pycpufit` returns fit state `2` for all voxels (zero iterations) on `tests/data/BIDS_test` Stage-B curves (`timer` span `0.0..0.0084126` minutes), producing fully non-finite accelerated maps unless CPU fallback is applied.
+- Repro package (ready for external handoff):
+  - `/Users/samuelbarnes/code/ROCKETSHIP/tests/contracts/handoffs/cpufit_tofts_extended/`
+  - Runner:
+    - `.venv/bin/python tests/contracts/handoffs/cpufit_tofts_extended/run_cpufit_tofts_extended_repro.py --json`
+  - Included payloads:
+    - `bids_short_timer_repro.npz` (failing short-timer Stage-B voxel)
+    - `osipi_control_repro.npz` (passing OSIPI control)
+  - Current observed output at `time_scale=1`:
+    - BIDS payload: `cpufit state=2, iterations=0` while CPU reference parameters are finite.
+    - OSIPI payload: `cpufit state=0` with close agreement to CPU reference.
 
 Requested handoff topics:
 - [ ] Improve constrained fit robustness for multi-parameter DCE models (`2cxm`, `tissue_uptake`).
 - [ ] Ensure deterministic handling/reporting of failed fits (no silent NaN propagation).
 - [ ] Verify bound handling and initialization behavior consistency across GPUfit/CPUfit implementations.
 - [ ] Provide backend diagnostics that can be surfaced directly in Python test failure messages.
+- [ ] Investigate `TOFTS_EXTENDED` short-timer conditioning/state behavior in `pycpufit` (all fits state `2` at iteration `0` on BIDS short-timer payload despite finite CPU reference).
 
 Current handling in main suite:
 - `2cxm` and `tissue_uptake` fast-backend OSIPI tests are marked `xfail` (secondary-goal, non-blocking) while remaining visible.
+
+## Synthetic_DCE Handoff Items (external project)
+- Import segmentation image with tissue classes
+- Output DCE images where each segmentation class maps to a unique tissue generation class (just provide tissue parameters in code)
+- Option to add motion, use inverse motion correction matrixes
+- Output ground truth maps (Ktrans, etc)
 
 ## Recently Completed (Condensed)
 - Contract parity tooling moved to `tests/contracts/`.

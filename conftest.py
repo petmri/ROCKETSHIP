@@ -86,6 +86,18 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Enable long-running OSIPI reliability fits. Alias: --osipi-slow",
     )
+    group.addoption(
+        "--run-qualification",
+        action="store_true",
+        default=False,
+        help="Enable dataset-level BIDS qualification tests.",
+    )
+    group.addoption(
+        "--qualification-root",
+        action="store",
+        default="",
+        help="Override BIDS root used by qualification tests.",
+    )
 
 
 @pytest.fixture(scope="session")
@@ -119,6 +131,17 @@ def run_multi_model_backend_parity(request: pytest.FixtureRequest) -> bool:
 @pytest.fixture(scope="session")
 def run_osipi_slow(request: pytest.FixtureRequest) -> bool:
     return bool(request.config.getoption("--run-osipi-slow"))
+
+
+@pytest.fixture(scope="session")
+def run_qualification(request: pytest.FixtureRequest) -> bool:
+    return bool(request.config.getoption("--run-qualification"))
+
+
+@pytest.fixture(scope="session")
+def qualification_root(request: pytest.FixtureRequest) -> str:
+    option_value = str(request.config.getoption("--qualification-root") or "").strip()
+    return option_value
 
 
 @pytest.fixture(scope="session")

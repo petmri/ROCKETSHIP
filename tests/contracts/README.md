@@ -20,6 +20,7 @@ The output in `baselines/` is the source of truth for Python parity checks until
 ## Contract parity scripts
 - `generate_python_results.py`: produces Python outputs in contract-result JSON format.
 - `compare_with_matlab_baseline.py`: compares Python results against MATLAB baseline values.
+- `handoffs/`: focused external reproducibility packages for upstream backend issues.
 
 Example:
 

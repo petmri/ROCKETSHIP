@@ -42,7 +42,7 @@ This writes:
 These files are intended for direct numerical comparison when the Python implementation is introduced.
 
 ## Generating synthetic datasets
-Create deterministic synthetic BIDS-like fixtures derived from `tests/data/BIDS_test`:
+Create deterministic synthetic BIDS-like fixtures derived from `tests/data/BIDS_example`:
 
 ```matlab
 manifest = generate_synthetic_datasets();
@@ -216,6 +216,28 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 .venv/bin/python -m pytest \
   tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_model_maps_and_roi_xls_cpu \
   --parity
+```
+
+## BIDS discovery and qualification
+Create a discoverable-session manifest from any BIDS root:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python run_bids_discovery.py \
+  --bids-root tests/data/BIDS_test \
+  --output-json out/bids_manifest.json \
+  --print-json
+```
+
+Run end-to-end Python qualification across all discovered sessions:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python run_python_qualification.py \
+  --bids-root tests/data/BIDS_test \
+  --output-root out/python_qualification_bids_test \
+  --backend cpu \
+  --print-summary-json
 ```
 
 ## Parity and benchmark helpers

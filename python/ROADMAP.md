@@ -77,6 +77,26 @@ Scope:
 - Validate end-to-end DCE + T1 Python workflows on representative real datasets.
 - Document known differences from MATLAB where scientifically acceptable.
 
+Current status:
+- Discovery utility is available at `/Users/samuelbarnes/code/ROCKETSHIP/run_bids_discovery.py`.
+- Qualification runner is available at `/Users/samuelbarnes/code/ROCKETSHIP/run_python_qualification.py`.
+- A discovery-driven qualification run was completed on 2026-02-20 for
+  `tests/data/BIDS_test`:
+  - `sessions_discovered=4`
+  - `sessions_passed=4`
+  - `sessions_failed=0`
+  - artifacts written under
+    `/Users/samuelbarnes/code/ROCKETSHIP/out/python_qualification_bids_test_auto/`
+- Merge packet and runbook notes are documented in:
+  - `/Users/samuelbarnes/code/ROCKETSHIP/python/QUALIFICATION_MERGE_PACKET.md`
+- Primary-model map-finiteness gating is now implemented in qualification.
+- Stage-D now guards against all-nonfinite accelerated outputs and falls back to
+  next backend/CPU for affected models.
+- Guarded-fallback qualification run now passes on current BIDS-test packet
+  (`out/python_qualification_bids_test_auto_gated_fallback`).
+- Remaining follow-up is upstream CPUfit behavior for `TOFTS_EXTENDED` on
+  short-timer synthetic BIDS curves (captured in TODO handoff items).
+
 Required outputs:
 - qualification report for `dev` merge decision.
 - issue list split into blocker vs follow-up.
@@ -112,5 +132,5 @@ Required outputs:
 2. Complete remaining T1 workflow gaps (GUI + residual MATLAB behavior).
 3. Complete OSIPI T1 + SI-to-concentration verification expansion.
 4. Complete Part E analysis workflow.
-5. Run real-data qualification and resolve blockers.
+5. Run real-data qualification and resolve blockers (initial BIDS-test packet completed; repeat on external real cohorts).
 6. Merge to `dev` for broader user testing.

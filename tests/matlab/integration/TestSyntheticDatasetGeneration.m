@@ -25,7 +25,7 @@ classdef TestSyntheticDatasetGeneration < matlab.unittest.TestCase
         end
 
         function testNoisyVariantPreservesDimensionsAndChangesValues(testCase)
-            sourceDce = fullfile(testCase.RepoRoot, 'tests/data', 'BIDS_test', 'derivatives', ...
+            sourceDce = fullfile(testCase.RepoRoot, 'tests/data', 'BIDS_example', 'derivatives', ...
                 'sub-01', 'ses-01', 'dce', 'sub-01_ses-01_desc-bfcz_DCE.nii.gz');
             sourceNii = load_untouch_nii(sourceDce);
 
@@ -42,7 +42,7 @@ classdef TestSyntheticDatasetGeneration < matlab.unittest.TestCase
         end
 
         function testDownsampleVariantReducesSpatialDimensions(testCase)
-            sourceDce = fullfile(testCase.RepoRoot, 'tests/data', 'BIDS_test', 'derivatives', ...
+            sourceDce = fullfile(testCase.RepoRoot, 'tests/data', 'BIDS_example', 'derivatives', ...
                 'sub-01', 'ses-01', 'dce', 'sub-01_ses-01_desc-bfcz_DCE.nii.gz');
             sourceNii = load_untouch_nii(sourceDce);
             sourceSize = size(sourceNii.img);
@@ -62,7 +62,7 @@ classdef TestSyntheticDatasetGeneration < matlab.unittest.TestCase
         end
 
         function testBolusDelayVariantAltersDynamics(testCase)
-            sourceDce = fullfile(testCase.RepoRoot, 'tests/data', 'BIDS_test', 'derivatives', ...
+            sourceDce = fullfile(testCase.RepoRoot, 'tests/data', 'BIDS_example', 'derivatives', ...
                 'sub-01', 'ses-01', 'dce', 'sub-01_ses-01_desc-bfcz_DCE.nii.gz');
             sourceNii = load_untouch_nii(sourceDce);
             sourceImg = double(sourceNii.img);

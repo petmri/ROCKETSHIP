@@ -18,6 +18,7 @@ sys.path.insert(0, str(REPO_ROOT / "python"))
 from dce_pipeline import (  # noqa: E402
     DcePipelineConfig,
     MODEL_LAYOUTS,
+    _accelerated_output_has_usable_primary_params,
     _fit_stage_d_model,
     _fit_stage_d_model_accelerated,
     run_dce_pipeline,
@@ -445,6 +446,110 @@ class TestDcePipeline:
         assert calls == ["cpufit_cpu", "gpufit_cpu_fallback"]
         assert out.shape == (ct.shape[1], 10)
         assert np.allclose(out, 9.0)
+
+    def test_stage_d_nonfinite_accelerated_output_falls_back_to_cpu(self) -> None:
+        ct = np.asarray(
+            [
+                [1.0, 2.0],
+                [1.1, 2.1],
+                [1.2, 2.2],
+                [1.3, 2.3],
+            ],
+            dtype=np.float64,
+        )
+        cp = np.asarray([0.8, 0.9, 1.0, 1.1], dtype=np.float64)
+        timer = np.asarray([0.0, 0.1, 0.2, 0.3], dtype=np.float64)
+
+        row_len = len(MODEL_LAYOUTS["ex_tofts"]["param_names"])
+        accel_nan = np.full((ct.shape[1], row_len), np.nan, dtype=np.float64)
+        cpu_row = np.asarray([0.2, 0.3, 0.1, 0.05, 0.2, 0.2, 0.3, 0.3, 0.1, 0.1], dtype=np.float64)
+        cpu_calls: list[int] = []
+
+        def fake_cpu_fit(*args, **kwargs):
+            del args, kwargs
+            cpu_calls.append(1)
+            return cpu_row
+
+        with patch("dce_pipeline._gpufit_import_available", return_value=False):
+            with patch("dce_pipeline._fit_stage_d_model_accelerated", return_value=accel_nan):
+                with patch("dce_pipeline._fit_model_curve", side_effect=fake_cpu_fit):
+                    out = _fit_stage_d_model(
+                        model_name="ex_tofts",
+                        ct=ct,
+                        cp_use=cp,
+                        timer=timer,
+                        prefs={},
+                        r1o=None,
+                        relaxivity=3.6,
+                        fw=0.8,
+                        stlv_use=None,
+                        sttum=None,
+                        start_injection_min=0.0,
+                        sss=None,
+                        ssstum=None,
+                        acceleration_backend="cpufit_cpu",
+                    )
+
+        assert len(cpu_calls) == ct.shape[1]
+        assert out.shape == (ct.shape[1], row_len)
+        assert np.all(np.isfinite(out[:, :3]))
+        assert np.allclose(out[0, :], cpu_row)
+
+    def test_stage_d_nonfinite_accelerated_output_tries_fallback_acceleration(self) -> None:
+        ct = np.asarray(
+            [
+                [1.0, 2.0],
+                [1.1, 2.1],
+                [1.2, 2.2],
+                [1.3, 2.3],
+            ],
+            dtype=np.float64,
+        )
+        cp = np.asarray([0.8, 0.9, 1.0, 1.1], dtype=np.float64)
+        timer = np.asarray([0.0, 0.1, 0.2, 0.3], dtype=np.float64)
+
+        row_len = len(MODEL_LAYOUTS["ex_tofts"]["param_names"])
+        accel_nan = np.full((ct.shape[1], row_len), np.nan, dtype=np.float64)
+        accel_ok = np.full((ct.shape[1], row_len), 7.0, dtype=np.float64)
+        calls: list[str] = []
+
+        def fake_accel(**kwargs):
+            backend = str(kwargs["acceleration_backend"])
+            calls.append(backend)
+            if backend == "cpufit_cpu":
+                return accel_nan
+            if backend == "gpufit_cpu_fallback":
+                return accel_ok
+            return None
+
+        with patch("dce_pipeline._gpufit_import_available", return_value=True):
+            with patch("dce_pipeline._fit_stage_d_model_accelerated", side_effect=fake_accel):
+                out = _fit_stage_d_model(
+                    model_name="ex_tofts",
+                    ct=ct,
+                    cp_use=cp,
+                    timer=timer,
+                    prefs={},
+                    r1o=None,
+                    relaxivity=3.6,
+                    fw=0.8,
+                    stlv_use=None,
+                    sttum=None,
+                    start_injection_min=0.0,
+                    sss=None,
+                    ssstum=None,
+                    acceleration_backend="cpufit_cpu",
+                )
+
+        assert calls == ["cpufit_cpu", "gpufit_cpu_fallback"]
+        assert out.shape == (ct.shape[1], row_len)
+        assert np.allclose(out, 7.0)
+
+    def test_accelerated_output_usable_primary_params_helper(self) -> None:
+        good = np.asarray([[0.2, 0.3, 0.1], [np.nan, np.nan, np.nan]], dtype=np.float64)
+        bad = np.asarray([[np.nan, np.nan, np.nan], [np.nan, np.nan, np.nan]], dtype=np.float64)
+        assert _accelerated_output_has_usable_primary_params("ex_tofts", good)
+        assert not _accelerated_output_has_usable_primary_params("ex_tofts", bad)
 
     @pytest.mark.parametrize(
         "model_name,model_id,expected_init,expected_bounds,expected_row0",

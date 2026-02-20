@@ -1,9 +1,9 @@
 {
   "output_dir": "../out/parametric_t1_tiny",
   "vfa_files": [
-    "../tests/data/BIDS_test/rawdata/sub-01/ses-01/anat/sub-01_ses-01_flip-01_VFA.nii.gz",
-    "../tests/data/BIDS_test/rawdata/sub-01/ses-01/anat/sub-01_ses-01_flip-02_VFA.nii.gz",
-    "../tests/data/BIDS_test/rawdata/sub-01/ses-01/anat/sub-01_ses-01_flip-03_VFA.nii.gz"
+    "../tests/data/BIDS_example/rawdata/sub-01/ses-01/anat/sub-01_ses-01_flip-01_VFA.nii.gz",
+    "../tests/data/BIDS_example/rawdata/sub-01/ses-01/anat/sub-01_ses-01_flip-02_VFA.nii.gz",
+    "../tests/data/BIDS_example/rawdata/sub-01/ses-01/anat/sub-01_ses-01_flip-03_VFA.nii.gz"
   ],
   "fit_type": "t1_fa_linear_fit",
   "output_basename": "T1_map",

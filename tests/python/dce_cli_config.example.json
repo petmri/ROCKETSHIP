@@ -1,22 +1,22 @@
 {
-  "subject_source_path": "/ABS/PATH/TO/BIDS_test/rawdata/sub-01/ses-01",
-  "subject_tp_path": "/ABS/PATH/TO/BIDS_test/derivatives/sub-01/ses-01",
+  "subject_source_path": "/ABS/PATH/TO/BIDS_example/rawdata/sub-01/ses-01",
+  "subject_tp_path": "/ABS/PATH/TO/BIDS_example/derivatives/sub-01/ses-01",
   "output_dir": "./out/dce_cli",
   "checkpoint_dir": "./out/dce_cli/checkpoints",
   "backend": "auto",
   "write_xls": true,
   "aif_mode": "auto",
   "dynamic_files": [
-    "/ABS/PATH/TO/BIDS_test/derivatives/sub-01/ses-01/dce/sub-01_ses-01_desc-bfcz_DCE.nii.gz"
+    "/ABS/PATH/TO/BIDS_example/derivatives/sub-01/ses-01/dce/sub-01_ses-01_desc-bfcz_DCE.nii.gz"
   ],
   "aif_files": [
-    "/ABS/PATH/TO/BIDS_test/derivatives/sub-01/ses-01/anat/sub-01_ses-01_space-DCEref_desc-brain_mask.nii.gz"
+    "/ABS/PATH/TO/BIDS_example/derivatives/sub-01/ses-01/anat/sub-01_ses-01_space-DCEref_desc-brain_mask.nii.gz"
   ],
   "roi_files": [
-    "/ABS/PATH/TO/BIDS_test/derivatives/sub-01/ses-01/anat/sub-01_ses-01_space-DCEref_desc-brain_mask.nii.gz"
+    "/ABS/PATH/TO/BIDS_example/derivatives/sub-01/ses-01/anat/sub-01_ses-01_space-DCEref_desc-brain_mask.nii.gz"
   ],
   "t1map_files": [
-    "/ABS/PATH/TO/BIDS_test/rawdata/sub-01/ses-01/anat/sub-01_ses-01_flip-01_VFA.nii.gz"
+    "/ABS/PATH/TO/BIDS_example/rawdata/sub-01/ses-01/anat/sub-01_ses-01_flip-01_VFA.nii.gz"
   ],
   "noise_files": [],
   "drift_files": [],

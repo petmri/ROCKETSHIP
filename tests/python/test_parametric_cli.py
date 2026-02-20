@@ -27,7 +27,7 @@ def test_main_applies_overrides_and_set_values() -> None:
             json.dumps(
                 {
                     "output_dir": "out/default",
-                    "vfa_files": ["tests/data/BIDS_test/rawdata/sub-01/ses-01/anat/sub-01_ses-01_flip-01_VFA.nii.gz"],
+                    "vfa_files": ["tests/data/BIDS_example/rawdata/sub-01/ses-01/anat/sub-01_ses-01_flip-01_VFA.nii.gz"],
                 }
             ),
             encoding="utf-8",
