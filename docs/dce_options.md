@@ -129,5 +129,5 @@ Notes:
   - `/Users/samuelbarnes/code/ROCKETSHIP/docs/script_preferences_option_audit.md`
   - `/Users/samuelbarnes/code/ROCKETSHIP/tests/data/scripts/script_preferences_option_audit.json`
 - Not all MATLAB-era options are fully consumed by current Python runtime yet; see active backlog:
-  - `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/PORTING_STATUS.md`
-  - `/Users/samuelbarnes/code/ROCKETSHIP/TODO.txt`
+  - `/Users/samuelbarnes/code/ROCKETSHIP/python/PORTING_STATUS.md`
+  - `/Users/samuelbarnes/code/ROCKETSHIP/TODO.md`

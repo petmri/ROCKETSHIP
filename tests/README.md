@@ -96,3 +96,116 @@ python3 tests/contracts/compare_with_matlab_baseline.py \
 ```
 
 Current Python ports are under `/Users/samuelbarnes/code/ROCKETSHIP/python/`.
+
+## Running Python tests
+Run the default Python test suite:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python -m pytest tests/python -q
+```
+
+Coverage run:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python -m pytest tests/python -q \
+  --cov=python \
+  --cov-report=term-missing \
+  --cov-report=xml \
+  --cov-fail-under=60
+```
+
+Targeted reliability checks:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python -m pytest \
+  tests/python/test_install_python_acceleration.py \
+  tests/python/test_dce_pipeline_contracts.py -v
+```
+
+## OSIPI-labeled tests
+Run OSIPI tests:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python -m pytest tests/python -m osipi -v
+```
+
+Run fast OSIPI backend checks only:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python -m pytest \
+  tests/python/test_osipi_pycpufit.py \
+  tests/python/test_osipi_pygpufit.py \
+  -m fast -v
+```
+
+Enable long OSIPI fits:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python -m pytest tests/python -m osipi -v --osipi-slow
+```
+
+## Dataset-backed DCE parity tests
+Run downsample Tofts parity:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python -m pytest \
+  tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_tofts_ktrans \
+  --parity
+```
+
+Run full-volume Tofts parity (slow):
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python -m pytest \
+  tests/python/test_dce_pipeline_parity_metrics.py::test_full_bbb_p19_tofts_ktrans \
+  --parity --full-parity
+```
+
+Run multi-model backend parity:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python -m pytest \
+  tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_models_cpu_and_auto \
+  --parity --mm-parity
+```
+
+Run CPU model-map + ROI table parity:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python -m pytest \
+  tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_model_maps_and_roi_xls_cpu \
+  --parity
+```
+
+## Parity and benchmark helpers
+Parity helper (prints summary metrics after pytest):
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python tests/python/run_dce_parity.py --suite multi-model
+```
+
+Examples:
+
+```bash
+.venv/bin/python tests/python/run_dce_parity.py -s tofts-downsample
+.venv/bin/python tests/python/run_dce_parity.py -s tofts-full -f "/path/to/ROCKETSHIP/tests/data/BBB data p19"
+.venv/bin/python tests/python/run_dce_parity.py -s model-map-roi-cpu -d "/path/to/ROCKETSHIP/tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3"
+```
+
+Benchmark helper:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python tests/python/run_dce_benchmark.py
+```

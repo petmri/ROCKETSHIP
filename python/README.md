@@ -15,7 +15,9 @@ currently in this repository.
   - MATLAB-vs-Python parity for model contracts and dataset-backed Tofts maps (`Ktrans`, `ve`)
 
 For detailed port status and todo items, see:
-- `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/PORTING_STATUS.md`
+- `/Users/samuelbarnes/code/ROCKETSHIP/python/ROADMAP.md`
+- `/Users/samuelbarnes/code/ROCKETSHIP/python/PORTING_STATUS.md`
+- `/Users/samuelbarnes/code/ROCKETSHIP/TODO.md`
 
 ## Environment setup
 
