@@ -59,6 +59,10 @@ For options in `stage_overrides`:
 - MATLAB script aliases: `tr` (ms), `fa` (deg)
 - `time_resolution_sec`, `time_resolution_min`
 - MATLAB script alias: `time_resolution` (sec)
+- Strict resolution behavior (real Stage A):
+  - Preferred: resolve from DCE metadata JSON sidecar (or explicit `dce_metadata_path` JSON).
+  - If no metadata JSON is available, you must set all three manually: TR (`tr_ms`/`tr_sec`), FA (`fa_deg`/`fa`), and time resolution (`time_resolution_sec`/`time_resolution`).
+  - Partial manual override with metadata JSON present is rejected (set all three or none).
 - `time_vector_path`, `timevectpath`, `timer_path`
 - MATLAB script toggle: `timevectyn` controls whether legacy `timevectpath` is used
 - `steady_state_start`, `steady_state_end`
@@ -116,6 +120,7 @@ For options in `stage_overrides`:
 
 Notes:
 - Stage-D acceleration currently applies to `tofts`, `ex_tofts`, `patlak`, `tissue_uptake`, and `2cxm`.
+- `gpu_tolerance` is a shared accelerated solver tolerance (CPUfit/GPUfit path) for all accelerated Stage-D models; current default is `1e-6` (the previous `1e-12` was too strict for some `ex_tofts` qualification workloads).
 - Stage summary for part D includes:
   - `selected_backend`
   - `acceleration_backend`

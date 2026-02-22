@@ -595,7 +595,18 @@ class DcePipelineConfig:
         if not self.dynamic_files:
             raise ValueError("dynamic_files is required (non-empty)")
         if not self.aif_files:
-            raise ValueError("aif_files is required (non-empty)")
+            raise ValueError(
+                "aif_files is required (non-empty). Automatic AIF discovery is not available in the Python DCE pipeline yet; "
+                "provide a dedicated AIF ROI mask."
+            )
+        if self.roi_files:
+            roi_set = {Path(p).expanduser().resolve() for p in self.roi_files}
+            overlap = [p for p in self.aif_files if Path(p).expanduser().resolve() in roi_set]
+            if overlap:
+                raise ValueError(
+                    "AIF mask must be a dedicated vascular ROI and cannot reuse ROI mask file(s): "
+                    + ", ".join(str(Path(p).expanduser().resolve()) for p in overlap)
+                )
         if not self.t1map_files:
             raise ValueError("t1map_files is required (non-empty)")
 
@@ -645,6 +656,27 @@ def _stage_override(config: DcePipelineConfig, key: str, default: Any) -> Any:
     return default
 
 
+def _override_value_is_set(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str) and value.strip() == "":
+        return False
+    return True
+
+
+def _explicit_stage_override(config: DcePipelineConfig, keys: Tuple[str, ...]) -> Tuple[Optional[Any], Optional[str]]:
+    for key in keys:
+        if key in config.stage_overrides:
+            value = config.stage_overrides[key]
+            if _override_value_is_set(value):
+                return value, str(key)
+        key_lc = key.lower()
+        for override_key, override_val in config.stage_overrides.items():
+            if str(override_key).lower() == key_lc and _override_value_is_set(override_val):
+                return override_val, str(override_key)
+    return None, None
+
+
 def _load_json(path: Path) -> Dict[str, Any]:
     if not path.exists():
         raise FileNotFoundError(path)
@@ -662,10 +694,10 @@ def _load_nifti_data(path: Path) -> np.ndarray:
 
 
 def _resolve_dynamic_metadata(config: DcePipelineConfig, n_timepoints: int) -> Dict[str, Any]:
-    metadata_path = _stage_override(config, "dce_metadata_path", None)
+    metadata_path, _ = _explicit_stage_override(config, ("dce_metadata_path",))
     candidates: List[Path] = []
-    if metadata_path:
-        candidates.append(Path(metadata_path).expanduser().resolve())
+    if metadata_path is not None:
+        candidates.append(Path(str(metadata_path)).expanduser().resolve())
 
     for dynamic in config.dynamic_files:
         dynamic_text = str(dynamic)
@@ -677,43 +709,111 @@ def _resolve_dynamic_metadata(config: DcePipelineConfig, n_timepoints: int) -> D
     candidates.extend(sorted((config.subject_source_path / "dce").glob("*DCE.json")))
 
     payload: Dict[str, Any] = {}
+    metadata_source_path: Optional[str] = None
     for candidate in candidates:
         if candidate.exists():
             payload = _load_json(candidate)
+            metadata_source_path = str(candidate)
             break
 
-    tr_sec = _stage_override(config, "tr_sec", None)
-    tr_ms = _stage_override(config, "tr_ms", _stage_override(config, "tr", None))
-    time_resolution_sec = _stage_override(config, "time_resolution_sec", _stage_override(config, "time_resolution", None))
-    fa_deg = _stage_override(config, "fa_deg", _stage_override(config, "fa", None))
+    tr_sec_raw, tr_sec_key = _explicit_stage_override(config, ("tr_sec",))
+    tr_ms_raw, tr_ms_key = _explicit_stage_override(config, ("tr_ms", "tr"))
+    time_resolution_raw, time_resolution_key = _explicit_stage_override(
+        config, ("time_resolution_sec", "time_resolution")
+    )
+    fa_raw, fa_key = _explicit_stage_override(config, ("fa_deg", "fa"))
 
-    if tr_ms is None and tr_sec is not None:
-        tr_ms = float(tr_sec) * 1000.0
+    if tr_sec_raw is not None and tr_ms_raw is not None:
+        raise ValueError("Specify only one of stage_overrides.tr_sec and stage_overrides.tr_ms/tr")
+
+    manual_tr = tr_sec_raw is not None or tr_ms_raw is not None
+    manual_fa = fa_raw is not None
+    manual_time = time_resolution_raw is not None
+    manual_any = manual_tr or manual_fa or manual_time
+    manual_all = manual_tr and manual_fa and manual_time
+
+    if metadata_source_path is None and not manual_all:
+        raise ValueError(
+            "DCE metadata JSON not found. Provide stage_overrides.tr_ms/tr_sec, "
+            "stage_overrides.fa_deg/fa, and stage_overrides.time_resolution_sec/time_resolution."
+        )
+    if metadata_source_path is not None and manual_any and not manual_all:
+        raise ValueError(
+            "Partial manual DCE metadata override is not allowed when metadata JSON is present. "
+            "Provide all of tr_ms/tr_sec + fa_deg/fa + time_resolution_sec/time_resolution, or provide none."
+        )
+
+    tr_ms: Optional[float] = None
+    time_resolution_sec: Optional[float] = None
+    fa_deg: Optional[float] = None
+    metadata_sources: Dict[str, str] = {}
+
+    if tr_sec_raw is not None:
+        tr_ms = float(tr_sec_raw) * 1000.0
+        metadata_sources["tr_ms"] = f"stage_overrides.{tr_sec_key}"
+    elif tr_ms_raw is not None:
+        tr_ms = float(tr_ms_raw)
+        metadata_sources["tr_ms"] = f"stage_overrides.{tr_ms_key}"
+
+    if time_resolution_raw is not None:
+        time_resolution_sec = float(time_resolution_raw)
+        metadata_sources["time_resolution_sec"] = f"stage_overrides.{time_resolution_key}"
+
+    if fa_raw is not None:
+        fa_deg = float(fa_raw)
+        metadata_sources["fa_deg"] = f"stage_overrides.{fa_key}"
+
+    source_prefix = f"json:{metadata_source_path}" if metadata_source_path else "json"
 
     if tr_ms is None:
-        if "RepetitionTimeExcitation" in payload:
+        if "tr_ms" in payload:
+            tr_ms = float(payload["tr_ms"])
+            metadata_sources["tr_ms"] = f"{source_prefix}.tr_ms"
+        elif "tr_sec" in payload:
+            tr_ms = float(payload["tr_sec"]) * 1000.0
+            metadata_sources["tr_ms"] = f"{source_prefix}.tr_sec"
+        elif "RepetitionTimeExcitation" in payload:
             tr_ms = float(payload["RepetitionTimeExcitation"]) * 1000.0
+            metadata_sources["tr_ms"] = f"{source_prefix}.RepetitionTimeExcitation"
             if time_resolution_sec is None and "RepetitionTime" in payload:
                 time_resolution_sec = float(payload["RepetitionTime"])
+                metadata_sources["time_resolution_sec"] = f"{source_prefix}.RepetitionTime"
         elif "RepetitionTime" in payload:
             tr_ms = float(payload["RepetitionTime"]) * 1000.0
+            metadata_sources["tr_ms"] = f"{source_prefix}.RepetitionTime"
             if time_resolution_sec is None:
                 time_resolution_sec = float(payload["RepetitionTime"])
+                metadata_sources["time_resolution_sec"] = f"{source_prefix}.RepetitionTime"
 
     if time_resolution_sec is None:
-        if "TriggerDelayTime" in payload and n_timepoints > 0:
+        if "time_resolution_sec" in payload:
+            time_resolution_sec = float(payload["time_resolution_sec"])
+            metadata_sources["time_resolution_sec"] = f"{source_prefix}.time_resolution_sec"
+        elif "TemporalResolution" in payload:
+            time_resolution_sec = float(payload["TemporalResolution"])
+            metadata_sources["time_resolution_sec"] = f"{source_prefix}.TemporalResolution"
+        elif "TriggerDelayTime" in payload and n_timepoints > 0:
             time_resolution_sec = float(payload["TriggerDelayTime"]) / float(n_timepoints) / 1000.0
+            metadata_sources["time_resolution_sec"] = f"{source_prefix}.TriggerDelayTime"
         elif "AcquisitionDuration" in payload and n_timepoints > 0:
             time_resolution_sec = float(payload["AcquisitionDuration"]) / float(n_timepoints)
+            metadata_sources["time_resolution_sec"] = f"{source_prefix}.AcquisitionDuration"
 
-    if time_resolution_sec is None and tr_ms is not None:
-        time_resolution_sec = float(tr_ms) / 1000.0
-
-    if time_resolution_sec is not None and "NumberOfAverages" in payload:
+    if (
+        time_resolution_sec is not None
+        and "NumberOfAverages" in payload
+        and metadata_sources.get("time_resolution_sec", "").startswith(source_prefix)
+    ):
         time_resolution_sec = float(time_resolution_sec) * float(payload["NumberOfAverages"])
+        metadata_sources["time_resolution_sec"] = metadata_sources["time_resolution_sec"] + "*NumberOfAverages"
 
-    if fa_deg is None and "FlipAngle" in payload:
-        fa_deg = float(payload["FlipAngle"])
+    if fa_deg is None:
+        if "fa_deg" in payload:
+            fa_deg = float(payload["fa_deg"])
+            metadata_sources["fa_deg"] = f"{source_prefix}.fa_deg"
+        elif "FlipAngle" in payload:
+            fa_deg = float(payload["FlipAngle"])
+            metadata_sources["fa_deg"] = f"{source_prefix}.FlipAngle"
 
     if tr_ms is None:
         raise ValueError("Unable to determine TR; set stage_overrides.tr_ms or provide DCE metadata JSON")
@@ -723,6 +823,12 @@ def _resolve_dynamic_metadata(config: DcePipelineConfig, n_timepoints: int) -> D
         )
     if fa_deg is None:
         raise ValueError("Unable to determine flip angle; set stage_overrides.fa_deg or provide DCE metadata JSON")
+    if float(tr_ms) <= 0.0:
+        raise ValueError(f"Resolved TR must be positive, got {tr_ms}")
+    if float(time_resolution_sec) <= 0.0:
+        raise ValueError(f"Resolved time resolution must be positive, got {time_resolution_sec}")
+    if float(fa_deg) <= 0.0:
+        raise ValueError(f"Resolved flip angle must be positive, got {fa_deg}")
 
     return {
         "tr_ms": float(tr_ms),
@@ -730,6 +836,8 @@ def _resolve_dynamic_metadata(config: DcePipelineConfig, n_timepoints: int) -> D
         "time_resolution_min": float(time_resolution_sec) / 60.0,
         "fa_deg": float(fa_deg),
         "metadata_source_keys": sorted(payload.keys()),
+        "metadata_source_path": metadata_source_path,
+        "metadata_sources": metadata_sources,
     }
 
 
@@ -929,6 +1037,8 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
         raise ValueError("AIF mask has no positive voxels")
     if not np.any(roi_mask):
         raise ValueError("ROI mask has no positive voxels")
+    if np.array_equal(aif_mask, roi_mask):
+        raise ValueError("AIF mask must be a dedicated vascular ROI and cannot be identical to ROI mask")
 
     if config.noise_files:
         noise_mask_img = _load_nifti_data(config.noise_files[0])
@@ -1912,7 +2022,7 @@ def _stage_d_fit_prefs(config: DcePipelineConfig) -> Dict[str, Any]:
         "max_iter": int(voxel_max_iter),
         "max_nfev": int(voxel_max_nfev),
         "robust": str(_stage_override(config, "voxel_Robust", "off")).strip(),
-        "gpu_tolerance": _safe_float(_stage_override(config, "gpu_tolerance", 1e-12), 1e-12),
+        "gpu_tolerance": _safe_float(_stage_override(config, "gpu_tolerance", 1e-6), 1e-6),
         "gpu_max_n_iterations": int(_safe_float(_stage_override(config, "gpu_max_n_iterations", 200), 200)),
         "gpu_initial_value_ktrans": _safe_float(_stage_override(config, "gpu_initial_value_ktrans", 2e-4), 2e-4),
         "gpu_initial_value_ve": _safe_float(_stage_override(config, "gpu_initial_value_ve", 0.2), 0.2),
@@ -2549,7 +2659,7 @@ def _fit_stage_d_model_accelerated(
     constraint_types = np.ascontiguousarray(
         np.full((n_params,), int(fit_module.ConstraintType.LOWER_UPPER), dtype=np.int32)
     )
-    tolerance = float(prefs.get("gpu_tolerance", 1e-12))
+    tolerance = float(prefs.get("gpu_tolerance", 1e-6))
     max_iterations = int(prefs.get("gpu_max_n_iterations", 200))
 
     parameters, states, chi_squares, _, _ = fit_module.fit_constrained(

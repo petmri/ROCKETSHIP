@@ -1,16 +1,20 @@
-# CPUfit Handoff: `TOFTS_EXTENDED` Short-Timer Repro
+# CPUfit Handoff (Regression Archive): `TOFTS_EXTENDED` Short-Timer Repro
 
-This package is for upstream `pycpufit`/CPUfit troubleshooting of a data-regime-specific
-`TOFTS_EXTENDED` fit-state failure.
+This package is kept as a regression archive for upstream `pycpufit`/CPUfit troubleshooting
+of a data-regime-specific `TOFTS_EXTENDED` fit-state failure that affected ROCKETSHIP
+qualification during development.
 
-## Problem Summary
+## Historical Problem Summary
 - On ROCKETSHIP BIDS qualification curves (`tests/data/BIDS_test`, Stage-B outputs), CPUfit
-  `TOFTS_EXTENDED` returns state `2` at iteration `0` for all tested voxels.
-- ROCKETSHIP pure CPU fitting on the same curves returns finite `ex_tofts` parameters.
-- OSIPI single-curve `extended_tofts` control still passes through CPUfit.
+  `TOFTS_EXTENDED` returned state `2` at iteration `0` for all tested voxels.
+- ROCKETSHIP pure CPU fitting on the same curves returned finite `ex_tofts` parameters.
+- OSIPI single-curve `extended_tofts` control still passed through CPUfit.
 
-ROCKETSHIP now guards this by falling back from acceleration to CPU when accelerated output
-has no usable finite primary parameters, but the upstream CPUfit behavior is still worth fixing.
+Current local status (2026-02-22):
+- ROCKETSHIP qualification now passes with accelerated `cpufit_cpu` after upstream CPUfit/Cpufit
+  fixes plus a ROCKETSHIP accelerated solver tolerance update (`gpu_tolerance=1e-6`).
+- ROCKETSHIP still keeps a defensive fallback from acceleration to CPU when accelerated output has
+  no usable finite primary parameters.
 
 ## Files
 - `bids_short_timer_repro.npz`: minimal failing payload (single Stage-B voxel).
@@ -31,7 +35,7 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
   --time-scale 600
 ```
 
-## Expected
+## Historical Expected (pre-fix reproduction)
 - `bids_short_timer_repro.npz`:
   - CPUfit state is expected to be non-zero (observed `2`) with `iterations=0`.
   - CPU reference (`python/dce_models.py:model_extended_tofts_fit`) remains finite.

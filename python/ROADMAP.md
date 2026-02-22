@@ -48,7 +48,9 @@ Current status:
 - Edge-case regression coverage exists for low-SNR data, non-uniform timer spacing, and custom fit bounds in `tests/python/test_dce_models.py`.
 - Strict OSIPI reliability thresholds for primary DCE models are now merge-gated via `tests/python/test_osipi_dce_reliability.py` and `tests/python/run_osipi_reliability.py`.
 - Backend-consistency checks now cover CPU vs CPUfit/GPUfit (where available) in `tests/python/test_osipi_backend_consistency.py`.
-- Remaining work is real-data backend qualification in end-to-end workflows.
+- Accelerated `ex_tofts` qualification failures on `cpufit_cpu` were resolved locally by adopting shared accelerated tolerance `gpu_tolerance=1e-6` (previous `1e-12` was too tight and drove max-iteration failures).
+- Full `tests/python` suite and current BIDS-test qualification now pass with the updated accelerated tolerance.
+- Remaining work is broader real-data/CUDA backend qualification in end-to-end workflows.
 
 Required outputs:
 - strict pass/fail criteria on primary model parity and reliability tests.
@@ -80,22 +82,22 @@ Scope:
 Current status:
 - Discovery utility is available at `/Users/samuelbarnes/code/ROCKETSHIP/run_bids_discovery.py`.
 - Qualification runner is available at `/Users/samuelbarnes/code/ROCKETSHIP/run_python_qualification.py`.
-- A discovery-driven qualification run was completed on 2026-02-20 for
+- A discovery-driven qualification run was completed on 2026-02-22 for
   `tests/data/BIDS_test`:
-  - `sessions_discovered=4`
-  - `sessions_passed=4`
+  - `sessions_discovered=5` (including `sub-05phantom`)
+  - `sessions_passed=5`
   - `sessions_failed=0`
   - artifacts written under
-    `/Users/samuelbarnes/code/ROCKETSHIP/out/python_qualification_bids_test_auto/`
+    `/Users/samuelbarnes/code/ROCKETSHIP/out/python_qualification_bids_test_auto_tol1e6/`
 - Merge packet and runbook notes are documented in:
   - `/Users/samuelbarnes/code/ROCKETSHIP/python/QUALIFICATION_MERGE_PACKET.md`
 - Primary-model map-finiteness gating is now implemented in qualification.
 - Stage-D now guards against all-nonfinite accelerated outputs and falls back to
   next backend/CPU for affected models.
-- Guarded-fallback qualification run now passes on current BIDS-test packet
-  (`out/python_qualification_bids_test_auto_gated_fallback`).
-- Remaining follow-up is upstream CPUfit behavior for `TOFTS_EXTENDED` on
-  short-timer synthetic BIDS curves (captured in TODO handoff items).
+- Current `backend=auto` qualification run passes on the BIDS-test packet with
+  accelerated `cpufit_cpu` after the `gpu_tolerance=1e-6` update.
+- Remaining follow-up is additional cohort coverage and CUDA/GPUfit runtime
+  verification, not the previous `ex_tofts` BIDS-test blocker.
 
 Required outputs:
 - qualification report for `dev` merge decision.
@@ -128,7 +130,7 @@ Required outputs:
 - legacy MATLAB queue/prep GUI flows not required by Python-first workflows
 
 ## Sequence to Merge
-1. Close primary DCE reliability gates.
+1. Maintain primary DCE reliability gates (and confirm on broader qualification cohorts / CUDA runtimes).
 2. Complete remaining T1 workflow gaps (GUI + residual MATLAB behavior).
 3. Complete OSIPI T1 + SI-to-concentration verification expansion.
 4. Complete Part E analysis workflow.

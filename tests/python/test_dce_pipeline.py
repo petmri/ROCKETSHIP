@@ -21,6 +21,7 @@ from dce_pipeline import (  # noqa: E402
     _accelerated_output_has_usable_primary_params,
     _fit_stage_d_model,
     _fit_stage_d_model_accelerated,
+    _resolve_dynamic_metadata,
     run_dce_pipeline,
     _run_stage_b_real,
     _run_stage_d_real,
@@ -203,6 +204,38 @@ class TestDcePipeline:
 
             with pytest.raises(ValueError, match=r"ImageJ ROI"):
                 run_dce_pipeline(config)
+
+    def test_pipeline_rejects_reused_roi_as_aif_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            config.roi_files = [config.aif_files[0]]
+
+            with pytest.raises(ValueError, match=r"AIF mask must be a dedicated vascular ROI"):
+                run_dce_pipeline(config)
+
+    def test_dynamic_metadata_requires_complete_manual_tuple_when_json_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            config.stage_overrides = {
+                "stage_a_mode": "real",
+                "tr_ms": 5.0,
+                "fa_deg": 15.0,
+            }
+            with pytest.raises(ValueError, match=r"DCE metadata JSON not found"):
+                _resolve_dynamic_metadata(config, n_timepoints=8)
+
+    def test_dynamic_metadata_rejects_partial_manual_override_when_json_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            dynamic_text = str(config.dynamic_files[0])
+            sidecar = Path(dynamic_text[:-7] + ".json")
+            sidecar.write_text(json.dumps({"RepetitionTime": 0.005, "FlipAngle": 17}))
+            config.stage_overrides = {
+                "stage_a_mode": "real",
+                "tr_ms": 5.0,
+            }
+            with pytest.raises(ValueError, match=r"Partial manual DCE metadata override is not allowed"):
+                _resolve_dynamic_metadata(config, n_timepoints=8)
 
     def test_validate_accepts_import_aif_path_alias_for_imported_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -624,7 +657,7 @@ class TestDcePipeline:
             "upper_limit_vp": 1.03,
             "lower_limit_fp": 0.04,
             "upper_limit_fp": 1.04,
-            "gpu_tolerance": 1e-12,
+            "gpu_tolerance": 1e-6,
             "gpu_max_n_iterations": 64,
         }
 
@@ -751,6 +784,44 @@ class TestDcePipeline:
             assert "array_shapes" in result["stages"]["A"]
             assert "Cp" in result["stages"]["A"]["array_shapes"]
             assert "Ct" in result["stages"]["A"]["array_shapes"]
+
+    def test_stage_a_real_rejects_identical_aif_and_roi_masks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            roi_file = config.subject_tp_path / "roi_mask.nii.gz"
+            roi_file.write_text("")
+            config.roi_files = [roi_file]
+            config.stage_overrides = {
+                "stage_a_mode": "real",
+                "stage_b_mode": "scaffold",
+                "tr_ms": 5.0,
+                "fa_deg": 15.0,
+                "time_resolution_sec": 5.0,
+                "steady_state_start": 1,
+                "steady_state_end": 2,
+                "snr_filter": 0.0,
+            }
+
+            dynamic = np.ones((4, 4, 1, 6), dtype=float) * 100.0
+            same_mask = np.zeros((4, 4, 1), dtype=float)
+            same_mask[1:3, 1:3, :] = 1.0
+            t1map = np.full((4, 4, 1), 1300.0, dtype=float)
+
+            def fake_load(path: Path):
+                p = str(path)
+                if p.endswith("dynamic.nii.gz"):
+                    return dynamic
+                if p.endswith("aif_mask.nii.gz"):
+                    return same_mask
+                if p.endswith("roi_mask.nii.gz"):
+                    return same_mask
+                if p.endswith("t1map.nii.gz"):
+                    return t1map
+                raise AssertionError(f"Unexpected path {path}")
+
+            with patch("dce_pipeline._load_nifti_data", side_effect=fake_load):
+                with pytest.raises(ValueError, match=r"AIF mask must be a dedicated vascular ROI"):
+                    run_dce_pipeline(config)
 
     def test_stage_b_real_raw_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

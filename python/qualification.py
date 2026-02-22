@@ -196,16 +196,14 @@ def _session_dce_inputs(session: BidsSession) -> Dict[str, Path]:
     missing = []
     if dynamic is None:
         missing.append("dynamic")
+    if aif is None:
+        missing.append("aif (*desc-AIF_T1map.nii*)")
     if roi is None:
         missing.append("roi")
     if t1map is None:
         missing.append("t1map")
     if missing:
         raise FileNotFoundError(f"Missing DCE derivative inputs ({', '.join(missing)}) for {session.id}")
-
-    if aif is None:
-        # Fallback keeps the qualification path functional if no explicit AIF derivative exists.
-        aif = roi
 
     return {
         "dynamic": dynamic,

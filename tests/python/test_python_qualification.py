@@ -11,8 +11,10 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "python"))
 
+from bids_discovery import BidsSession  # noqa: E402
 from qualification import QualificationRunConfig, run_bids_qualification  # noqa: E402
 from qualification import _primary_model_map_blockers  # noqa: E402
+from qualification import _session_dce_inputs  # noqa: E402
 
 
 @pytest.mark.unit
@@ -42,6 +44,30 @@ def test_primary_model_map_blockers_ignores_all_zero_maps() -> None:
     }
     blockers = _primary_model_map_blockers(map_stats, ("tofts",))
     assert blockers == []
+
+
+@pytest.mark.unit
+def test_session_dce_inputs_requires_explicit_aif_roi(tmp_path: Path) -> None:
+    raw_session = tmp_path / "rawdata" / "sub-01" / "ses-01"
+    deriv_session = tmp_path / "derivatives" / "sub-01" / "ses-01"
+    (raw_session / "dce").mkdir(parents=True, exist_ok=True)
+    (deriv_session / "dce").mkdir(parents=True, exist_ok=True)
+    (deriv_session / "anat").mkdir(parents=True, exist_ok=True)
+
+    (deriv_session / "dce" / "sub-01_ses-01_desc-bfcz_DCE.nii.gz").write_text("")
+    (deriv_session / "anat" / "sub-01_ses-01_space-DCEref_desc-brain_mask.nii.gz").write_text("")
+    (deriv_session / "anat" / "sub-01_ses-01_space-DCEref_T1map.nii").write_text("")
+
+    session = BidsSession(
+        bids_root=tmp_path,
+        subject="sub-01",
+        session="ses-01",
+        rawdata_path=raw_session,
+        derivatives_path=deriv_session,
+    )
+
+    with pytest.raises(FileNotFoundError, match=r"aif \(\*desc-AIF_T1map\.nii\*\)"):
+        _session_dce_inputs(session)
 
 
 @pytest.mark.integration

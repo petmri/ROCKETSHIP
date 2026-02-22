@@ -1,14 +1,14 @@
 # Python Porting Status
 
 ## Snapshot
-- Date: 2026-02-20
+- Date: 2026-02-22
 - Branch: `codex/algorithm-test-suite`
 - Commit: working tree (uncommitted)
 
 Current automated baseline:
 - Command: `.venv/bin/python -m pytest tests/python -q`
-- Result: `126 passed, 12 skipped, 2 xfailed`
-- Current non-blocking xfails:
+- Result: `139 passed, 13 skipped, 2 xpassed`
+- Current xfail-marked non-blocking tests (XPASS on patched local `pycpufit`):
   - `tests/python/test_osipi_pycpufit.py::test_osipi_pycpufit_2cxm_fast`
   - `tests/python/test_osipi_pycpufit.py::test_osipi_pycpufit_tissue_uptake_fast`
 
@@ -16,17 +16,15 @@ Latest qualification packet run:
 - Discovery command:
   - `.venv/bin/python run_bids_discovery.py --bids-root tests/data/BIDS_test --output-json out/python_qualification_bids_test_auto/discovery_manifest.json --print-json`
 - Qualification command:
-  - `.venv/bin/python run_python_qualification.py --bids-root tests/data/BIDS_test --output-root out/python_qualification_bids_test_auto --backend auto --no-postfit-arrays --print-summary-json`
+  - `.venv/bin/python run_python_qualification.py --bids-root tests/data/BIDS_test --output-root out/python_qualification_bids_test_auto_tol1e6 --backend auto --no-postfit-arrays --print-summary-json`
 - Result:
-  - `status=ok`, `sessions_discovered=4`, `sessions_passed=4`, `sessions_failed=0`, `blocker_count=0`, `warning_count=1`
+  - `status=ok`, `sessions_discovered=5`, `sessions_passed=5`, `sessions_failed=0`, `blocker_count=0`, `warning_count=1`
+  - `backend=auto` selected accelerated `cpufit_cpu` in Stage D for primary models.
+  - `ex_tofts` primary-map finiteness gating now passes after adopting accelerated `gpu_tolerance=1e-6` (previous `1e-12` caused excessive max-iteration failures in the Cpufit CPU path).
 - Merge packet:
   - `/Users/samuelbarnes/code/ROCKETSHIP/python/QUALIFICATION_MERGE_PACKET.md`
-- Gate-enabled follow-up run:
-  - `.venv/bin/python run_python_qualification.py --bids-root tests/data/BIDS_test --output-root out/python_qualification_bids_test_auto_gated --backend auto --no-postfit-arrays --print-summary-json`
-  - `status=failed`, `sessions_failed=4`, `blocker_count=12` (all from `ex_tofts` non-finite primary parameter maps on `cpufit_cpu`)
-- Guarded-fallback follow-up run:
-  - `.venv/bin/python run_python_qualification.py --bids-root tests/data/BIDS_test --output-root out/python_qualification_bids_test_auto_gated_fallback --backend auto --no-postfit-arrays --print-summary-json`
-  - `status=ok`, `sessions_failed=0`, `blocker_count=0` after Stage-D fallback from non-finite accelerated `ex_tofts` outputs to CPU.
+- Historical note:
+  - Earlier gated qualification runs failed on accelerated `ex_tofts` finiteness (`cpufit_cpu`) before the tolerance update; Stage-D guarded fallback remains in place as a safety net for all-NaN accelerated outputs.
 
 ## Important Details / Lessons Learned
 - `t1_fa_fit` MATLAB-vs-Python contract parity currently gates indices `[0, 1, 2, 5]`:
@@ -39,11 +37,17 @@ Latest qualification packet run:
   - Part E loader reads `*_postfit_arrays.npz` directly, avoiding `.mat`-format/version issues.
 - Qualification warning from 2026-02-20 BIDS-test run:
   - `sub-02downsample_ses-01` required flip-angle metadata trim (`3 -> 2`) to match derivative VFA frames.
-- Qualification risk from 2026-02-20 BIDS-test run:
-  - `ex_tofts` map stats on `cpufit_cpu` showed non-finite parameter-map behavior (`finite_nonzero_fraction=0.0`) while run-level checks still passed.
-  - Primary-model map-finiteness gating is implemented in `python/qualification.py`.
-  - Stage-D now rejects all-nonfinite accelerated outputs and falls back to next backend/CPU (`python/dce_pipeline.py`).
-  - Upstream follow-up remains: `pycpufit` `TOFTS_EXTENDED` fit-state behavior on short-timer BIDS synthetic curves.
+- Qualification lesson (updated 2026-02-22):
+  - `ex_tofts` accelerated `cpufit_cpu` fits previously failed qualification map-finiteness checks under `gpu_tolerance=1e-12`.
+  - Local fix adopted on 2026-02-22: accelerated `gpu_tolerance=1e-6` (shared accelerated solver tolerance) after CPUfit/Cpufit diagnosis identified excessive max-iteration failures from overly tight tolerance.
+  - Qualification rerun now passes all 5 BIDS-test sessions with `backend=auto` (`cpufit_cpu`).
+  - Stage-D all-nonfinite accelerated-output fallback remains in `python/dce_pipeline.py` as a defensive guard.
+- Accelerated-vs-CPU tolerance mapping is not 1:1:
+  - Accelerated path uses single `gpu_tolerance` (now default `1e-6`) for CPUfit/GPUfit constrained LM solver.
+  - CPU SciPy path uses `tol_fun` -> `ftol` default `1e-12` and `tol_x` -> `xtol` default `1e-6` in `python/dce_models.py`.
+- Real-data DCE inputs are now stricter by design:
+  - Stage A requires a dedicated AIF ROI mask (or future auto-AIF routine); brain-mask fallback as AIF is rejected.
+  - TR/FA/time resolution for real data must come from sidecar JSON or be fully specified in config (no silent defaults).
 
 ## Category Definitions
 - `done`: implemented and acceptable for current transition goals.
@@ -56,7 +60,7 @@ Latest qualification packet run:
 | MATLAB area | Representative MATLAB files | Python status | Category | Notes |
 |---|---|---|---|---|
 | DCE CLI pipeline A/B/D | `run_dce_cli.m`, `dce/A_make_R1maps_func.m`, `dce/B_AIF_fitting_func.m`, `dce/D_fit_voxels_func.m` | Implemented via `python/dce_pipeline.py` + `python/dce_cli.py` | done | Core in-memory CLI flow exists and is tested. |
-| DCE primary models | `dce/model_tofts*.m`, `dce/model_patlak*.m`, `dce/model_extended_tofts*.m` | Implemented in `python/dce_models.py` and wired into pipeline | primary | Edge-case regression tests cover low-SNR/non-uniform timer/bounds; strict OSIPI reliability thresholds are merge-gated; backend-consistency checks exist for CPU/CPUfit/GPUfit where available. Qualification includes explicit primary-model map-finiteness gating plus guarded acceleration fallback when accelerated output has no usable finite primary parameters. |
+| DCE primary models | `dce/model_tofts*.m`, `dce/model_patlak*.m`, `dce/model_extended_tofts*.m` | Implemented in `python/dce_models.py` and wired into pipeline | primary | Edge-case regression tests cover low-SNR/non-uniform timer/bounds; strict OSIPI reliability thresholds are merge-gated; backend-consistency checks exist for CPU/CPUfit/GPUfit where available. Qualification includes explicit primary-model map-finiteness gating plus guarded acceleration fallback when accelerated output has no usable finite primary parameters. Current BIDS-test qualification passes with accelerated `cpufit_cpu` after adopting shared accelerated tolerance `gpu_tolerance=1e-6`. |
 | DCE unstable models | `dce/model_2cxm*.m`, `dce/model_tissue_uptake*.m` | Implemented but still unstable in some parity/reliability paths | secondary | Keep improving; not a blocker for first dev merge unless promoted. |
 | DCE optional models | `dce/model_fxr*.m`, `dce/auc_helper.m`, `nested`, `FXL_rr` pathways | Partial (`fxr`, `auc` present; `nested`/`FXL_rr` not executed) | secondary | Decide post-primary whether to fully support or deprecate. |
 | DCE Part E post-fit analysis | `dce/fitting_analysis.m`, `dce/compare_fits.m`, `dce/compare_gui.m` | Partial (`python/dce_postfit_analysis.py`, `tests/python/run_dce_postfit_analysis.py`) | primary | Statistical core is ported (supported-model checks, SSE extraction, f-test, AIC/relative-likelihood, ROI CSV writers, voxel map reconstruction) plus reproducible JSON/CSV/NPY artifact writers (`run_ftest_analysis`, `run_aic_analysis`), NPZ-based runner path (`load_dce_fit_stats_from_npz`) using Stage-D postfit exports (`write_postfit_arrays`), and optional plot/stat-summary outputs for troubleshooting; remaining gap is workflow qualification on external real cohorts and end-user handoff docs. |
@@ -74,8 +78,8 @@ Latest qualification packet run:
 ## Primary Gaps Blocking Dev Merge Trial
 1. Python T1 mapping workflow parity with MATLAB usage (remaining behavior + external real-data validation).
 2. Python Part E analysis workflow external real-data qualification and handoff.
-3. Qualification hardening for primary DCE models:
-   - upstream follow-up: resolve `pycpufit` `TOFTS_EXTENDED` state behavior on short-timer BIDS synthetic curves (ROCKETSHIP now guards/falls back safely).
+3. Qualification hardening for primary DCE models on broader cohorts/backend combinations:
+   - current BIDS-test packet passes with `gpu_tolerance=1e-6`; next step is confirming the same behavior on additional real cohorts and CUDA/GPUfit runtimes.
 
 ## Secondary Gaps
 - 2CXM and tissue uptake robustness across CPU/CPUfit/GPUfit.

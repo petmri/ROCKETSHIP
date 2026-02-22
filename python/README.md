@@ -172,7 +172,11 @@ Config fields are parsed by:
 Key expectations:
 
 - Dynamic image + ROI/AIF/T1/noise masks are provided (NIfTI path lists)
-- `stage_overrides` should provide TR/FA/timing parameters for parity-safe runs
+- TR/FA/time-resolution for real Stage A are resolved strictly:
+  - preferred from DCE metadata JSON sidecar (or explicit `stage_overrides.dce_metadata_path`)
+  - if no metadata JSON is available, you must provide all three manually in `stage_overrides`
+    (`tr_ms`/`tr_sec`, `fa_deg`/`fa`, `time_resolution_sec`/`time_resolution`)
+  - partial manual override when metadata JSON is present is rejected (set all three or none)
 - MATLAB-style `dce_preferences.txt` defaults are loaded automatically from `/Users/samuelbarnes/code/ROCKETSHIP/dce/dce_preferences.txt` when present
 - Supported backend values: `auto`, `cpu`, `gpufit`
 - Backend selection behavior:

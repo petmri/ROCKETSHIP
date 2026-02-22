@@ -22,7 +22,7 @@ Finish the Python transition to the point that it can be merged to `dev` and tes
 - [x] Add regression tests for known edge cases (bounds, low SNR, non-uniform timer inputs).
 - [x] Add qualification gating for non-finite primary-model parameter maps (see `python/qualification.py` and `tests/python/test_python_qualification.py`).
 - [x] Resolve qualification blocker from `ex_tofts` non-finite accelerated maps by falling back to next backend/CPU when accelerated output has no usable finite primary parameters (`python/dce_pipeline.py`, `tests/python/test_dce_pipeline.py`).
-- [ ] Upstream follow-up: investigate/fix `pycpufit` `TOFTS_EXTENDED` all-fit state=2 behavior on short-timer BIDS-test data (captured in CPUfit handoff items).
+- [x] Adopt accelerated DCE `gpu_tolerance=1e-6` default (was `1e-12`) after CPUfit/Cpufit max-iteration diagnosis; verified with full Python test suite and `run_python_qualification.py` on 5-session `tests/data/BIDS_test`.
 
 3. Part E post-fitting analysis
 - [x] Port required workflow from `dce/fitting_analysis.m`, `dce/compare_fits.m`, and supporting analysis helpers.
@@ -39,6 +39,8 @@ Finish the Python transition to the point that it can be merged to `dev` and tes
   - `/Users/samuelbarnes/code/ROCKETSHIP/out/python_qualification_bids_test_auto_gated/qualification_summary.json`
   - `/Users/samuelbarnes/code/ROCKETSHIP/out/python_qualification_bids_test_auto_gated_fallback/qualification_summary.json`
   - `/Users/samuelbarnes/code/ROCKETSHIP/python/QUALIFICATION_MERGE_PACKET.md`
+- Latest local qualification rerun (2026-02-22):
+  - `backend=auto` (`cpufit_cpu`) on 5-session `tests/data/BIDS_test` passed (`sessions_failed=0`, `blocker_count=0`) after accelerated tolerance default update to `gpu_tolerance=1e-6`.
 
 5. Update license to GPL-3 before `dev` merge
 - [x] Add license file
@@ -48,6 +50,7 @@ Finish the Python transition to the point that it can be merged to `dev` and tes
 - [ ] Get real NII BIDs data and replace matrix with all 0/1
 - [ ] Insert synthetic DCE curves into real nii files, maintaining original headers just replace all SI
 - [ ] Save ground truth Ktrans, vp, etc. files for synthetic datasets
+- [ ] Compare fit values to ground truth
 - [ ] In BIDS struture generate 3 subjects (low, medium, high SNR) with 2 meassurements (identical parameters with unique noise)
 2. Other
 - [ ] Improve `2cxm` and `tissue_uptake` stability/accuracy across all fit backends.
@@ -62,21 +65,22 @@ Finish the Python transition to the point that it can be merged to `dev` and tes
 - legacy MATLAB queue/prep GUI flows that are not needed in Python workflows
 
 ## GPUfit / CPUfit Handoff Items (for external accelerator project)
-Current observed issues from `.venv/bin/python -m pytest tests/python -q` on 2026-02-20:
+Current observed accelerator issues to hand off / track:
 - `test_osipi_pycpufit_2cxm_fast`:
   - `vp` absolute error too large (`actual=0.070445478`, `expected=0.02`, tolerance `0.01857123`).
 - `test_osipi_pycpufit_tissue_uptake_fast`:
   - non-finite output (`vp=nan`) in fast backend path.
-- Qualification diagnostic (2026-02-20):
-  - `TOFTS_EXTENDED` on `pycpufit` returns fit state `2` for all voxels (zero iterations) on `tests/data/BIDS_test` Stage-B curves (`timer` span `0.0..0.0084126` minutes), producing fully non-finite accelerated maps unless CPU fallback is applied.
-- Repro package (ready for external handoff):
+- `TOFTS_EXTENDED` / `ex_tofts` qualification issue (historical, resolved in current local workflow):
+  - Upstream CPUfit/Cpufit fixes plus ROCKETSHIP accelerated `gpu_tolerance=1e-6` default resolved BIDS-test qualification failures on `cpufit_cpu`.
+  - Keep repro package below as regression archive for upstream.
+- Repro package (regression archive / external handoff reference):
   - `/Users/samuelbarnes/code/ROCKETSHIP/tests/contracts/handoffs/cpufit_tofts_extended/`
   - Runner:
     - `.venv/bin/python tests/contracts/handoffs/cpufit_tofts_extended/run_cpufit_tofts_extended_repro.py --json`
   - Included payloads:
     - `bids_short_timer_repro.npz` (failing short-timer Stage-B voxel)
     - `osipi_control_repro.npz` (passing OSIPI control)
-  - Current observed output at `time_scale=1`:
+  - Historical observed output before upstream/local fix:
     - BIDS payload: `cpufit state=2, iterations=0` while CPU reference parameters are finite.
     - OSIPI payload: `cpufit state=0` with close agreement to CPU reference.
 
@@ -85,10 +89,11 @@ Requested handoff topics:
 - [ ] Ensure deterministic handling/reporting of failed fits (no silent NaN propagation).
 - [ ] Verify bound handling and initialization behavior consistency across GPUfit/CPUfit implementations.
 - [ ] Provide backend diagnostics that can be surfaced directly in Python test failure messages.
-- [ ] Investigate `TOFTS_EXTENDED` short-timer conditioning/state behavior in `pycpufit` (all fits state `2` at iteration `0` on BIDS short-timer payload despite finite CPU reference).
+- [ ] Verify CUDA/GPUfit runtime behavior for recent CPUfit/CUDA-side `TOFTS_EXTENDED` and `2CXM` fixes on a CUDA-capable machine.
 
 Current handling in main suite:
 - `2cxm` and `tissue_uptake` fast-backend OSIPI tests are marked `xfail` (secondary-goal, non-blocking) while remaining visible.
+- On the current patched local `pycpufit`, these xfail-marked tests may `XPASS`; keep non-blocking status until broader coverage is complete.
 
 ## Synthetic_DCE Handoff Items (external project)
 - Import segmentation image with tissue classes
@@ -109,6 +114,7 @@ Current handling in main suite:
 - Primary DCE edge-case regression tests added for non-uniform timer, low-SNR fits, and custom bounds (`tests/python/test_dce_models.py`).
 - Primary DCE OSIPI thresholds tightened to strict peer-max limits and integrated into merge-gate reporting (`tests/python/test_osipi_dce_reliability.py`, `tests/python/run_osipi_reliability.py`).
 - Primary DCE backend consistency checks added across CPU/CPUfit/GPUfit where available (`tests/python/test_osipi_backend_consistency.py`).
+- Accelerated DCE default tolerance updated to `gpu_tolerance=1e-6` (shared accelerated solver tolerance) after CPUfit/Cpufit max-iteration diagnosis; full `tests/python` suite and 5-session BIDS qualification rerun pass.
 - Parametric T1 GUI v1 added (`run_parametric_python_gui.py`, `python/parametric_gui.py`) with run controls, event progress, and summary/artifact display.
 - Parametric T1 real-data naming/integrity tests added for BIDS-based multifile and stacked inputs (`tests/python/test_parametric_pipeline.py`).
 - Parametric pipeline now supports nonlinear and two-point VFA fit types in addition to linear, with tiny-fixture integration tests (`python/parametric_pipeline.py`, `tests/python/test_parametric_pipeline.py`).
