@@ -967,9 +967,8 @@ if save_output==true
     disp('MAT results saved to: ')
     disp(saved_results)
     disp(['File MD5 hash: ' mat_md5])
-else
-    RUNA_vars=Adata;
 end
+RUNA_vars=Adata;
     
 disp(' ');
 disp('Finished A');
