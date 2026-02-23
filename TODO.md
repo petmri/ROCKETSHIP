@@ -20,6 +20,7 @@ Finish the Python transition to the point that it can be merged to `dev` and tes
 - [x] Tighten parity/reliability thresholds and make primary model checks strict merge gates.
 - [x] Ensure backend consistency across `cpu`, `cpufit`, and `gpufit` where available.
 - [x] Add regression tests for known edge cases (bounds, low SNR, non-uniform timer inputs).
+- [ ] Implement automatic DCE baseline-window detection (`steady_state_end`, and start if needed) for Stage A by copying MATLAB behavior; current default-first-2-frames behavior is not sufficient for real data and can silently bias maps.
 - [x] Add qualification gating for non-finite primary-model parameter maps (see `python/qualification.py` and `tests/python/test_python_qualification.py`).
 - [x] Resolve qualification blocker from `ex_tofts` non-finite accelerated maps by falling back to next backend/CPU when accelerated output has no usable finite primary parameters (`python/dce_pipeline.py`, `tests/python/test_dce_pipeline.py`).
 - [x] Adopt accelerated DCE `gpu_tolerance=1e-6` default (was `1e-12`) after CPUfit/Cpufit max-iteration diagnosis; verified with full Python test suite and `run_python_qualification.py` on 5-session `tests/data/BIDS_test`.
@@ -42,18 +43,36 @@ Finish the Python transition to the point that it can be merged to `dev` and tes
 - Latest local qualification rerun (2026-02-22):
   - `backend=auto` (`cpufit_cpu`) on 5-session `tests/data/BIDS_test` passed (`sessions_failed=0`, `blocker_count=0`) after accelerated tolerance default update to `gpu_tolerance=1e-6`.
 
+5. Synthetic phantom images example datasets qualification
+- [x] Get real NII BIDs data and replace matrix with all 0/1
+- [x] Insert synthetic DCE curves into real nii files, maintaining original headers just replace all SI
+- [x] Save ground truth Ktrans, vp, etc. files for synthetic datasets
+- [x] Compare fit values to ground truth
+- [ ] Acheive reasonable passing tolerances (~10-20% bias values)
+- [ ] Separate implementation-error vs model-mismatch error by generating matched-model phantom datasets (`tofts`, `ex_tofts`, `patlak`) in `synthetic_dce`; current phantoms are primarily `2cxm`-generated and simpler fits are expected to be biased.
+- [x] Add synthetic phantom ground-truth reliability checks (region/model-specific MAE tolerances) for `sub-05phantom`/`sub-06phantom`/`sub-07phantom`, with T1 reconstructed in-test before DCE fitting.
+- Phantom GT reliability calibration (2026-02-22):
+  - New test file: `tests/python/test_phantom_gt_reliability.py` (qualification-gated; CPU + auto/cpufit paths).
+  - Initial tolerance profile written to `tests/data/BIDS_test/phantom_gt_mae_tolerances.json` from local CPU + cpufit summary runs.
+  - Tolerance profile is currently marked `gate_ready=false` (provisional exploratory profile while phantom performance triage is in progress).
+  - MATLAB-based phantom GT calibration is still pending and can be folded into the same tolerance/profile workflow later.
+- Phantom GT diagnostic status (2026-02-23):
+  - `sub-08phantom` added (very low noise + extra VFA flip angle) to isolate T1/noise effects.
+  - AIF timing/scaling metadata pass-through to Stage A (`TemporalResolution`, relaxivity, hematocrit) is now fixed and used from JSON.
+  - Nonlinear T1 fitting substantially improved phantom T1 maps, but DCE parameter bias remains large.
+  - Most likely remaining dominant source is model mismatch (phantoms generated with `2cxm`, evaluated with `tofts`/`ex_tofts`/`patlak`).
+  - See `tests/PHANTOM_GT_QUALIFICATION_STATUS.md`.
+
 5. Update license to GPL-3 before `dev` merge
 - [x] Add license file
 
 ## Secondary (Important, Not Blocking First Dev Merge)
 1. Include robust example datasets, synthetic only
-- [ ] Get real NII BIDs data and replace matrix with all 0/1
-- [ ] Insert synthetic DCE curves into real nii files, maintaining original headers just replace all SI
-- [ ] Save ground truth Ktrans, vp, etc. files for synthetic datasets
-- [ ] Compare fit values to ground truth
 - [ ] In BIDS struture generate 3 subjects (low, medium, high SNR) with 2 meassurements (identical parameters with unique noise)
 2. Other
-- [ ] Improve `2cxm` and `tissue_uptake` stability/accuracy across all fit backends.
+- [ ] switch the T1 fitting over to CPUfit/GPUfit for speed up
+- [x] Improve `2cxm` and `tissue_uptake` stability/accuracy is OSIPI.
+- [ ] Improve `2cxm` and `tissue_uptake` stability/accuracy for real data.
 - [ ] Expand DSC support beyond current core (`DSC_convolution_oSVD` and workflow-level parity).
 - [ ] Decide final status of `nested` and `FXL_rr` (full support vs explicit non-support and cleanup).
 
@@ -115,6 +134,8 @@ Current handling in main suite:
 - Primary DCE OSIPI thresholds tightened to strict peer-max limits and integrated into merge-gate reporting (`tests/python/test_osipi_dce_reliability.py`, `tests/python/run_osipi_reliability.py`).
 - Primary DCE backend consistency checks added across CPU/CPUfit/GPUfit where available (`tests/python/test_osipi_backend_consistency.py`).
 - Accelerated DCE default tolerance updated to `gpu_tolerance=1e-6` (shared accelerated solver tolerance) after CPUfit/Cpufit max-iteration diagnosis; full `tests/python` suite and 5-session BIDS qualification rerun pass.
+- Synthetic phantom GT reliability helper/runner added (`tests/python/phantom_gt_helpers.py`, `tests/python/run_phantom_gt_reliability.py`) with region-labeled MAE summaries and per-backend tolerance profile support.
+- Phantom GT runner now includes compact AIF diagnostics, `--subject` filtering, and explicit phantom metadata alignment notes (baseline-images diagnostic override; provisional tolerance gating).
 - Parametric T1 GUI v1 added (`run_parametric_python_gui.py`, `python/parametric_gui.py`) with run controls, event progress, and summary/artifact display.
 - Parametric T1 real-data naming/integrity tests added for BIDS-based multifile and stacked inputs (`tests/python/test_parametric_pipeline.py`).
 - Parametric pipeline now supports nonlinear and two-point VFA fit types in addition to linear, with tiny-fixture integration tests (`python/parametric_pipeline.py`, `tests/python/test_parametric_pipeline.py`).

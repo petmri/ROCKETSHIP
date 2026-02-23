@@ -129,7 +129,7 @@ class ParametricGuiWindow(QMainWindow):
         form = QFormLayout(group)
 
         self.output_dir_edit = QLineEdit()
-        self.fit_type_edit = QLineEdit("t1_fa_linear_fit")
+        self.fit_type_edit = QLineEdit("t1_fa_fit")
         self.output_basename_edit = QLineEdit("T1_map")
         self.output_label_edit = QLineEdit("")
         self.tr_ms_edit = QLineEdit("")
@@ -331,7 +331,7 @@ class ParametricGuiWindow(QMainWindow):
         self.config_path_edit.setText(str(path))
 
         self.output_dir_edit.setText(str(payload.get("output_dir", "")))
-        self.fit_type_edit.setText(str(payload.get("fit_type", "t1_fa_linear_fit")))
+        self.fit_type_edit.setText(str(payload.get("fit_type", "t1_fa_fit")))
         self.output_basename_edit.setText(str(payload.get("output_basename", "T1_map")))
         self.output_label_edit.setText(str(payload.get("output_label", "")))
         self.tr_ms_edit.setText("" if payload.get("tr_ms") is None else str(payload.get("tr_ms")))
@@ -350,7 +350,7 @@ class ParametricGuiWindow(QMainWindow):
     def _collect_config_payload(self) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
             "output_dir": self.output_dir_edit.text().strip(),
-            "fit_type": self.fit_type_edit.text().strip() or "t1_fa_linear_fit",
+            "fit_type": self.fit_type_edit.text().strip() or "t1_fa_fit",
             "output_basename": self.output_basename_edit.text().strip() or "T1_map",
             "output_label": self.output_label_edit.text().strip(),
             "rsquared_threshold": float(self.rsq_threshold_edit.text().strip() or "0.6"),

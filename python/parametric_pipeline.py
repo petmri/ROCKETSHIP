@@ -47,7 +47,7 @@ class ParametricT1Config:
 
     output_dir: Path
     vfa_files: List[Path] = field(default_factory=list)
-    fit_type: str = "t1_fa_linear_fit"
+    fit_type: str = "t1_fa_fit"
     output_basename: str = "T1_map"
     output_label: str = ""
     rsquared_threshold: float = 0.6
@@ -80,7 +80,7 @@ class ParametricT1Config:
         return cls(
             output_dir=_resolve_path(data["output_dir"], base_dir),
             vfa_files=_to_path_list(vfa_values, base_dir),
-            fit_type=str(data.get("fit_type", "t1_fa_linear_fit")),
+            fit_type=str(data.get("fit_type", "t1_fa_fit")),
             output_basename=str(data.get("output_basename", "T1_map")),
             output_label=str(data.get("output_label", "")),
             rsquared_threshold=float(data.get("rsquared_threshold", 0.6)),

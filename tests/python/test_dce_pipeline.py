@@ -237,6 +237,48 @@ class TestDcePipeline:
             with pytest.raises(ValueError, match=r"Partial manual DCE metadata override is not allowed"):
                 _resolve_dynamic_metadata(config, n_timepoints=8)
 
+    def test_dynamic_metadata_json_requires_explicit_frame_spacing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            dynamic_text = str(config.dynamic_files[0])
+            sidecar = Path(dynamic_text[:-7] + ".json")
+            sidecar.write_text(json.dumps({"RepetitionTime": 0.005, "FlipAngle": 17}))
+
+            with pytest.raises(ValueError, match=r"TemporalResolution/time_resolution_sec"):
+                _resolve_dynamic_metadata(config, n_timepoints=8)
+
+    def test_dynamic_metadata_reads_relaxivity_and_hematocrit_from_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            dynamic_text = str(config.dynamic_files[0])
+            sidecar = Path(dynamic_text[:-7] + ".json")
+            sidecar.write_text(
+                json.dumps(
+                    {
+                        "RepetitionTime": 0.0085,
+                        "TemporalResolution": 12.5,
+                        "FlipAngle": 17.0,
+                        "SyntheticPhantom": {
+                            "Relaxivity_per_mM_per_s": 5.25,
+                            "RecommendedROCKETSHIPHematocrit": 0.0,
+                            "AIFConcentrationKind": "plasma",
+                        },
+                    }
+                )
+            )
+
+            out = _resolve_dynamic_metadata(config, n_timepoints=8)
+            assert out["tr_ms"] == pytest.approx(8.5)
+            assert out["time_resolution_sec"] == pytest.approx(12.5)
+            assert out["fa_deg"] == pytest.approx(17.0)
+            assert out["relaxivity"] == pytest.approx(5.25)
+            assert out["hematocrit"] == pytest.approx(0.0)
+            assert out["aif_concentration_kind"] == "plasma"
+            assert "SyntheticPhantom.Relaxivity_per_mM_per_s" in str(out["metadata_sources"].get("relaxivity", ""))
+            assert "SyntheticPhantom.RecommendedROCKETSHIPHematocrit" in str(
+                out["metadata_sources"].get("hematocrit", "")
+            )
+
     def test_validate_accepts_import_aif_path_alias_for_imported_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))

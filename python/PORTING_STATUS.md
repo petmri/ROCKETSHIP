@@ -48,6 +48,16 @@ Latest qualification packet run:
 - Real-data DCE inputs are now stricter by design:
   - Stage A requires a dedicated AIF ROI mask (or future auto-AIF routine); brain-mask fallback as AIF is rejected.
   - TR/FA/time resolution for real data must come from sidecar JSON or be fully specified in config (no silent defaults).
+- Synthetic phantom GT reliability checks now exist for calibration/guarding:
+  - `tests/python/test_phantom_gt_reliability.py` reconstructs T1 in-test and compares T1 + primary DCE maps against `rawdata/.../gt` ground-truth maps for `sub-05phantom`/`sub-06phantom`/`sub-07phantom`.
+  - Tolerances are region- and model-specific (`tests/data/BIDS_test/phantom_gt_mae_tolerances.json`) because model assumptions intentionally bias some tissue classes.
+  - Initial tolerance profile is derived from local CPU + `cpufit_cpu` runs; MATLAB calibration can be added to the same workflow later.
+  - Current profile is explicitly marked provisional (`gate_ready=false`) while phantom performance triage is in progress.
+- Phantom GT troubleshooting status (2026-02-23):
+  - Timing metadata and Stage-A conversion metadata (`TemporalResolution`, relaxivity, hematocrit) mismatches were fixed and are no longer the dominant phantom error source.
+  - Nonlinear T1 fitting is now the default for Python qualification/parametric workflows and substantially improves phantom T1 accuracy.
+  - Low-noise diagnostic phantom `sub-08phantom` (extra VFA flip angle) shows good T1 + AIF agreement but still large DCE parameter bias, supporting model-mismatch diagnosis (`2cxm`-generated phantoms vs simpler fit models).
+  - Detailed notes and temporary phantom-only diagnostic behavior are documented in `tests/PHANTOM_GT_QUALIFICATION_STATUS.md`.
 
 ## Category Definitions
 - `done`: implemented and acceptable for current transition goals.

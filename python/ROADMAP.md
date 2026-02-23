@@ -82,6 +82,7 @@ Scope:
 Current status:
 - Discovery utility is available at `/Users/samuelbarnes/code/ROCKETSHIP/run_bids_discovery.py`.
 - Qualification runner is available at `/Users/samuelbarnes/code/ROCKETSHIP/run_python_qualification.py`.
+- Synthetic phantom GT reliability runner is available at `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/run_phantom_gt_reliability.py` (T1 reconstruction + DCE map MAE vs `rawdata/.../gt` by tissue region).
 - A discovery-driven qualification run was completed on 2026-02-22 for
   `tests/data/BIDS_test`:
   - `sessions_discovered=5` (including `sub-05phantom`)
@@ -96,6 +97,11 @@ Current status:
   next backend/CPU for affected models.
 - Current `backend=auto` qualification run passes on the BIDS-test packet with
   accelerated `cpufit_cpu` after the `gpu_tolerance=1e-6` update.
+- Synthetic phantom sessions (`sub-05/06/07`) now have a separate region/model-specific GT reliability check with initial CPU + `cpufit_cpu` tolerance profile (`tests/data/BIDS_test/phantom_gt_mae_tolerances.json`).
+- Low-noise diagnostic phantom `sub-08phantom` has been added (extra VFA flip angle) to isolate T1/noise effects from DCE model bias.
+- Phantom GT tolerance profile is currently provisional (`gate_ready=false`) while performance triage continues.
+- Phantom GT troubleshooting indicates timing/Stage-A metadata mismatches are fixed; remaining large DCE parameter bias is now more consistent with model mismatch (`2cxm` generation vs `tofts`/`ex_tofts`/`patlak` fitting).
+- See `/Users/samuelbarnes/code/ROCKETSHIP/tests/PHANTOM_GT_QUALIFICATION_STATUS.md` for current findings and ruled-out causes.
 - Remaining follow-up is additional cohort coverage and CUDA/GPUfit runtime
   verification, not the previous `ex_tofts` BIDS-test blocker.
 

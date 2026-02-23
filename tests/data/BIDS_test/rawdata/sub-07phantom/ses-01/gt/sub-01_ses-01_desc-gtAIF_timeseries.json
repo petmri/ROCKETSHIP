@@ -1,0 +1,25 @@
+{
+    "Description": "Synthetic phantom ground truth AIF time series",
+    "Columns": [
+        "frame_idx",
+        "time_min",
+        "aif_gd_mM",
+        "aif_si_norm"
+    ],
+    "TimeUnits": "min",
+    "ConcentrationUnits": "mM",
+    "SignalUnits": "normalized SI",
+    "AIFConcentrationKind": "plasma",
+    "PlasmaCorrectionApplied": false,
+    "Hematocrit": 0.0,
+    "RecommendedROCKETSHIPHematocrit": 0.0,
+    "BaselineImages": 7,
+    "TemporalResolutionMin": 0.11448671,
+    "TemporalResolution": 6.86920242,
+    "RepetitionTime": 0.008706,
+    "FlipAngle": 16.756,
+    "Relaxivity_per_mM_per_s": 5.264308,
+    "AIFPrecontrastT1_ms": 1318.303713,
+    "AIFRho": 1008.239384,
+    "SyntheticAIFModel": "parker"
+}

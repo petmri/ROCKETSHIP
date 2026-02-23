@@ -242,7 +242,7 @@ def _run_t1_for_session(session: BidsSession, output_dir: Path) -> Dict[str, Any
         payload = {
             "output_dir": str(output_dir),
             "vfa_files": [str(inputs["vfa_deriv"])],
-            "fit_type": "t1_fa_linear_fit",
+            "fit_type": "t1_fa_fit",
             "output_basename": "T1_map",
             "output_label": session.id,
             "rsquared_threshold": 0.6,

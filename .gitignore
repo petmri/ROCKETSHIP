@@ -181,7 +181,6 @@ email_preferences.txt
 dce_last_state.mat
 *info.log
 dce/*info.log
-tests/data/BIDS_test/derivatives
 tests/data/synthetic/generated
 tests/data/BBB data p19/Dyn-1_timecurves.fig
 tests/data/BBB data p19/Dyn-1dynamicCt.nii.gz

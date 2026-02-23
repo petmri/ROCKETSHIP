@@ -240,6 +240,27 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
   --print-summary-json
 ```
 
+## Synthetic phantom GT reliability (diagnostic)
+Run the phantom GT summary runner (reconstructs T1, runs DCE, compares against `rawdata/.../gt` by tissue region):
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python tests/python/run_phantom_gt_reliability.py --backend auto
+```
+
+Limit to a single phantom (useful for fast debugging, e.g. low-noise `sub-08phantom`):
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python tests/python/run_phantom_gt_reliability.py --backend auto --subject sub-08phantom
+```
+
+Important current status:
+- The phantom tolerance profile (`tests/data/BIDS_test/phantom_gt_mae_tolerances.json`) is provisional and not a merge gate yet.
+- `tests/python/test_phantom_gt_reliability.py` is qualification-gated and will `xfail` when the profile is marked `gate_ready=false`.
+- Phantom runs currently align Stage-A baseline to GT `BaselineImages` for diagnostics; real-data baseline auto-detection is still a TODO.
+- See `/Users/samuelbarnes/code/ROCKETSHIP/tests/PHANTOM_GT_QUALIFICATION_STATUS.md` for current findings, ruled-out causes, and known dataset details.
+
 ## Parity and benchmark helpers
 Parity helper (prints summary metrics after pytest):
 

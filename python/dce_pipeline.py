@@ -765,6 +765,23 @@ def _resolve_dynamic_metadata(config: DcePipelineConfig, n_timepoints: int) -> D
 
     source_prefix = f"json:{metadata_source_path}" if metadata_source_path else "json"
 
+    def _payload_lookup(keys: Tuple[str, ...]) -> Tuple[Optional[Any], Optional[str]]:
+        for raw_key in keys:
+            if "." not in raw_key:
+                if raw_key in payload:
+                    return payload[raw_key], raw_key
+                continue
+            cur: Any = payload
+            ok = True
+            for part in raw_key.split("."):
+                if not isinstance(cur, dict) or part not in cur:
+                    ok = False
+                    break
+                cur = cur[part]
+            if ok:
+                return cur, raw_key
+        return None, None
+
     if tr_ms is None:
         if "tr_ms" in payload:
             tr_ms = float(payload["tr_ms"])
@@ -775,15 +792,9 @@ def _resolve_dynamic_metadata(config: DcePipelineConfig, n_timepoints: int) -> D
         elif "RepetitionTimeExcitation" in payload:
             tr_ms = float(payload["RepetitionTimeExcitation"]) * 1000.0
             metadata_sources["tr_ms"] = f"{source_prefix}.RepetitionTimeExcitation"
-            if time_resolution_sec is None and "RepetitionTime" in payload:
-                time_resolution_sec = float(payload["RepetitionTime"])
-                metadata_sources["time_resolution_sec"] = f"{source_prefix}.RepetitionTime"
         elif "RepetitionTime" in payload:
             tr_ms = float(payload["RepetitionTime"]) * 1000.0
             metadata_sources["tr_ms"] = f"{source_prefix}.RepetitionTime"
-            if time_resolution_sec is None:
-                time_resolution_sec = float(payload["RepetitionTime"])
-                metadata_sources["time_resolution_sec"] = f"{source_prefix}.RepetitionTime"
 
     if time_resolution_sec is None:
         if "time_resolution_sec" in payload:
@@ -792,12 +803,6 @@ def _resolve_dynamic_metadata(config: DcePipelineConfig, n_timepoints: int) -> D
         elif "TemporalResolution" in payload:
             time_resolution_sec = float(payload["TemporalResolution"])
             metadata_sources["time_resolution_sec"] = f"{source_prefix}.TemporalResolution"
-        elif "TriggerDelayTime" in payload and n_timepoints > 0:
-            time_resolution_sec = float(payload["TriggerDelayTime"]) / float(n_timepoints) / 1000.0
-            metadata_sources["time_resolution_sec"] = f"{source_prefix}.TriggerDelayTime"
-        elif "AcquisitionDuration" in payload and n_timepoints > 0:
-            time_resolution_sec = float(payload["AcquisitionDuration"]) / float(n_timepoints)
-            metadata_sources["time_resolution_sec"] = f"{source_prefix}.AcquisitionDuration"
 
     if (
         time_resolution_sec is not None
@@ -815,11 +820,55 @@ def _resolve_dynamic_metadata(config: DcePipelineConfig, n_timepoints: int) -> D
             fa_deg = float(payload["FlipAngle"])
             metadata_sources["fa_deg"] = f"{source_prefix}.FlipAngle"
 
+    relaxivity_val = None
+    relaxivity_key = None
+    relaxivity_val, relaxivity_key = _payload_lookup(
+        (
+            "relaxivity",
+            "Relaxivity_per_mM_per_s",
+            "contrast_relaxivity",
+            "ContrastRelaxivity_per_mM_per_s",
+            "SyntheticPhantom.relaxivity",
+            "SyntheticPhantom.Relaxivity_per_mM_per_s",
+        )
+    )
+    relaxivity = None
+    if relaxivity_val is not None:
+        relaxivity = float(relaxivity_val)
+        metadata_sources["relaxivity"] = f"{source_prefix}.{relaxivity_key}"
+
+    hematocrit_val = None
+    hematocrit_key = None
+    hematocrit_val, hematocrit_key = _payload_lookup(
+        (
+            "hematocrit",
+            "Hematocrit",
+            "SyntheticPhantom.hematocrit",
+            "SyntheticPhantom.Hematocrit",
+            "SyntheticPhantom.RecommendedROCKETSHIPHematocrit",
+        )
+    )
+    hematocrit = None
+    if hematocrit_val is not None:
+        hematocrit = float(hematocrit_val)
+        metadata_sources["hematocrit"] = f"{source_prefix}.{hematocrit_key}"
+
+    aif_kind_val, aif_kind_key = _payload_lookup(
+        (
+            "AIFConcentrationKind",
+            "SyntheticPhantom.AIFConcentrationKind",
+        )
+    )
+    aif_concentration_kind = str(aif_kind_val).strip().lower() if aif_kind_val is not None else None
+    if aif_kind_val is not None and aif_kind_key is not None:
+        metadata_sources["aif_concentration_kind"] = f"{source_prefix}.{aif_kind_key}"
+
     if tr_ms is None:
         raise ValueError("Unable to determine TR; set stage_overrides.tr_ms or provide DCE metadata JSON")
     if time_resolution_sec is None:
         raise ValueError(
-            "Unable to determine time resolution; set stage_overrides.time_resolution_sec or provide DCE metadata JSON"
+            "Unable to determine DCE frame spacing (time resolution); set stage_overrides.time_resolution_sec "
+            "or provide DCE metadata JSON with TemporalResolution/time_resolution_sec."
         )
     if fa_deg is None:
         raise ValueError("Unable to determine flip angle; set stage_overrides.fa_deg or provide DCE metadata JSON")
@@ -829,12 +878,19 @@ def _resolve_dynamic_metadata(config: DcePipelineConfig, n_timepoints: int) -> D
         raise ValueError(f"Resolved time resolution must be positive, got {time_resolution_sec}")
     if float(fa_deg) <= 0.0:
         raise ValueError(f"Resolved flip angle must be positive, got {fa_deg}")
+    if relaxivity is not None and float(relaxivity) <= 0.0:
+        raise ValueError(f"Resolved relaxivity must be positive, got {relaxivity}")
+    if hematocrit is not None and not (0.0 <= float(hematocrit) < 1.0):
+        raise ValueError(f"Resolved hematocrit must be in [0, 1), got {hematocrit}")
 
     return {
         "tr_ms": float(tr_ms),
         "time_resolution_sec": float(time_resolution_sec),
         "time_resolution_min": float(time_resolution_sec) / 60.0,
         "fa_deg": float(fa_deg),
+        "relaxivity": (float(relaxivity) if relaxivity is not None else None),
+        "hematocrit": (float(hematocrit) if hematocrit is not None else None),
+        "aif_concentration_kind": aif_concentration_kind,
         "metadata_source_keys": sorted(payload.keys()),
         "metadata_source_path": metadata_source_path,
         "metadata_sources": metadata_sources,
@@ -1103,8 +1159,22 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     fa_deg = float(timing["fa_deg"])
     time_resolution_min = float(timing["time_resolution_min"])
 
-    relaxivity = float(_stage_override(config, "relaxivity", 3.4))
-    hematocrit = float(_stage_override(config, "hematocrit", 0.45))
+    relaxivity_override, _ = _explicit_stage_override(config, ("relaxivity",))
+    hematocrit_override, _ = _explicit_stage_override(config, ("hematocrit",))
+    relaxivity = float(
+        relaxivity_override
+        if relaxivity_override is not None
+        else (timing.get("relaxivity") if timing.get("relaxivity") is not None else 3.4)
+    )
+    hematocrit = float(
+        hematocrit_override
+        if hematocrit_override is not None
+        else (timing.get("hematocrit") if timing.get("hematocrit") is not None else 0.45)
+    )
+    if relaxivity <= 0.0:
+        raise ValueError(f"relaxivity must be positive, got {relaxivity}")
+    if not (0.0 <= hematocrit < 1.0):
+        raise ValueError(f"hematocrit must be in [0, 1), got {hematocrit}")
 
     ss_start, ss_end = _baseline_window(config, n_time)
     baseline_slice = slice(ss_start, ss_end)
@@ -1190,6 +1260,7 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
         "time_resolution_min": time_resolution_min,
         "relaxivity": relaxivity,
         "hematocrit": hematocrit,
+        "aif_concentration_kind": timing.get("aif_concentration_kind"),
         "blood_t1_override_sec": blood_t1_override_sec,
         "steady_state_time": [ss_start + 1, ss_end],
         "start_injection": start_injection,
