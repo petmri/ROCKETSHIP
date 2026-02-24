@@ -13,16 +13,20 @@ residuals = [];
 % check (again) if using gpu
 % Auto detect GPU
 try
-    USE_GPU = strfind(gpuDevice().Name, 'NVIDIA') && ...
-        ( exist("matlab/GpufitConstrainedMex.mexa64", 'file') == 3);
-    disp("Gpufit detected. GPU will be utilized for voxel fitting.")
+    USE_GPU = GpufitCudaAvailableMex;
 catch
-    disp("Gpufit not detected. Defaulting to CPU.")
     USE_GPU = 0;
+end
+
+if USE_GPU
+    disp("Gpufit detected. GPU will be utilized for voxel fitting.")
+else
+    disp("Gpufit not detected. Defaulting to CPU.")
 end
 gpu_prefs = parse_preference_file('dce_preferences.txt',0,{'force_cpu'},{0});
 FORCE_CPU = str2num(gpu_prefs.force_cpu);
 if FORCE_CPU
+    disp("Forcing CPU for voxel fitting...")
     USE_GPU = 0;
 end
 
@@ -147,13 +151,13 @@ if strcmp(model, 'ex_tofts')
         
         % If did not converge discard values
         one_parameter = parameters(1,:);
-        one_parameter(states~=0) = -0.000001;  %Ktrans
+        one_parameter(states~=0) = NaN;  %Ktrans
         parameters(1,:) = one_parameter;
         one_parameter = parameters(2,:);
-        one_parameter(states~=0) = -0.000001;  %ve
+        one_parameter(states~=0) = NaN;  %ve
         parameters(2,:) = one_parameter;
         one_parameter = parameters(3,:);
-        one_parameter(states~=0) = -0.000001;  %vp
+        one_parameter(states~=0) = NaN;  %vp
         parameters(3,:) = one_parameter;
         
         GG = [parameters' chi_squares'];
@@ -311,13 +315,13 @@ elseif strcmp(model, 'tissue_uptake')
         fprintf('ratio gpu not read = %s\n',num2str(state_4));
         % If did not converge discard values
 %         one_parameter = parameters(1,:);
-%         one_parameter(states~=0) = -0.000001;  %Ktrans
+%         one_parameter(states~=0) = NaN;  %Ktrans
 %         parameters(1,:) = one_parameter;
 %         one_parameter = parameters(2,:);
-%         one_parameter(states~=0) = -0.000001;  %vp
+%         one_parameter(states~=0) = NaN;  %vp
 %         parameters(2,:) = one_parameter;
 %         one_parameter = parameters(3,:);
-%         one_parameter(states~=0) = -0.000001;  %fp
+%         one_parameter(states~=0) = NaN;  %fp
 %         parameters(3,:) = one_parameter;
         
         GG = [parameters' chi_squares'];
@@ -433,10 +437,10 @@ elseif strcmp(model, 'tofts')
         
         % If did not converge discard values
         one_parameter = parameters(1,:);
-        one_parameter(states~=0) = -0.000001;  %Ktrans
+        one_parameter(states~=0) = NaN;  %Ktrans
         parameters(1,:) = one_parameter;
         one_parameter = parameters(2,:);
-        one_parameter(states~=0) = -0.000001;  %ve
+        one_parameter(states~=0) = NaN;  %ve
         parameters(2,:) = one_parameter;
         
         GG = [parameters' chi_squares'];
@@ -790,10 +794,10 @@ elseif strcmp(model, 'patlak')
 
         % If did not converge discard values
         one_parameter = parameters(1,:);
-        one_parameter(states~=0) = -0.000001;  %Ktrans
+        one_parameter(states~=0) = NaN;  %Ktrans
         parameters(1,:) = one_parameter;
         one_parameter = parameters(2,:);
-        one_parameter(states~=0) = -0.000001;  %vp
+        one_parameter(states~=0) = NaN;  %vp
         parameters(2,:) = one_parameter;
         
         GG = [parameters' chi_squares'];
@@ -960,17 +964,17 @@ elseif strcmp(model, '2cxm')
         
         % If did not converge discard values
         one_parameter = parameters(1,:);
-        one_parameter(states~=0) = -0.000001;  %Ktrans
+        one_parameter(states~=0) = NaN;  %Ktrans
         parameters(1,:) = one_parameter;
         one_parameter = parameters(2,:);
-        one_parameter(states~=0) = -0.000001;  %ve
+        one_parameter(states~=0) = NaN;  %ve
         parameters(2,:) = one_parameter;
         one_parameter = parameters(3,:);
-        one_parameter(states~=0) = -0.000001;  %vp
+        one_parameter(states~=0) = NaN;  %vp
         parameters(3,:) = one_parameter;
-        one_parameter = parameters(3,:);
-        one_parameter(states~=0) = -0.000001;  %fp
-        parameters(3,:) = one_parameter;
+        one_parameter = parameters(4,:);
+        one_parameter(states~=0) = NaN;  %fp
+        parameters(4,:) = one_parameter;
         
         GG = [parameters' chi_squares'];
         % add zeros for the unknown + and - 95 CI

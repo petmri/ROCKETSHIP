@@ -23,14 +23,15 @@ autoaif_sobel_threshold = 0.005
 % AIF fitting options
 %%%%%%%%%%%%%%%%%%%%%%
 % aif function = A*exp(-c*t)+B*exp(-d*t)
+% Initial Upper limits and initial values for A and B are auto-set
 % values order = A B c d
 aif_lower_limits = 0 0 0 0
-aif_upper_limits = 5 5 5 5
-aif_initial_values = 1 1 1 1
+aif_upper_limits = 5 5 50 50
+aif_initial_values = 1 1 1 0.01
 
 % Advanced Options
 aif_TolFun = 10^(-20)
-aif_TolX = 10^(-20)
+aif_TolX = 10^(-23)
 aif_MaxIter = 1000
 aif_MaxFunEvals = 1000
 %robust options no quotes: "off" "LAR" "Bisquare"

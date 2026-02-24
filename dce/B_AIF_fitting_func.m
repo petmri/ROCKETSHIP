@@ -1,4 +1,6 @@
-function results = B_AIF_fitting_func(results_a_path,start_time,end_time,start_injection,end_injection,fit_aif,import_aif_path,time_resolution, timevectpath)
+function [results, B_vars] = B_AIF_fitting_func(results_a_path, start_time, ...
+    end_time,start_injection,end_injection,fit_aif,import_aif_path,time_resolution, ...
+    timevectpath, RUNA_struct, save_output)
 
 % B_AIF_fitting_func - This file is used to apply a model fitting to the
 % arterial input function. AIF is fit to a bi-exponential model with a
@@ -47,28 +49,35 @@ function results = B_AIF_fitting_func(results_a_path,start_time,end_time,start_i
 %% Toggle options
 % If you have a threshold value for noise (testing).
 threshold = 0;
+if nargin<11
+    save_output=true;
+end
 
 %% DO NOT ALTER BELOW UNLESS YOU KNOW WHAT YOU ARE DOING
 
 %% 1. Load the data array from previous script
 
-load(results_a_path);
+if ~exist('RUNA_struct','var')
+    load(results_a_path);
+else
+    Adata = RUNA_struct;
+end
 
 % unload the variables from previous data array
 quant    = Adata.quant;
 rootname = Adata.rootname;
-Cp       = Adata.Cp;
-Ct       = Adata.Ct;
+Cp       = double(Adata.Cp);
+Ct       = double(Adata.Ct);
 if (start_injection == -1 || end_injection == -1)
     start_injection = Adata.start_injection*time_resolution;
     end_injection = Adata.end_injection*time_resolution;
 end
 
 % We also load the Rawdata for raw curve fitting if necessary
-Stlv    = Adata.Stlv;
-Sttum   = Adata.Sttum;
-Sss     = Adata.Sss;
-Ssstum  = Adata.Ssstum;
+Stlv    = double(Adata.Stlv);
+Sttum   = double(Adata.Sttum);
+Sss     = double(Adata.Sss);
+Ssstum  = double(Adata.Ssstum);
 
 results  = '';
 
@@ -85,13 +94,13 @@ fprintf('************** User Input **************\n\n');
 disp('User selected part A results: ');
 disp(results_a_path);
 Opt.Input = 'file';
-try
-    a_md5 = DataHash(results_a_path, Opt);
-catch
-    disp('Problem using md5 hashing. Will continue');
-    a_md5 = 'error';
-end
-fprintf('File MD5 hash: %s\n\n', a_md5)
+% try
+%     a_md5 = DataHash(results_a_path, Opt);
+% catch
+%     disp('Problem using md5 hashing. Will continue');
+%     a_md5 = 'error';
+% end
+% fprintf('File MD5 hash: %s\n\n', a_md5)
 disp('User selected start time (min): ');
 disp(start_time);
 disp('User selected end time (min): ');
@@ -223,8 +232,8 @@ xdata{1}.step = [start_injection end_injection];
 M{1} = '';
 aif_name = '';
 if isempty(import_aif_path)
-    if(fit_aif)
-        xdata{1}.raw = false;
+    if(fit_aif==1)
+        xdata{1}.fittingAU = false;
         [Cp_fitted xAIF xdataAIF] = AIFbiexpfithelp(xdata, 1);
         Cp_use = Cp_fitted;
  
@@ -234,11 +243,11 @@ if isempty(import_aif_path)
         %Fit raw data curve
         Cptemp = xdata{1}.Cp;
         xdata{1}.Cp = xdata{1}.Stlv;
-        xdata{1}.raw = true;
+        xdata{1}.fittingAU = true;
         [Stlv_fitted, ~, ~] = AIFbiexpfithelp(xdata, 1);
         xdata{1}.Cp = Cptemp;
         Stlv_use = Stlv_fitted;
-    else
+    elseif(fit_aif==2)
         Cp_use = CpROI;
         M{2} = 'Using Raw Curve';
         aif_name = 'raw';
@@ -269,6 +278,15 @@ else
         Stlv_use = exernal.xdata{1}.Stlv_use;
         import_timer = external.xdata{1}.timer;
         import_start = external.xdata{1}.step(1);
+    elseif endsWith(import_aif_path, 'csv')
+        S_ratio = external .* (1 - exp(-Adata.tr / Adata.blood_t1)) / (1 - exp(-Adata.tr/Adata.blood_t1)*cosd(Adata.fa));
+        R1 = (1 / Adata.tr) .* log((1 - S_ratio .* cosd(Adata.fa)) ./ (1 - S_ratio));
+        Cp_use = (R1 - 1/Adata.blood_t1) / (Adata.relaxivity*(1-Adata.hematocrit));
+        Cp_use = Cp_use';
+        Stlv_use = external';
+        import_timer = timer;
+        [~, max_index] = max(Stlv_use);
+        import_start = timer(max_index);
     else
         disp('No Cp curve found in selected file')
         return
@@ -312,6 +330,11 @@ subplot(1,2,1)
 plot(timer,CpROI,'r.');
 hold on;
 plot(timer, Cp_use,'b');
+disp('AIF mmol:')
+perLine = 14;
+fmt = [repmat('%8.4f ', 1, perLine), '\n'];
+fprintf(fmt, CpROI);
+if mod( length(CpROI), perLine) ~= 0; fprintf('\n'); end
 
 M{1} = 'Original Plasma Curve';
 % M{2} = 'Selected Curve';
@@ -384,19 +407,23 @@ Bdata.Ssstum      = Adata.Ssstum;
 
 results = fullfile(PathName1, ['B_' rootname aif_name '_R1info.mat']);
 
-save(results, 'Bdata','-v7.3');
+if save_output==true
+    save(results, 'Bdata','-v7.3');
 
-Opt.Input = 'file';
-try
-    mat_md5 = DataHash(results, Opt);
-catch
-    disp('Problem using md5 hashing. Will continue');
-    mat_md5 = 'error';
+    Opt.Input = 'file';
+% try
+%     mat_md5 = DataHash(results, Opt);
+% catch
+%     disp('Problem using md5 hashing. Will continue');
+%     mat_md5 = 'error';
+% end
+    disp(' ')
+    disp('MAT results saved to: ')
+    disp(results)
+% disp(['File MD5 hash: ' mat_md5])
+else
+    B_vars = Bdata;
 end
-disp(' ')
-disp('MAT results saved to: ')
-disp(results)
-disp(['File MD5 hash: ' mat_md5])
 
 disp(' ');
 disp('Finished B');

@@ -1,19 +1,46 @@
-function T1mapping_fit(tp_path)
+function T1mapping_fit(source_path, tp_path, file)
 % INPUTS
 %------------------------------------
-file_list = {strcat(tp_path,'VFA_mc.nii')};
+if (tp_path(end) ~= '/')
+    file_list = {strcat(tp_path, '/', file)};
+else
+    file_list = {strcat(tp_path, file)};
+end
+
+if ~(exist(file_list{1}, "file"))
+    disp('VFA file missing!')
+    disp(file_list)
+    % exit;
+end
 					% must point to valid nifti files
-json_list = dir(strcat(tp_path,'*.json'));
-% TODO - fix to exclude dynamic
-parameter_list = zeros(size(json_list,1)-1, 1);
+json_list = dir(strcat(source_path,'/*VFA.json'));
+
+% use regex to find VFA files
+pattern = 'sub-\d+_ses-\d+_flip-\d+_VFA\.json';
+
+% Initialize a count for JSON files that match the pattern
+jsonFileCount = 0;
+
+% Loop through the files and count JSON files that match the pattern
+for i = 1:numel(json_list)
+    % Check if the file name matches the pattern
+    if regexp(json_list(i).name, pattern, 'once')
+        jsonFileCount = jsonFileCount + 1;
+    end
+end
+
+parameter_list = zeros(size(jsonFileCount,1), 1);
 if isempty(json_list)
     % default FAs
     parameter_list = [2 5 10 12 15];
-    tr = 5.14;          % units ms, only used for T1 FA fitting
+    preferencePath = strcat('../../script_preferences.txt');
+    script_prefs = parse_preference_file(preferencePath, 0, ...
+        {'tr'});
+    tr = script_prefs.tr;          % units ms, only used for T1 FA fitting
 else
     % extract TR and FA from jsons
-    for i = 1:size(json_list, 1)-1
-        fname = strcat(tp_path, json_list(i).name);
+    for i = 1:jsonFileCount
+        fname = strcat(source_path, '/', json_list(i).name);
         fid = fopen(fname);
         raw = fread(fid,inf);
         str = char(raw');
@@ -24,6 +51,17 @@ else
         parameter_list(i) = fa;
     end
     parameter_list = sort(parameter_list);
+end
+
+B1_file = char(strcat(tp_path, "B1_scaled_FAreg.nii"));
+% if B1 map exists, load it into a 4D array
+if (exist(B1_file, "file"))
+    fa_list = load_untouch_nii(B1_file);
+    true_fa = ones([size(fa_list.img) length(parameter_list)]);
+    for i = 1:size(parameter_list)
+        true_fa(:,:,:,i) = fa_list.img(:,:,:) * parameter_list(i);
+    end
+    cur_dataset.true_fa = true_fa;
 end
 
 					% units of ms or degrees
@@ -89,8 +127,9 @@ JOB_struct(1).save_txt = save_txt;
 %------------------------------------
 
 % Call Mapping Function
-% try
+try
     calculateMap(JOB_struct);
-% catch L
-%     disp("T1 mapping failed! Sad!")
-% end
+catch L
+    disp("T1 mapping failed! Sad!")
+    disp(L)
+end

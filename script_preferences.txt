@@ -19,14 +19,20 @@
     % probably deprecated (COPIUM)
     LUT = 1
 
-    % input nifti datasets
-    dynamic_files = DCE_mc_bfc_norm.nii
+    % input nifti datasets, can specify subfolders and use wildcard *
+    dynamic_files = /dce/*_desc-bfcz_DCE.nii*
 
-    aif_files = aif.nii
-    roi_files = T1_bet_mask_dyn.nii
-    t1map_files = t1_map_fixed_use_me.nii
+    aif_files = /dce/*desc-AIF_T1map.nii*
+    roi_files = /anat/*space-DCEref_desc-brain_mask.nii*
+    t1map_files = /anat/*space-DCEref_T1map.nii*
     noise_files =
     drift_files =
+
+    % what t-dimension image to start from/end on
+    % useful for excluding bad data points at beginning or end
+    % leave blank to do from beginning/to end
+    start_t = 3
+    end_t = 
 
     % Name of output file
     rootname = dce
@@ -52,37 +58,47 @@
 aif_rr_type = aif_roi
 
 % repetition time of dynamic scan (ms), overwritten by json if it exists
-tr = 21.572
+tr = 8
 
 % flip angle of dynamic scan (degrees), overwritten by json if it exists
-fa = 20
-
-% what t-dimension image to start from/end on
-% useful for excluding bad data points at beginning or end
-% leave blank to do from beginning/to end
-start_t = 
-end_t = 
+fa = 15
 
 % hematocrit percent (0 - 1.00) of subject
 hematocrit = 0.45
 
 % snr required for AIF voxels, snr must exceed this
 % value averaged over all time points
-snr_filter = 5
+snr_filter = 1
 
 % -1 = determine via figure, -2 = auto
 injection_time = -2
 
 % r1 relaxivity (in mM^-1*sec^-1) of contrast agent
-relaxivity = 3.7
+% if AcquisitionDateTime field exists in json, CLI auto determines for this study:
+% pre-Oct 2017 assumes MultiHance
+% post-Oct 2017 assumes dotarem
+% Shen 2015: https://journals.lww.com/investigativeradiology/fulltext/2015/05000/t1_relaxivities_of_gadolinium_based_magnetic.4.aspx
+% dotarem 3T, human blood = 3.43 ± 0.29, 3.19 ± 0.4 [3.4 ± 0.4]
+% magnevist 3T, human blood = 3.76 ± 0.17, 3.34 ± 0.19 [3.8 ± 0.2]
+% MH 3T - https://journals.lww.com/investigativeradiology/fulltext/2015/05000/t1_relaxivities_of_gadolinium_based_magnetic.4.aspx
+% https://www.bracco.com/sites/default/files/2022-10/kr-en-2016-04-30-brochure-the-strenght-of-relaxivity-multihance.pdf
+% https://journals.lww.com/investigativeradiology/fulltext/2006/03000/relaxivity_of_gadopentetate_dimeglumine.3.aspx
+% https://appliedradiology.com/articles/mri-contrast-selection-greater-stability-or-higher-relaxivity
+% MultiHance 3T, human blood = 5.4 ± 0.3 (2015; appliedradiology.com), 5.9 ± 0.4, <6ish (bracco), 6.3 ± 0.4 (2006, <1 mM), 6.3 (mriquestions.com)
+% Szomolanyi 2019: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6738537/
+% dotarem 3T, human blood - 2.72 ± 0.17
+% magnevist 3T, human blood - 3.3 ± 0.2
+relaxivity = 2.8
+% set below to 1 if you wish to use the value above with the CLI command.
+force_use_default_relaxivity = 0
 
 % boolean value, perform drift correction globally,
 % not on a slice by slice basis
 drift_global = 1
 
-% the T1 value of blood (in ms) only used if 
+% the T1 value of blood (in s) only used if
 % aif_rr_type is set to 'aif_auto_static' or 'aif_roi_static'
-blood_t1 = 1000
+blood_t1 = 2.000
 
 % the length of the contrast agent injection in
 % number of acquisitions, for auto AIF only
@@ -102,16 +118,16 @@ end_time = 0
 % disable if you really know what you're doing
 auto_find_injection = 1
     % start of contrast injection (in minutes)
-    start_injection = 0.5
+    start_injection = 0.0867
     % end of contrast injection (in minutes)
-    end_injection = 0.7
+    end_injection = 0.2167
 
 % time resolution of dynamic scan (in seconds)
-time_resolution = 15.4
+time_resolution = 15.36
 
 % raw = 2, fitted = 1, import = 3, raw for reference region
 aif_type = 1
-    import_aif_path = 
+   import_aif_path =
 
 % bool to use manual time vector
 timevectyn = 0

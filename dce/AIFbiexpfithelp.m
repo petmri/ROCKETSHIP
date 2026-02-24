@@ -58,14 +58,25 @@ end
 options = optimset('lsqcurvefit');
 
 %increase the number of function evaluations for more accuracy
-options.MaxFunEvals = MaxFunEvals;
-options.MaxIter     = MaxIter;
-options.TolFun      = TolFun;
-options.TolX        = TolX;
-options.Diagnostics = 'off';
-options.Display     = 'off';
-options.Algorithm   = 'levenberg-marquardt';
-options.Robust      = Robust;
+% options.MaxFunEvals = MaxFunEvals;
+% options.MaxIter     = MaxIter;
+% options.TolFun      = TolFun;
+% options.TolX        = TolX;
+% options.Diagnostics = 'off';
+% options.Display     = 'off';
+% options.Algorithm   = 'levenberg-marquardt';
+% options.Robust      = Robust;
+options = fitoptions('Method', 'NonlinearLeastSquares',...
+    'Algorithm', 'Levenberg-Marquardt',...
+    'MaxIter', MaxIter,...
+    'MaxFunEvals', MaxFunEvals,...
+    'TolFun', TolFun,...
+    'TolX', TolX,...
+    'Display', 'off',...
+    'Lower',lower_limits,...
+    'Upper', upper_limits,...
+    'StartPoint', initial_values,...
+    'Robust', Robust);
 
 % Choose upper and lower bounds only for trust-region methods.
 % lb = [0 0 0 0];
@@ -97,14 +108,18 @@ step = zeros(size(timer));
 step(start_index:end_index) = 1;
 xdata{1}.step = step;
 
-% W is the weighting matrix, should you want to emphasise certain
-% datapoints
-W = ones(size(Cp));
+
 [~, max_index] = max(Cp.*step);
 % WW= sort(Cp.*step, 'descend');
 % ind(1) = find(Cp == WW(1));
 % ind(2) = find(Cp == WW(2));
 % ind(3) = find(Cp == WW(3));
+
+% W is the weighting matrix, should you want to emphasise certain
+% datapoints
+W = ones(size(Cp)) .* 10;
+W(1:max_index) = 0;
+options.Weights = W;
 
 step(max_index+1:end) = 0;
 xdata{1}.step = step;
@@ -133,35 +148,40 @@ end
 
 maxer = Cp(max_index);
 xdata{1}.maxer = maxer;
-Cp = Cp.*W;
+% Cp = Cp.*W;
 
-if isfield(xdata{1}, 'raw') && xdata{1}.raw == true
-    end_baseline = find(xdata{1}.step > 0);
-    baseline = mean(Cp(1:end_baseline(1)));
-    xdata{1}.baseline = baseline;
-    upper_limits(1) = maxer*2;
-    upper_limits(2) = maxer*2;
-    initial_values(1) = maxer*0.5;
-    initial_values(2) = maxer*0.5;
-    if verbose>0
-        disp('Fitting raw values, limits and initial values adjusted');
-        fprintf('lower_limits = %s\n',num2str(lower_limits));
-        fprintf('upper_limits = %s\n',num2str(upper_limits));
-        fprintf('initial_values = %s\n',num2str(initial_values));
-    end
+end_baseline = find(xdata{1}.step > 0);
+baseline = mean(Cp(1:end_baseline(1)));
+xdata{1}.baseline = baseline;
+upper_limits(1) = maxer*2;
+upper_limits(2) = maxer*2;
+initial_values(1) = maxer*0.5;
+initial_values(2) = maxer*0.5;
+options.Upper = upper_limits;
+options.StartPoint = initial_values;
+if verbose>0
+    disp('Fitting AIF values, limits and initial values adjusted');
+    fprintf('lower_limits = %s\n',num2str(lower_limits));
+    fprintf('upper_limits = %s\n',num2str(upper_limits));
+    fprintf('initial_values = %s\n',num2str(initial_values));
 end
 % Currently, we use AIF
-[x,resnorm,residual,exitflag,output,lambda,jacobian] = lsqcurvefit(@AIFbiexpcon, ...
-    initial_values, xdata, ...
-    Cp',lower_limits,upper_limits,options);
+% [x,resnorm,residual,exitflag,output,lambda,jacobian] = lsqcurvefit(@AIFbiexpcon, ...
+%     initial_values, xdata, ...
+%     Cp',lower_limits,upper_limits,options);
+
+ft = fittype('AIFbiexpcon(A, B, c, d, T1, step, fittingAU, baseline)', ...
+    'independent', {'T1', 'step'}, 'coefficients', {'A', 'B', 'c', 'd'}, 'problem', {'fittingAU', 'baseline'});
+[f, gof, output] = fit([timer, step], Cp, ft, options, 'problem', {xdata{1}.fittingAU, xdata{1}.baseline});
 
 xdata{1}.timer = oldt;
-rsquare = 1 - resnorm / norm(Cp-mean(Cp))^2;
+% rsquare = 1 - resnorm / norm(Cp-mean(Cp))^2;
 if verbose>0
-    disp(['R^2 of AIF fit = ' num2str(rsquare)]);
+    disp(['Adjusted R^2 of AIF fit = ' num2str(gof.adjrsquare)]);
+    % disp(['Adjusted R^2 of AIF fit = ' num2str(rsquare)]);
 end
 
-out = AIFbiexpcon(x, xdata);
-
-
-
+% out = AIFbiexpcon(x, xdata);
+out = AIFbiexpcon(f.A, f.B, f.c, f.d, timer, step, xdata{1}.fittingAU, xdata{1}.baseline)';
+x = [f.A, f.B, f.c, f.d];
+rsquare = gof.adjrsquare;

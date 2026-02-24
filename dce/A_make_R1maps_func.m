@@ -1,9 +1,9 @@
 % function saved_results = A_make_R1maps_func(DYNAMIC, LV, TUMOR, NOISE, DRIFT, hdr, res,quant, rootname, dynampath, dynam_name, aif_rr_type, ... 
-function [saved_results, errormsg] = A_make_R1maps_func(filevolume, noise_pathpick, ...
+function [saved_results, RUNA_vars, errormsg] = A_make_R1maps_func(filevolume, noise_pathpick, ...
     noise_pixsize, LUT, filelist, t1aiffiles, t1roifiles, t1mapfiles, noisefiles, ...
     driftfiles, rootname, fileorder, quant, mask_roi, mask_aif, ...
     aif_rr_type, tr, fa, hematocrit, snr_filter, relaxivity, ...
-    steady_state_time, drift_global, blood_t1, injection_duration, start_t, end_t)
+    steady_state_time, drift_global, blood_t1, injection_duration, start_t, end_t, save_output)
 
 % A_make_R1maps_func - Generate concentration versus time curves for the
 % tumor region and the arterial input region. The setup follows Loveless
@@ -99,11 +99,21 @@ if ispc
 else
     disp('Non PC unable to run OpenGL software mode, there may be some graphics issues')
 end
+if nargin < 28
+    save_output = true;
+end
 
 
 %% DO NOT ALTER LINES BELOW UNLESS YOU KNOW WHAT YOU ARE DOING
 % Log input results
 %[log_path,base,~] = fileparts(dce_path);
+[dynampath, ~]  = fileparts(filelist{1});
+log_path = dynampath;
+log_path = fullfile(log_path, ['A_' rootname 'R1info.log']);
+if exist(log_path, 'file')==2
+  delete(log_path);
+end
+diary(log_path);
 
 fprintf('************** User Input **************\n\n');
 % disp('User selected dce file: ');
@@ -134,6 +144,20 @@ else
 end
 
 
+disp('User selected starting repetition: ')
+if ~isempty(start_t)
+    disp(start_t)
+else
+    disp('None')
+end
+
+disp('User selected ending repetition: ')
+if ~isempty(end_t)
+    disp(end_t)
+else
+    disp('None')
+end
+
 %% 2. a) Load the files
 
 [TUMOR, LV, NOISE, DYNAMIC, DRIFT, dynampath, dynam_name, rootname, hdr, ...
@@ -141,12 +165,6 @@ end
     loadIMGVOL(filevolume, noise_pathpick, noise_pixsize, LUT, t1aiffiles, ...
     t1roifiles, t1mapfiles, noisefiles, driftfiles, filelist, rootname, ...
     fileorder, mask_roi, mask_aif, start_t, end_t);
-log_path = dynampath;
-log_path = fullfile(log_path, ['A_' rootname 'R1info.log']);
-if exist(log_path, 'file')==2
-  delete(log_path);
-end
-diary(log_path);
 
 disp('User selected drift correction: ');
 if(isempty(find(DRIFT > 0, 1)))
@@ -160,7 +178,7 @@ else
 end
 fprintf('************** End User Input **************\n\n\n');
 disp('Starting Part A Processing')
-disp(datestr(now))
+disp(datetime)
 disp(' ');
 tic
 
@@ -268,7 +286,7 @@ if dimt==1
 end
 
 % The TR is in ms
-tr = tr/1000; 
+tr = tr/1000;
 
 %% 3. Setup the data for next step.
 
@@ -691,6 +709,9 @@ elseif snrfilter>=prefilter_number_aif_voxels
     error('Error SNR filter removed all AIF points, lower SNR filter requirement');
 end
 
+disp('Average Filtered AIF T1: ')
+disp(mean(LV(lvind)));
+
 %% 7. Convert AIF/ Reference region to R1
 T1LV     = LV(lvind);
 T1       = T1LV;
@@ -714,7 +735,7 @@ AB = A./B;
 
 [AB, T1LV, lvind, BADspacelABv, GOODspacelABv] = cleanAB(AB, T1LV,lvind, 'AIF', min(numel(T1LV)), 0.05, quant);
 if numel(T1LV)==0
-    error('Error all AIF voxels removed due to bad/negative values, check T1 values and AIF placement');
+    error('A_make_R1maps_func:AIFVoxelsRemoved', 'Error: all AIF voxels removed due to bad/negative values, check T1 values and AIF placement.');
 end
 
 R1tLV = double((1/tr).*log(AB));
@@ -725,7 +746,7 @@ Stlv = Stlv(:,GOODspacelABv);
 
 [R1tLV, T1LV, lvind, BADspacelv, GOODspacelv] = cleanR1t(R1tLV, T1LV,lvind, 'AIF', min(numel(T1LV)), 0.005, quant);
 if numel(T1LV)==0
-    error('Error all AIF voxels removed due to bad/negative values, check T1 values and AIF placement');
+    error('A_make_R1maps_func:AIFVoxelsRemoved', 'Error: all AIF voxels removed due to bad/negative values, check T1 values and AIF placement.');
 end
 Sss = Sss(GOODspacelv);
 Stlv = Stlv(:,GOODspacelv);
@@ -770,7 +791,7 @@ end
 
 AB = A./B;
 
-[AB T1TUM tumind BADspaceAB GOODspaceAB] = cleanAB(AB, T1TUM,tumind, 'Tumor', min(numel(T1TUM)), 0.7, quant);
+[AB, T1TUM, tumind, BADspaceAB, GOODspaceAB] = cleanAB(AB, T1TUM,tumind, 'Tumor', min(numel(T1TUM)), 0.7, quant);
 if numel(T1TUM)==0
     error('Error all voxels removed due to bad/negative values, check ROI, T1 values, and image quality');
 end
@@ -781,7 +802,7 @@ Sttum = Sttum(:,GOODspaceAB);
 Sstar = Sstar(GOODspaceAB);
 
 
-[R1tTOI T1TUM tumind BADspaceT GOODspaceT] = cleanR1t(R1tTOI, T1TUM,tumind, 'Tumor', min(numel(T1TUM)), 0.7, quant);
+[R1tTOI, T1TUM, tumind, BADspaceT, GOODspaceT] = cleanR1t(R1tTOI, T1TUM,tumind, 'Tumor', min(numel(T1TUM)), 0.7, quant);
 if numel(T1TUM)==0
     error('Error all voxels removed due to bad/negative values, check ROI, T1 values, and image quality');
 end
@@ -844,7 +865,7 @@ end
 
 CC = make_nii(CTFILE, res, [1 1 1],[],[],hdr);
 if quant
-    save_nii(CC, fullfile(PathName1, [rootname 'dynamicCt.nii']));
+    save_nii(CC, fullfile(PathName1, [rootname 'dynamicCt.nii.gz']));
 end
 %% 11. Save as delta R1 values (May be useful if the Contrast agent has longer correlation time).
 
@@ -898,10 +919,10 @@ Adata.Stlv   = Stlv;
 Adata.Sttum  = Sttum;
 Adata.T1 = T1;
 Adata.T1LV = T1LV;
-Adata.T1TUM=T1TUM;
+Adata.T1TUM= T1TUM;
 Adata.TUMOR= TUMOR;
 Adata.aif_rr_type = aif_rr_type;
-Adata.currentCT=currentCT;
+Adata.currentCT = currentCT;
 Adata.deltaR1LV = deltaR1LV;
 Adata.deltaR1TOI= deltaR1TOI;
 Adata.dynam_name= dynam_name;
@@ -924,57 +945,33 @@ Adata.voxelSNR_filtered = voxelSNR_filtered;
 Adata.injection_duration = injection_duration;
 Adata.start_injection = start_injection;
 Adata.end_injection = end_injection;
+Adata.tr = tr;
+Adata.fa = fa;
+Adata.blood_t1 = blood_t1;
 
 %% 14. Save the file for the next Step
 
-
 saved_results = fullfile(PathName1, ['A_' rootname 'R1info.mat']);
-save(saved_results, 'Adata','-v7.3');
-Opt.Input = 'file';
-try
-    %mat_md5 = DataHash(saved_results, Opt);
-    disp('hash disabled')
-    mat_md5 = 0;
-catch
-    disp('Problem using md5 hashing. Will continue');
-    mat_md5 = 'error';
+if save_output==true
+    save(saved_results, 'Adata','-v7.3');
+    Opt.Input = 'file';
+    try
+        %mat_md5 = DataHash(saved_results, Opt);
+        disp('hash disabled')
+        mat_md5 = 0;
+    catch
+        disp('Problem using md5 hashing. Will continue');
+        mat_md5 = 'error';
+    end
+    disp(' ')
+    disp('MAT results saved to: ')
+    disp(saved_results)
+    disp(['File MD5 hash: ' mat_md5])
 end
-disp(' ')
-disp('MAT results saved to: ')
-disp(saved_results)
-disp(['File MD5 hash: ' mat_md5])
-
+RUNA_vars=Adata;
+    
 disp(' ');
 disp('Finished A');
-disp(datestr(now))
+disp(datetime)
 toc
 diary off;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

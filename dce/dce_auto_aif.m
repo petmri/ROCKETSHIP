@@ -1,7 +1,4 @@
 function [end_ss, aif_index, dynamic_output] = dce_auto_aif(dynamic_input, mask_index,dimx,dimy,dimz,injection_duration)
-% load('C:\Users\sbarnes\Documents\data\6 DCE Stroke\aging\Sam Analysis\Raw AIF\1 young - Copy\A-preAIFcalc.mat')
-% load('C:\Users\sbarnes\Documents\data\6 DCE Stroke\aging\Sam Analysis\Fitted Auto AIF\1 young\A-preAIFcalcPostDrift.mat')
-% load('C:\Users\sbarnes\Documents\data\6 DCE Stroke\aging\Sam Analysis\Fitted Auto AIF\2 old\A-preAutoFitWithDrift.mat')
 
 % Only calculate the end of steady state, stop here
 if nargout == 1
