@@ -6,11 +6,9 @@ on:
     branches:
       - master
       - dev
-      - dev
   pull_request:
     branches:
       - master
-      - dev
       - dev
 
 jobs:

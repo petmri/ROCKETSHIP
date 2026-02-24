@@ -219,12 +219,6 @@ for model_index=1:numel(dce_model_list)
         USE_GPU = 0;
     end
     
-    gpu_prefs = parse_preference_file('dce_preferences.txt',0,{'force_cpu'},{0});
-    FORCE_CPU = str2num(gpu_prefs.force_cpu);
-    if FORCE_CPU
-        USE_GPU = 0;
-    end
-    
     if ~USE_GPU
         disp('User selected number of CPU cores');
         c = parcluster('local'); % build the 'local' cluster object

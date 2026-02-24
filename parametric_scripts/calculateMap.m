@@ -344,7 +344,7 @@ for n=1:number_of_fits
             fit_type = 't1_fa_linear_fit';
         elseif ~isempty(strfind(fit_type, 'ADC'))
             fit_type = 'ADC_linear_fast';
-        elseif ~isempty(strfind(fit_type, 'ADC'))
+        elseif ~isempty(strfind(fit_type, 'user_input'))
             fit_type = 'user_input';
         else
            
@@ -534,10 +534,10 @@ for n=1:number_of_fits
 
             % If did not converge discard values
             one_parameter = parameters(1,:);
-            one_parameter(states~=0) = -2;  %a
+            one_parameter(states~=0) = NaN;  %a
             parameters(1,:) = one_parameter;
             one_parameter = parameters(2,:);
-            one_parameter(states~=0) = --2;  %t1
+            one_parameter(states~=0) = NaN;  %t1
             parameters(2,:) = one_parameter;
 
             fit_output(:,1) = parameters(2,:);
@@ -545,7 +545,6 @@ for n=1:number_of_fits
             fit_output(:,3) = chi_squares;
             fit_output(:,4) = zeros(number_voxels,1);
             fit_output(:,5) = zeros(number_voxels,1);
-            fit_output(:,6) = zeros(number_voxels,1);
             fit_output(:,6) = zeros(number_voxels,1);
             
     %         for i=1:number_voxels

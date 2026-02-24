@@ -64,7 +64,6 @@ if strcmp(model, 'ex_tofts')
     end
         
     if ~USE_GPU || cpu_only
-    if ~USE_GPU || cpu_only
         % Get values from pref file
         prefs_str = parse_preference_file('dce_preferences.txt',0,...
             {'voxel_TolFun' 'voxel_TolX' 'voxel_MaxIter' 'voxel_MaxFunEvals' 'voxel_Robust'});
@@ -215,7 +214,6 @@ elseif strcmp(model, 'tissue_uptake')
     end
     
     if ~USE_GPU
-    if ~USE_GPU
         % Get values from pref file
         prefs_str = parse_preference_file('dce_preferences.txt',0,...
             {'voxel_TolFun' 'voxel_TolX' 'voxel_MaxIter' 'voxel_MaxFunEvals' 'voxel_Robust'});
@@ -260,7 +258,6 @@ elseif strcmp(model, 'tissue_uptake')
     end
     
     if USE_GPU       
-    if USE_GPU       
         model_id = ModelID.TISSUE_UPTAKE;
         estimator_id = EstimatorID.LSE;
         
@@ -299,15 +296,11 @@ elseif strcmp(model, 'tissue_uptake')
         % constrain upper and lower bounds for both parameters
         constraint_type = int32([3,3,3]);
 
-        % constrain upper and lower bounds for both parameters
-        constraint_type = int32([3,3,3]);
-
         % Load measured data
         indie_vars = single([timer_data' Cp_data]);
         Ct_single = single(Ct_data);
         
         % Execute GPU fit
-        [parameters, states, chi_squares, n_iterations, time] = gpufit_constrained(Ct_single,[],model_id,init_param_single,constraints_single,constraint_type,tolerance, max_n_iterations,[],estimator_id,indie_vars);
         [parameters, states, chi_squares, n_iterations, time] = gpufit_constrained(Ct_single,[],model_id,init_param_single,constraints_single,constraint_type,tolerance, max_n_iterations,[],estimator_id,indie_vars);
         %[parameters, states, chi_squares, n_iterations, time] = gpufit(Ct_single,[],model_id,init_param_single,tolerance, max_n_iterations,[],estimator_id,indie_vars);
         state_0 = numel(states(states==0));
@@ -362,7 +355,6 @@ elseif strcmp(model, 'tofts')
     end
     
     if ~USE_GPU
-    if ~USE_GPU
         % Get values from pref file
         prefs_str = parse_preference_file('dce_preferences.txt',0,...
             {'voxel_TolFun' 'voxel_TolX' 'voxel_MaxIter' 'voxel_MaxFunEvals' 'voxel_Robust'});
@@ -401,7 +393,6 @@ elseif strcmp(model, 'tofts')
     end   
         
     if USE_GPU
-    if USE_GPU
         model_id = ModelID.TOFTS;
         estimator_id = EstimatorID.LSE;
         
@@ -437,15 +428,11 @@ elseif strcmp(model, 'tofts')
         % constrain upper and lower bounds for both parameters
         constraint_type = int32([3,3]);
 
-        % constrain upper and lower bounds for both parameters
-        constraint_type = int32([3,3]);
-
         % Load measured data
         indie_vars = single([timer_data' Cp_data]);
         Ct_single = single(Ct_data);
         
         % Execute GPU fit
-        [parameters, states, chi_squares, n_iterations, time] = gpufit_constrained(Ct_single,[],model_id,init_param_single,constraints_single,constraint_type,tolerance, max_n_iterations,[],estimator_id,indie_vars);
         [parameters, states, chi_squares, n_iterations, time] = gpufit_constrained(Ct_single,[],model_id,init_param_single,constraints_single,constraint_type,tolerance, max_n_iterations,[],estimator_id,indie_vars);
         
         % If did not converge discard values
@@ -721,7 +708,6 @@ elseif strcmp(model, 'patlak')
     end
         
     if ~USE_GPU
-    if ~USE_GPU
         % Get CPU fitting values from pref file
         prefs_str = parse_preference_file('dce_preferences.txt',0,...
             {'voxel_TolFun' 'voxel_TolX' 'voxel_MaxIter' 'voxel_MaxFunEvals' 'voxel_Robust'});
@@ -798,14 +784,12 @@ elseif strcmp(model, 'patlak')
         constraints_single = single(constraints);
         % constrain upper and lower bounds for both parameters
         constraint_type = int32([3,3]);
-        constraint_type = int32([3,3]);
         
         % Load measured data
         indie_vars = single([timer_data' Cp_data]);
         Ct_single = single(Ct_data);
         
         % Execute GPU fit
-        [parameters, states, chi_squares, n_iterations, time] = gpufit_constrained(Ct_single,[],model_id,init_param_single,constraints_single, constraint_type, tolerance, max_n_iterations,[],estimator_id,indie_vars);
         [parameters, states, chi_squares, n_iterations, time] = gpufit_constrained(Ct_single,[],model_id,init_param_single,constraints_single, constraint_type, tolerance, max_n_iterations,[],estimator_id,indie_vars);
 
         % If did not converge discard values
@@ -893,7 +877,6 @@ elseif strcmp(model, '2cxm')
     end
     
     if ~USE_GPU
-    if ~USE_GPU
         % Get values from pref file
         prefs_str = parse_preference_file('dce_preferences.txt',0,...
             {'voxel_TolFun' 'voxel_TolX' 'voxel_MaxIter' 'voxel_MaxFunEvals' 'voxel_Robust'});
@@ -930,7 +913,6 @@ elseif strcmp(model, '2cxm')
         if diary_restore, diary on, end
     end
     
-    if USE_GPU
     if USE_GPU
         model_id = ModelID.TWO_COMPARTMENT_EXCHANGE;
         estimator_id = EstimatorID.LSE;
@@ -973,15 +955,11 @@ elseif strcmp(model, '2cxm')
         % constrain upper and lower bounds for both parameters
         constraint_type = int32([3,3,3,3]);
 
-        % constrain upper and lower bounds for both parameters
-        constraint_type = int32([3,3,3,3]);
-
         % Load measured data
         indie_vars = single([timer_data' Cp_data]);
         Ct_single = single(Ct_data);
         
         % Execute GPU fit
-        [parameters, states, chi_squares, n_iterations, time] = gpufit_constrained(Ct_single,[],model_id,init_param_single,constraints_single,constraint_type,tolerance, max_n_iterations,[],estimator_id,indie_vars);
         [parameters, states, chi_squares, n_iterations, time] = gpufit_constrained(Ct_single,[],model_id,init_param_single,constraints_single,constraint_type,tolerance, max_n_iterations,[],estimator_id,indie_vars);
         
         % If did not converge discard values
@@ -994,9 +972,9 @@ elseif strcmp(model, '2cxm')
         one_parameter = parameters(3,:);
         one_parameter(states~=0) = NaN;  %vp
         parameters(3,:) = one_parameter;
-        one_parameter = parameters(3,:);
+        one_parameter = parameters(4,:);
         one_parameter(states~=0) = NaN;  %fp
-        parameters(3,:) = one_parameter;
+        parameters(4,:) = one_parameter;
         
         GG = [parameters' chi_squares'];
         % add zeros for the unknown + and - 95 CI
