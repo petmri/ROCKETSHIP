@@ -609,6 +609,16 @@ def run_phantom_gt_session_compare(
         "artifacts": {
             "t1_summary_json": str(t1_summary.get("meta", {}).get("summary_path", "")),
             "dce_summary_json": str(dce_summary.get("meta", {}).get("summary_path", "")),
+            "pred_t1_map_path": str(t1_map_path),
+            "gt_paths": {
+                "seg": str(gt["seg"]),
+                "t1": str(gt["t1"]),
+                "ktrans": str(gt["ktrans"]),
+                "ve": str(gt["ve"]),
+                "vp": str(gt["vp"]),
+                **({"fp": str(gt["fp"])} if gt.get("fp") is not None else {}),
+            },
+            "dce_map_paths": {},
         },
     }
 
@@ -657,6 +667,11 @@ def run_phantom_gt_session_compare(
                 model_metrics[param_name] = region_metrics
         if model_metrics:
             result["dce"][str(model_name)] = model_metrics
+            result["artifacts"]["dce_map_paths"][str(model_name)] = {
+                str(param_name): str(map_paths[param_name])
+                for param_name in param_names
+                if map_paths.get(param_name)
+            }
 
     return result
 
