@@ -546,6 +546,7 @@ for n=1:number_of_fits
             fit_output(:,4) = zeros(number_voxels,1);
             fit_output(:,5) = zeros(number_voxels,1);
             fit_output(:,6) = zeros(number_voxels,1);
+            fit_output(:,6) = zeros(number_voxels,1);
             
     %         for i=1:number_voxels
     %             % filter negatives
@@ -791,6 +792,7 @@ if submit
     xdata{1}.dimensions = [dim_x, dim_y, dim_z];
     xdata{1}.numvoxels = 0; %Reset below if fit_voxels
     xdata{1}.x_values = parameter_list;
+    
     
     if strfind(fit_type,'ADC')
         xdata{1}.x_units = 'b-value (s/mm^2)';
