@@ -66,6 +66,14 @@ For options in `stage_overrides`:
 - `time_vector_path`, `timevectpath`, `timer_path`
 - MATLAB script toggle: `timevectyn` controls whether legacy `timevectpath` is used
 - `steady_state_start`, `steady_state_end`
+- `steady_state_auto_method`: explicit automatic baseline-end detector (used only when `steady_state_end` is not set)
+  - `legacy_sobel`: MATLAB `dce_auto_aif`-style global-signal Sobel/line-fit heuristic
+  - `piecewise_constant`: MATLAB `find_end_ss`-style two-constant brute-force split with local-min backtrack
+  - `glr`: GLR-like one-sided change-in-mean detector (ported from `synthetic_dce` `ismrm_submit/end_baseline_detect.py`)
+  - `tv`: total-variation/fused-lasso style denoise + first significant upward jump detector (same source)
+  - Aliases accepted: `legacy`, `dce_auto_aif`, `sobel`, `piecewise`, `find_end_ss`, `edge`, `find_end_ss_edge`, `tv`, `find_end_ss_tv`
+  - Manual `steady_state_end` takes precedence over `steady_state_auto_method`
+  - If neither `steady_state_end` nor `steady_state_auto_method` is set, Python defaults to `legacy_sobel`
 - `start_time`, `end_time`, `start_time_min`, `end_time_min`
 - `start_injection_min`, `end_injection_min`
 - MATLAB script aliases: `start_injection`, `end_injection` (min)

@@ -36,6 +36,8 @@ ALLOWED_AIF_MODES = {"auto", "fitted", "raw", "imported"}
 ALLOWED_STAGE_A_MODES = {"real", "scaffold"}
 ALLOWED_STAGE_B_MODES = {"real", "scaffold", "auto"}
 ALLOWED_STAGE_D_MODES = {"real", "scaffold", "auto"}
+ALLOWED_STEADY_STATE_AUTO_METHODS = {"none", "legacy_sobel", "piecewise_constant", "glr", "tv"}
+PIECEWISE_CONSTANT_BASELINE_FORWARD_DELTA_FRACTION = 0.01
 
 MODEL_SELECTION_ORDER = [
     ("tofts", "tofts"),
@@ -898,11 +900,477 @@ def _resolve_dynamic_metadata(config: DcePipelineConfig, n_timepoints: int) -> D
 
 
 def _baseline_window(config: DcePipelineConfig, n_timepoints: int) -> Tuple[int, int]:
-    start_1b = int(_stage_override(config, "steady_state_start", 1))
-    end_1b = int(_stage_override(config, "steady_state_end", min(2, n_timepoints)))
+    start_raw = _stage_override(config, "steady_state_start", 1)
+    end_raw = _stage_override(config, "steady_state_end", min(2, n_timepoints))
+    if not _override_value_is_set(start_raw):
+        start_raw = 1
+    if not _override_value_is_set(end_raw):
+        end_raw = min(2, n_timepoints)
+    start_1b = int(start_raw)
+    end_1b = int(end_raw)
     start_1b = max(1, min(start_1b, n_timepoints))
     end_1b = max(start_1b, min(end_1b, n_timepoints))
     return start_1b - 1, end_1b
+
+
+def _moving_average_smooth_1d(values: np.ndarray, window: int) -> np.ndarray:
+    arr = np.asarray(values, dtype=np.float64).reshape(-1)
+    if arr.size == 0:
+        return arr.copy()
+    window = max(1, int(window))
+    if window == 1 or arr.size == 1:
+        return arr.copy()
+    if window % 2 == 0:
+        window += 1
+    pad = window // 2
+    padded = np.pad(arr, (pad, pad), mode="edge")
+    kernel = np.ones(window, dtype=np.float64) / float(window)
+    return np.convolve(padded, kernel, mode="valid")
+
+
+def _gaussian_smooth_1d(values: np.ndarray, sigma: float) -> np.ndarray:
+    arr = np.asarray(values, dtype=np.float64).reshape(-1)
+    if arr.size == 0:
+        return arr.copy()
+    sigma = float(sigma)
+    if sigma <= 0.0 or arr.size == 1:
+        return arr.copy()
+    radius = max(1, int(math.ceil(3.0 * sigma)))
+    x = np.arange(-radius, radius + 1, dtype=np.float64)
+    kernel = np.exp(-(x**2) / (2.0 * sigma * sigma))
+    kernel /= np.sum(kernel)
+    padded = np.pad(arr, (radius, radius), mode="edge")
+    return np.convolve(padded, kernel, mode="valid")
+
+
+def _normalize_zero_one(values: np.ndarray) -> np.ndarray:
+    arr = np.asarray(values, dtype=np.float64)
+    if arr.size == 0:
+        return arr.copy()
+    finite = np.isfinite(arr)
+    if not np.any(finite):
+        return np.zeros_like(arr, dtype=np.float64)
+    filled = arr.copy()
+    if not np.all(finite):
+        idx = np.arange(arr.size, dtype=np.float64)
+        filled[~finite] = np.interp(idx[~finite], idx[finite], filled[finite])
+    vmin = float(np.min(filled))
+    vmax = float(np.max(filled))
+    if not math.isfinite(vmin) or not math.isfinite(vmax) or vmax <= vmin:
+        return np.zeros_like(filled, dtype=np.float64)
+    return (filled - vmin) / (vmax - vmin)
+
+
+def _linear_fit_r2(x: np.ndarray, y: np.ndarray) -> float:
+    x = np.asarray(x, dtype=np.float64).reshape(-1)
+    y = np.asarray(y, dtype=np.float64).reshape(-1)
+    if x.size != y.size or x.size < 2:
+        return 0.0
+    x_mean = float(np.mean(x))
+    y_mean = float(np.mean(y))
+    x_center = x - x_mean
+    denom = float(np.sum(x_center * x_center))
+    if denom <= 0.0:
+        return 0.0
+    slope = float(np.sum(x_center * (y - y_mean)) / denom)
+    intercept = y_mean - slope * x_mean
+    y_hat = slope * x + intercept
+    ss_res = float(np.sum((y - y_hat) ** 2))
+    ss_tot = float(np.sum((y - y_mean) ** 2))
+    if ss_tot <= 0.0:
+        return 1.0 if ss_res <= 1e-15 else 0.0
+    r2 = 1.0 - (ss_res / ss_tot)
+    return float(max(-1.0, min(1.0, r2)))
+
+
+def _normalize_steady_state_auto_method(value: Any) -> str:
+    if value is None:
+        return "none"
+    text = str(value).strip().lower()
+    if text in {"", "none", "off", "disabled", "manual", "false", "0"}:
+        return "none"
+    aliases = {
+        "legacy": "legacy_sobel",
+        "legacy_sobel": "legacy_sobel",
+        "sobel": "legacy_sobel",
+        "matlab_legacy": "legacy_sobel",
+        "dce_auto_aif": "legacy_sobel",
+        "piecewise": "piecewise_constant",
+        "piecewise_constant": "piecewise_constant",
+        "piecewise-constant": "piecewise_constant",
+        "find_end_ss": "piecewise_constant",
+        "bruteforce_piecewise": "piecewise_constant",
+        "glr": "glr",
+        "edge": "glr",
+        "glr_edge": "glr",
+        "find_end_ss_edge": "glr",
+        "tv": "tv",
+        "tv_denoise": "tv",
+        "tv_denoising": "tv",
+        "find_end_ss_tv": "tv",
+    }
+    if text in aliases:
+        return aliases[text]
+    raise ValueError(
+        f"Unsupported stage_overrides.steady_state_auto_method '{value}'. "
+        f"Allowed: {sorted(ALLOWED_STEADY_STATE_AUTO_METHODS)}"
+    )
+
+
+def _legacy_sobel_baseline_end(stlv: np.ndarray) -> Dict[str, Any]:
+    curves = np.asarray(stlv, dtype=np.float64)
+    if curves.ndim == 1:
+        curves = curves[:, np.newaxis]
+    if curves.ndim != 2 or curves.shape[0] < 2:
+        return {
+            "method": "legacy_sobel",
+            "end_ss_1b": 1,
+            "global_edge_index_1b": 1,
+            "slope_at_edge": 0.0,
+            "linefit_r2_threshold": 0.95,
+        }
+
+    global_dyn = np.mean(curves, axis=1)
+    global_smooth = _moving_average_smooth_1d(global_dyn, window=9)
+    global_smooth = _normalize_zero_one(global_smooth)
+    if global_smooth.size < 2:
+        return {
+            "method": "legacy_sobel",
+            "end_ss_1b": 1,
+            "global_edge_index_1b": 1,
+            "slope_at_edge": 0.0,
+            "linefit_r2_threshold": 0.95,
+        }
+
+    # Approximate MATLAB's Sobel edge response on a 1D curve.
+    sobel = np.array([1.0, 0.0, -1.0], dtype=np.float64) / 2.0
+    bx = np.convolve(np.pad(global_smooth, (1, 1), mode="edge"), sobel, mode="valid")
+    i0 = int(np.argmin(bx))  # MATLAB uses min(bx) for the strongest rising edge.
+    i0 = max(1, min(i0, global_smooth.size - 1))
+    end_ss_1b = i0  # i (1-based) minus 1 => Python 0-based index i0 corresponds to 1-based i0
+
+    r2_threshold = 0.95
+    if i0 >= 2:
+        # MATLAB: for n=2:(i-1); fit((n:i)', y(n:i), 'poly1'); if rsquare>0.95, end_ss=n; break
+        x_all = np.arange(1, global_smooth.size + 1, dtype=np.float64)
+        i_1b = i0 + 1
+        for n_1b in range(2, i_1b):
+            seg = slice(n_1b - 1, i_1b)
+            r2 = _linear_fit_r2(x_all[seg], global_smooth[seg])
+            if r2 > r2_threshold:
+                end_ss_1b = n_1b
+                break
+
+    end_ss_1b = max(1, min(int(end_ss_1b), global_smooth.size))
+    return {
+        "method": "legacy_sobel",
+        "end_ss_1b": int(end_ss_1b),
+        "global_edge_index_1b": int(i0 + 1),
+        "slope_at_edge": float(bx[i0]) if bx.size > 0 else 0.0,
+        "linefit_r2_threshold": float(r2_threshold),
+    }
+
+
+def _glr_baseline_end(stlv: np.ndarray) -> Dict[str, Any]:
+    curves = np.asarray(stlv, dtype=np.float64)
+    if curves.ndim == 1:
+        curves = curves[:, np.newaxis]
+    if curves.ndim != 2 or curves.shape[0] < 2:
+        return {
+            "method": "glr",
+            "end_ss_1b": 1,
+            "mode": "fallback_short_signal",
+        }
+
+    global_time_curve = np.mean(curves, axis=1)
+    mean_si = float(np.mean(global_time_curve))
+    n = int(global_time_curve.size)
+    min_before = 3
+    min_after = 5
+
+    # Early-jump guard for immediate contrast arrival (ported from end_baseline_detect.py).
+    early_threshold = None
+    early_detected_0b = None
+    if n >= 3:
+        first_jumps = np.diff(global_time_curve[:3])
+        if n > 10:
+            tail_segment = global_time_curve[max(0, n - 10) : n]
+            tail_jumps = np.diff(tail_segment)
+            baseline_jump_std = float(np.std(tail_jumps)) if tail_jumps.size > 0 else float(np.std(tail_segment))
+        else:
+            baseline_jump_std = float(np.std(first_jumps)) if first_jumps.size > 1 else float(np.std(global_time_curve[:3]))
+        if baseline_jump_std < 1e-10:
+            baseline_jump_std = 0.01 * (float(np.mean(global_time_curve[:3])) + 1e-10)
+        early_threshold = 3.0 * baseline_jump_std
+        for idx, jump in enumerate(first_jumps):
+            if float(jump) > early_threshold:
+                early_detected_0b = int(idx)
+                return {
+                    "method": "glr",
+                    "end_ss_1b": int(early_detected_0b + 1),
+                    "mode": "early_jump",
+                    "early_jump_index_1b": int(early_detected_0b + 1),
+                    "early_jump_threshold": float(early_threshold),
+                    "early_jump_value": float(jump),
+                }
+
+    max_score = -math.inf
+    best_changepoint_0b = max(0, min_before - 1)
+    best_k_1b = min_before
+    for k in range(min_before, n - min_after + 1):
+        before = global_time_curve[:k]
+        after = global_time_curve[k : k + min_after]
+        if before.size == 0 or after.size == 0:
+            continue
+        mean_before = float(np.mean(before))
+        mean_after = float(np.mean(after))
+        if mean_after <= mean_before:
+            continue
+        var_before = float(np.var(before))
+        baseline_flatness = var_before / (mean_before + mean_si * 0.001)
+        mean_increase = mean_after - mean_before
+        score = mean_increase / (baseline_flatness + mean_si * 0.001)
+        if k < 10:
+            score *= 0.6 + (k / 10.0)
+        if score > max_score:
+            max_score = score
+            best_k_1b = int(k)
+            best_changepoint_0b = int(k - 1)  # last baseline point
+
+    end_ss_1b = int(max(1, min(best_changepoint_0b + 1, n)))
+    return {
+        "method": "glr",
+        "end_ss_1b": end_ss_1b,
+        "mode": "glr_score",
+        "best_split_k_1b": int(best_k_1b),
+        "glr_score": (float(max_score) if math.isfinite(max_score) else None),
+        "min_before": int(min_before),
+        "min_after": int(min_after),
+        "early_jump_threshold": (float(early_threshold) if early_threshold is not None else None),
+    }
+
+
+def _tv_baseline_end(stlv: np.ndarray) -> Dict[str, Any]:
+    curves = np.asarray(stlv, dtype=np.float64)
+    if curves.ndim == 1:
+        curves = curves[:, np.newaxis]
+    if curves.ndim != 2 or curves.shape[0] < 2:
+        return {
+            "method": "tv",
+            "end_ss_1b": 1,
+            "mode": "fallback_short_signal",
+        }
+
+    global_time_curve = np.mean(curves, axis=1).astype(np.float64, copy=False)
+    n = int(global_time_curve.size)
+    if n < 3:
+        return {
+            "method": "tv",
+            "end_ss_1b": 1,
+            "mode": "fallback_short_signal",
+        }
+
+    diff = np.diff(global_time_curve)
+    mad = float(np.median(np.abs(diff - np.median(diff)))) if diff.size > 0 else 0.0
+    lambda_tv = 2.0 * mad
+    if mad < 1e-6:
+        lambda_tv = 0.1
+
+    x = global_time_curve.copy()
+    n_iter = 0
+    for iteration in range(50):
+        n_iter = iteration + 1
+        x_old = x.copy()
+        d = np.diff(x)
+        d_thresh = np.sign(d) * np.maximum(np.abs(d) - lambda_tv / n, 0.0)
+        x[0] = global_time_curve[0]
+        for i in range(1, n):
+            x[i] = 0.5 * (x[i - 1] + d_thresh[i - 1]) + 0.5 * global_time_curve[i]
+        if float(np.max(np.abs(x - x_old))) < 1e-6:
+            break
+
+    jumps = np.diff(x)
+    baseline_len = min(n, max(5, int(0.2 * n)))
+    baseline_segment = x[:baseline_len]
+    baseline_jumps = np.diff(baseline_segment)
+    if baseline_jumps.size > 0:
+        baseline_jump_mad = float(np.median(np.abs(baseline_jumps - np.median(baseline_jumps))))
+        baseline_jump_median = float(np.median(baseline_jumps))
+    else:
+        baseline_jump_mad = 0.0
+        baseline_jump_median = 0.0
+    if baseline_jump_mad < 1e-6:
+        baseline_jump_mad = 0.01 * float(np.std(global_time_curve[:baseline_len]))
+        if baseline_jump_mad < 1e-6:
+            baseline_jump_mad = 0.01
+
+    jump_threshold = baseline_jump_median + 3.5 * baseline_jump_mad
+    significant_jumps = np.where(jumps > jump_threshold)[0]
+    valid_jumps: List[int] = []
+    for idx in significant_jumps:
+        i = int(idx)
+        if i < jumps.size - 1:
+            next_jump = float(jumps[i + 1])
+            if next_jump > -baseline_jump_mad or float(jumps[i]) > 2.0 * jump_threshold:
+                valid_jumps.append(i)
+        else:
+            if float(jumps[i]) > 1.5 * jump_threshold:
+                valid_jumps.append(i)
+
+    if len(valid_jumps) == 0:
+        end_ss_0b = 0
+        detected_jump = 0.0
+    else:
+        end_ss_0b = int(valid_jumps[0])  # index before the first accepted jump
+        detected_jump = float(jumps[end_ss_0b])
+
+    end_ss_1b = int(max(1, min(end_ss_0b + 1, n)))
+    baseline_noise = (
+        float(np.std(global_time_curve[: min(10, max(1, n // 4))])) if end_ss_0b > 0 else float(np.std(global_time_curve))
+    )
+    if baseline_noise < 1e-6:
+        baseline_noise = 1e-6
+    raw_strength = detected_jump / baseline_noise
+    strength = float(np.clip(1.0 - np.exp(-raw_strength / 2.0), 0.0, 1.0))
+
+    return {
+        "method": "tv",
+        "end_ss_1b": end_ss_1b,
+        "mode": "tv_jump",
+        "lambda_tv": float(lambda_tv),
+        "tv_iterations": int(n_iter),
+        "baseline_len": int(baseline_len),
+        "baseline_jump_mad": float(baseline_jump_mad),
+        "jump_threshold": float(jump_threshold),
+        "detected_jump": float(detected_jump),
+        "strength": float(strength),
+        "valid_jump_count": int(len(valid_jumps)),
+    }
+
+
+def _piecewise_constant_baseline_end(stlv: np.ndarray) -> Dict[str, Any]:
+    curves = np.asarray(stlv, dtype=np.float64)
+    if curves.ndim == 1:
+        curves = curves[:, np.newaxis]
+    if curves.ndim != 2 or curves.shape[0] < 3:
+        return {
+            "method": "piecewise_constant",
+            "end_ss_1b": 1,
+            "transition_index_1b": 1,
+            "local_max_index_1b": 1,
+        }
+
+    x = np.mean(curves, axis=1)
+    x = _gaussian_smooth_1d(x, sigma=1.0)
+    n = x.size
+    best_t_1b = 2
+    best_mse = math.inf
+
+    # MATLAB branch brute-force split: two piecewise constants with transition at t.
+    for t_1b in range(2, n):
+        if t_1b >= n:
+            continue
+        before = x[: t_1b - 1]
+        after = x[t_1b:]
+        if before.size == 0 or after.size == 0:
+            continue
+        before_mean = float(np.mean(before))
+        after_mean = float(np.mean(after))
+        pred = np.empty_like(x)
+        pred[: t_1b - 1] = before_mean
+        pred[t_1b - 1 :] = after_mean
+        mse = float(np.mean((x - pred) ** 2))
+        if mse < best_mse:
+            best_mse = mse
+            best_t_1b = t_1b
+
+    local_min_1b = best_t_1b
+    while local_min_1b > 1 and x[local_min_1b - 1] >= x[local_min_1b - 2]:
+        local_min_1b -= 1
+
+    # Flat/noiseless baselines can make the backtrack run all the way to frame 1.
+    # Step forward again while values remain within a small tolerance of the local minimum.
+    mean_aif = float(np.mean(x)) if x.size > 0 else 0.0
+    delta_abs = abs(mean_aif) * float(PIECEWISE_CONSTANT_BASELINE_FORWARD_DELTA_FRACTION)
+    anchor_value = float(x[local_min_1b - 1])
+    local_min_forward_1b = local_min_1b
+    while local_min_forward_1b < best_t_1b:
+        next_value = float(x[local_min_forward_1b])  # 1-based -> next sample
+        if abs(next_value - anchor_value) <= delta_abs:
+            local_min_forward_1b += 1
+            continue
+        break
+    local_min_1b = local_min_forward_1b
+
+    local_max_1b = best_t_1b
+    while local_max_1b < n and x[local_max_1b - 1] <= x[local_max_1b]:
+        local_max_1b += 1
+
+    return {
+        "method": "piecewise_constant",
+        "end_ss_1b": int(max(1, min(local_min_1b, n))),
+        "transition_index_1b": int(max(1, min(best_t_1b, n))),
+        "local_max_index_1b": int(max(1, min(local_max_1b, n))),
+        "transition_mse": (float(best_mse) if math.isfinite(best_mse) else None),
+        "flat_forward_delta_fraction": float(PIECEWISE_CONSTANT_BASELINE_FORWARD_DELTA_FRACTION),
+        "flat_forward_delta_abs": float(delta_abs),
+    }
+
+
+def _resolve_baseline_window(
+    config: DcePipelineConfig,
+    n_timepoints: int,
+    stlv: Optional[np.ndarray] = None,
+) -> Tuple[int, int, Dict[str, Any]]:
+    sentinel = object()
+    start_raw = _stage_override(config, "steady_state_start", sentinel)
+    end_raw = _stage_override(config, "steady_state_end", sentinel)
+    auto_method_raw = _stage_override(config, "steady_state_auto_method", None)
+    auto_method_requested = _normalize_steady_state_auto_method(auto_method_raw)
+
+    start_is_set = start_raw is not sentinel and _override_value_is_set(start_raw)
+    end_is_set = end_raw is not sentinel and _override_value_is_set(end_raw)
+
+    start_1b = 1 if not start_is_set else int(start_raw)
+    used_method = "manual" if end_is_set else "default"
+    auto_details: Optional[Dict[str, Any]] = None
+    end_source: str
+    if end_is_set:
+        end_1b = int(end_raw)
+        end_source = "steady_state_end"
+    else:
+        auto_method = auto_method_requested if auto_method_requested != "none" else "legacy_sobel"
+        if stlv is None:
+            raise ValueError(
+                "stage_overrides.steady_state_auto_method requires Stage-A AIF signal data to estimate baseline end"
+            )
+        detector_map: Dict[str, Callable[[np.ndarray], Dict[str, Any]]] = {
+            "legacy_sobel": _legacy_sobel_baseline_end,
+            "piecewise_constant": _piecewise_constant_baseline_end,
+            "glr": _glr_baseline_end,
+            "tv": _tv_baseline_end,
+        }
+        detector = detector_map[auto_method]
+        auto_details = detector(stlv)
+        end_1b = int(auto_details["end_ss_1b"])
+        used_method = auto_method
+        if auto_method_requested == "none":
+            end_source = "default_auto_method:legacy_sobel"
+        else:
+            end_source = f"steady_state_auto_method:{auto_method}"
+
+    start_1b = max(1, min(start_1b, n_timepoints))
+    end_1b = max(start_1b, min(end_1b, n_timepoints))
+    info = {
+        "method_requested": auto_method_requested,
+        "method_used": used_method,
+        "start_1b": int(start_1b),
+        "end_1b": int(end_1b),
+        "source": end_source,
+    }
+    if auto_details is not None:
+        info["auto_details"] = auto_details
+    return start_1b - 1, end_1b, info
 
 
 def _clean_ab(
@@ -1176,7 +1644,7 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     if not (0.0 <= hematocrit < 1.0):
         raise ValueError(f"hematocrit must be in [0, 1), got {hematocrit}")
 
-    ss_start, ss_end = _baseline_window(config, n_time)
+    ss_start, ss_end, baseline_info = _resolve_baseline_window(config, n_time, stlv=stlv)
     baseline_slice = slice(ss_start, ss_end)
 
     # AIF path to R1
@@ -1263,6 +1731,7 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
         "aif_concentration_kind": timing.get("aif_concentration_kind"),
         "blood_t1_override_sec": blood_t1_override_sec,
         "steady_state_time": [ss_start + 1, ss_end],
+        "steady_state_auto": baseline_info,
         "start_injection": start_injection,
         "end_injection": end_injection,
         "figure_paths": figures,

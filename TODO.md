@@ -20,7 +20,8 @@ Finish the Python transition to the point that it can be merged to `dev` and tes
 - [x] Tighten parity/reliability thresholds and make primary model checks strict merge gates.
 - [x] Ensure backend consistency across `cpu`, `cpufit`, and `gpufit` where available.
 - [x] Add regression tests for known edge cases (bounds, low SNR, non-uniform timer inputs).
-- [ ] Implement automatic DCE baseline-window detection (`steady_state_end`, and start if needed) for Stage A by copying MATLAB behavior; current default-first-2-frames behavior is not sufficient for real data and can silently bias maps.
+- [x] Implement automatic DCE baseline-window detection methods for Stage A (`steady_state_auto_method` = `legacy_sobel` and `piecewise_constant`), with explicit method selection and manual `steady_state_end` precedence.
+- [ ] Validate the current default DCE baseline auto method (`legacy_sobel`) on representative real datasets (MATLAB comparison + qualification impact), and confirm whether the default should remain `legacy_sobel` vs `glr`/`tv`.
 - [x] Add qualification gating for non-finite primary-model parameter maps (see `python/qualification.py` and `tests/python/test_python_qualification.py`).
 - [x] Resolve qualification blocker from `ex_tofts` non-finite accelerated maps by falling back to next backend/CPU when accelerated output has no usable finite primary parameters (`python/dce_pipeline.py`, `tests/python/test_dce_pipeline.py`).
 - [x] Adopt accelerated DCE `gpu_tolerance=1e-6` default (was `1e-12`) after CPUfit/Cpufit max-iteration diagnosis; verified with full Python test suite and `run_python_qualification.py` on 5-session `tests/data/BIDS_test`.

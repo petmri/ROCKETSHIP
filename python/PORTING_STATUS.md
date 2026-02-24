@@ -48,6 +48,12 @@ Latest qualification packet run:
 - Real-data DCE inputs are now stricter by design:
   - Stage A requires a dedicated AIF ROI mask (or future auto-AIF routine); brain-mask fallback as AIF is rejected.
   - TR/FA/time resolution for real data must come from sidecar JSON or be fully specified in config (no silent defaults).
+- DCE baseline auto-detection port status (updated 2026-02-24):
+  - Python Stage A now supports explicit baseline-end detectors via `stage_overrides.steady_state_auto_method`:
+    - `legacy_sobel` (from `dce_auto_aif` baseline-end path)
+    - `piecewise_constant` (from `find_end_ss` branch implementation)
+    - `glr` and `tv` (ported from `synthetic_dce` `ismrm_submit/end_baseline_detect.py`)
+  - Manual `steady_state_end` still takes precedence; if no manual end and no auto method are provided, Python now defaults to `legacy_sobel`.
 - Synthetic phantom GT reliability checks now exist for calibration/guarding:
   - `tests/python/test_phantom_gt_reliability.py` reconstructs T1 in-test and compares T1 + primary DCE maps against `rawdata/.../gt` ground-truth maps for `sub-05phantom`/`sub-06phantom`/`sub-07phantom`.
   - Tolerances are region- and model-specific (`tests/data/BIDS_test/phantom_gt_mae_tolerances.json`) because model assumptions intentionally bias some tissue classes.

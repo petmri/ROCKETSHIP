@@ -21,7 +21,12 @@ from dce_pipeline import (  # noqa: E402
     _accelerated_output_has_usable_primary_params,
     _fit_stage_d_model,
     _fit_stage_d_model_accelerated,
+    _glr_baseline_end,
+    _legacy_sobel_baseline_end,
+    _piecewise_constant_baseline_end,
+    _resolve_baseline_window,
     _resolve_dynamic_metadata,
+    _tv_baseline_end,
     run_dce_pipeline,
     _run_stage_b_real,
     _run_stage_d_real,
@@ -278,6 +283,156 @@ class TestDcePipeline:
             assert "SyntheticPhantom.RecommendedROCKETSHIPHematocrit" in str(
                 out["metadata_sources"].get("hematocrit", "")
             )
+
+    def test_legacy_sobel_baseline_end_detects_pre_rise_frames(self) -> None:
+        n_time = 40
+        t = np.arange(n_time, dtype=np.float64)
+        mean_curve = np.zeros(n_time, dtype=np.float64)
+        mean_curve[:8] = 100.0
+        mean_curve[8:14] = np.linspace(100.0, 150.0, 6)
+        mean_curve[14:] = 150.0 + 15.0 * np.exp(-(t[14:] - t[14]) / 8.0)
+        stlv = np.tile(mean_curve[:, np.newaxis], (1, 6))
+
+        out = _legacy_sobel_baseline_end(stlv)
+
+        assert out["method"] == "legacy_sobel"
+        assert 2 <= int(out["end_ss_1b"]) <= 10
+        assert int(out["global_edge_index_1b"]) >= int(out["end_ss_1b"])
+
+    def test_piecewise_constant_baseline_end_returns_local_min_before_transition(self) -> None:
+        n_time = 36
+        t = np.arange(n_time, dtype=np.float64)
+        mean_curve = np.full(n_time, 90.0, dtype=np.float64)
+        mean_curve[5:10] = np.array([89.7, 89.4, 89.0, 89.3, 89.8], dtype=np.float64)
+        mean_curve[10:] += 70.0
+        mean_curve[10:] += 8.0 * np.exp(-(t[10:] - t[10]) / 4.0)
+        stlv = np.tile(mean_curve[:, np.newaxis], (1, 4))
+
+        out = _piecewise_constant_baseline_end(stlv)
+
+        assert out["method"] == "piecewise_constant"
+        assert 6 <= int(out["end_ss_1b"]) <= 10
+        assert int(out["transition_index_1b"]) >= int(out["end_ss_1b"])
+        assert int(out["local_max_index_1b"]) >= int(out["transition_index_1b"])
+
+    def test_piecewise_constant_baseline_end_flat_baseline_tracks_forward_within_delta(self) -> None:
+        n_time = 30
+        mean_curve = np.full(n_time, 100.0, dtype=np.float64)
+        mean_curve[8:] = 160.0
+        stlv = np.tile(mean_curve[:, np.newaxis], (1, 5))
+
+        out = _piecewise_constant_baseline_end(stlv)
+
+        assert out["method"] == "piecewise_constant"
+        # Without the flat-baseline forward step this tends to collapse to frame 1.
+        assert int(out["end_ss_1b"]) > 1
+        assert int(out["end_ss_1b"]) <= int(out["transition_index_1b"])
+        assert out["flat_forward_delta_fraction"] == pytest.approx(0.01)
+        assert out["flat_forward_delta_abs"] > 0.0
+
+    def test_glr_baseline_end_detects_step_change(self) -> None:
+        n_time = 40
+        mean_curve = np.full(n_time, 100.0, dtype=np.float64)
+        mean_curve[:8] += np.array([0.0, 0.2, -0.1, 0.1, -0.2, 0.15, -0.05, 0.0], dtype=np.float64)
+        mean_curve[8:] += np.linspace(25.0, 15.0, n_time - 8)
+        stlv = np.tile(mean_curve[:, np.newaxis], (1, 6))
+
+        out = _glr_baseline_end(stlv)
+
+        assert out["method"] == "glr"
+        assert out["mode"] in {"glr_score", "early_jump"}
+        assert 6 <= int(out["end_ss_1b"]) <= 10
+
+    def test_tv_baseline_end_detects_step_change(self) -> None:
+        n_time = 48
+        mean_curve = np.full(n_time, 95.0, dtype=np.float64)
+        mean_curve[:10] += np.array([0.0, -0.1, 0.15, -0.05, 0.08, -0.06, 0.1, -0.02, 0.04, 0.0], dtype=np.float64)
+        mean_curve[10:] += 18.0 + 10.0 * np.exp(-np.arange(n_time - 10, dtype=np.float64) / 8.0)
+        stlv = np.tile(mean_curve[:, np.newaxis], (1, 5))
+
+        out = _tv_baseline_end(stlv)
+
+        assert out["method"] == "tv"
+        assert out["mode"] == "tv_jump"
+        assert 8 <= int(out["end_ss_1b"]) <= 12
+        assert out["lambda_tv"] >= 0.0
+        assert 0.0 <= out["strength"] <= 1.0
+
+    def test_resolve_baseline_window_uses_selected_auto_method_when_end_not_manual(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            config.stage_overrides = {
+                "stage_a_mode": "scaffold",
+                "steady_state_auto_method": "piecewise_constant",
+                "steady_state_start": 1,
+            }
+            mean_curve = np.full(24, 100.0, dtype=np.float64)
+            mean_curve[4:7] = np.array([99.5, 99.0, 99.3], dtype=np.float64)
+            mean_curve[7:] = 140.0
+            stlv = np.tile(mean_curve[:, np.newaxis], (1, 3))
+
+            ss_start, ss_end, info = _resolve_baseline_window(config, n_timepoints=24, stlv=stlv)
+
+            assert ss_start == 0
+            assert 4 <= ss_end <= 8
+            assert info["method_requested"] == "piecewise_constant"
+            assert info["method_used"] == "piecewise_constant"
+            assert info["source"] == "steady_state_auto_method:piecewise_constant"
+
+    def test_resolve_baseline_window_manual_end_overrides_auto_method(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            config.stage_overrides = {
+                "stage_a_mode": "scaffold",
+                "steady_state_start": 1,
+                "steady_state_end": 3,
+                "steady_state_auto_method": "legacy_sobel",
+            }
+            stlv = np.full((12, 2), 100.0, dtype=np.float64)
+
+            ss_start, ss_end, info = _resolve_baseline_window(config, n_timepoints=12, stlv=stlv)
+
+            assert (ss_start, ss_end) == (0, 3)
+            assert info["method_requested"] == "legacy_sobel"
+            assert info["method_used"] == "manual"
+            assert info["source"] == "steady_state_end"
+
+    def test_resolve_baseline_window_accepts_glr_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            config.stage_overrides = {
+                "stage_a_mode": "scaffold",
+                "steady_state_auto_method": "find_end_ss_edge",
+            }
+            mean_curve = np.full(20, 100.0, dtype=np.float64)
+            mean_curve[5:] += 20.0
+            stlv = np.tile(mean_curve[:, np.newaxis], (1, 4))
+
+            _, ss_end, info = _resolve_baseline_window(config, n_timepoints=20, stlv=stlv)
+
+            assert 4 <= ss_end <= 7
+            assert info["method_requested"] == "glr"
+            assert info["method_used"] == "glr"
+
+    def test_resolve_baseline_window_defaults_to_legacy_sobel_when_no_options_set(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            config.stage_overrides = {
+                "stage_a_mode": "scaffold",
+                "use_dce_preferences": False,
+            }
+            mean_curve = np.full(24, 100.0, dtype=np.float64)
+            mean_curve[8:12] = np.linspace(100.0, 140.0, 4)
+            mean_curve[12:] = 140.0
+            stlv = np.tile(mean_curve[:, np.newaxis], (1, 4))
+
+            ss_start, ss_end, info = _resolve_baseline_window(config, n_timepoints=24, stlv=stlv)
+
+            assert ss_start == 0
+            assert 1 <= ss_end <= 12
+            assert info["method_requested"] == "none"
+            assert info["method_used"] == "legacy_sobel"
+            assert info["source"] == "default_auto_method:legacy_sobel"
 
     def test_validate_accepts_import_aif_path_alias_for_imported_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
