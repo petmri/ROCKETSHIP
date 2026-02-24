@@ -45,7 +45,7 @@ jobs:
           command: run_dce_cli('test_data/BIDS_test/rawdata/sub-01/ses-01/', 'test_data/BIDS_test/derivatives/sub-01/ses-01/')
 
       - name: Upload Ktrans result
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: Ktrans_result_${{ matrix.os }}-${{ matrix.release }}
           path: test_data/BIDS_test/derivatives/sub-01/ses-01/dce/dce_patlak_fit_Ktrans.nii
