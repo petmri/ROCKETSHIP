@@ -50,6 +50,12 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         action="store_true",
         help="Return non-zero when no sessions are discovered.",
     )
+    parser.add_argument(
+        "--pipeline-folder",
+        type=str,
+        default=None,
+        help="Optional pipeline folder name within derivatives (e.g., 'dceprep'). If not provided, looks for subjects directly under derivatives/.",
+    )
     return parser.parse_args(argv)
 
 
@@ -58,7 +64,7 @@ def main(argv: List[str] | None = None) -> int:
     bids_root = Path(args.bids_root).expanduser().resolve()
 
     try:
-        sessions = discover_bids_sessions(bids_root)
+        sessions = discover_bids_sessions(bids_root, pipeline_folder=args.pipeline_folder)
     except FileNotFoundError as exc:
         print(str(exc), file=sys.stderr)
         return 2

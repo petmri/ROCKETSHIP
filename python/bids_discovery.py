@@ -24,11 +24,22 @@ class BidsSession:
         return self.subject
 
 
-def discover_bids_sessions(bids_root: Path) -> List[BidsSession]:
-    """Discover subject/session entries present in both rawdata and derivatives."""
+def discover_bids_sessions(bids_root: Path, pipeline_folder: Optional[str] = None) -> List[BidsSession]:
+    """Discover subject/session entries present in both rawdata and derivatives.
+
+    Args:
+        bids_root: Root of BIDS dataset
+        pipeline_folder: Optional pipeline folder name within derivatives (e.g., 'dceprep').
+                        If not provided, looks for subjects directly under derivatives/.
+    """
     root = Path(bids_root).expanduser().resolve()
     raw_root = root / "rawdata"
-    deriv_root = root / "derivatives"
+
+    if pipeline_folder:
+        deriv_root = root / "derivatives" / pipeline_folder
+    else:
+        deriv_root = root / "derivatives"
+
     if not raw_root.is_dir():
         raise FileNotFoundError(f"Missing BIDS rawdata directory: {raw_root}")
     if not deriv_root.is_dir():
