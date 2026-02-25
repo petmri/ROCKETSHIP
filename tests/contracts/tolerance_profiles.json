@@ -1,0 +1,17 @@
+{
+  "forward_exact": {
+    "atol": 1e-10,
+    "rtol": 1e-8,
+    "description": "Deterministic closed-form forward models with no optimizer path dependence."
+  },
+  "fit_recovery": {
+    "atol": 5e-3,
+    "rtol": 5e-2,
+    "description": "Nonlinear fit recovery on synthetic data with deterministic start points."
+  },
+  "map_regression": {
+    "atol": 1e-4,
+    "rtol": 1e-2,
+    "description": "Voxel/map-level regression checks where interpolation or solver differences are expected."
+  }
+}

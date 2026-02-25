@@ -1,0 +1,134 @@
+{
+  "cases": {
+    "case_1": {
+      "patlak_sd_0.02_delay_0.csv": {
+        "arterial_delay_s": 0.0,
+        "ps_ref_per_min": 0.0,
+        "source_label": "case_1",
+        "vp_ref": 0.1
+      },
+      "patlak_sd_0.02_delay_5.csv": {
+        "arterial_delay_s": 5.0,
+        "ps_ref_per_min": 0.0,
+        "source_label": "case_1_delayed",
+        "vp_ref": 0.1
+      }
+    },
+    "case_2": {
+      "patlak_sd_0.02_delay_0.csv": {
+        "arterial_delay_s": 0.0,
+        "ps_ref_per_min": 0.05,
+        "source_label": "case_2",
+        "vp_ref": 0.1
+      },
+      "patlak_sd_0.02_delay_5.csv": {
+        "arterial_delay_s": 5.0,
+        "ps_ref_per_min": 0.05,
+        "source_label": "case_2_delayed",
+        "vp_ref": 0.1
+      }
+    },
+    "case_3": {
+      "patlak_sd_0.02_delay_0.csv": {
+        "arterial_delay_s": 0.0,
+        "ps_ref_per_min": 0.15,
+        "source_label": "case_3",
+        "vp_ref": 0.1
+      },
+      "patlak_sd_0.02_delay_5.csv": {
+        "arterial_delay_s": 5.0,
+        "ps_ref_per_min": 0.15,
+        "source_label": "case_3_delayed",
+        "vp_ref": 0.1
+      }
+    },
+    "case_4": {
+      "patlak_sd_0.02_delay_0.csv": {
+        "arterial_delay_s": 0.0,
+        "ps_ref_per_min": 0.0,
+        "source_label": "case_4",
+        "vp_ref": 0.2
+      },
+      "patlak_sd_0.02_delay_5.csv": {
+        "arterial_delay_s": 5.0,
+        "ps_ref_per_min": 0.0,
+        "source_label": "case_4_delayed",
+        "vp_ref": 0.2
+      }
+    },
+    "case_5": {
+      "patlak_sd_0.02_delay_0.csv": {
+        "arterial_delay_s": 0.0,
+        "ps_ref_per_min": 0.05,
+        "source_label": "case_5",
+        "vp_ref": 0.2
+      },
+      "patlak_sd_0.02_delay_5.csv": {
+        "arterial_delay_s": 5.0,
+        "ps_ref_per_min": 0.05,
+        "source_label": "case_5_delayed",
+        "vp_ref": 0.2
+      }
+    },
+    "case_6": {
+      "patlak_sd_0.02_delay_0.csv": {
+        "arterial_delay_s": 0.0,
+        "ps_ref_per_min": 0.15,
+        "source_label": "case_6",
+        "vp_ref": 0.2
+      },
+      "patlak_sd_0.02_delay_5.csv": {
+        "arterial_delay_s": 5.0,
+        "ps_ref_per_min": 0.15,
+        "source_label": "case_6_delayed",
+        "vp_ref": 0.2
+      }
+    },
+    "case_7": {
+      "patlak_sd_0.02_delay_0.csv": {
+        "arterial_delay_s": 0.0,
+        "ps_ref_per_min": 0.0,
+        "source_label": "case_7",
+        "vp_ref": 0.5
+      },
+      "patlak_sd_0.02_delay_5.csv": {
+        "arterial_delay_s": 5.0,
+        "ps_ref_per_min": 0.0,
+        "source_label": "case_7_delayed",
+        "vp_ref": 0.5
+      }
+    },
+    "case_8": {
+      "patlak_sd_0.02_delay_0.csv": {
+        "arterial_delay_s": 0.0,
+        "ps_ref_per_min": 0.05,
+        "source_label": "case_8",
+        "vp_ref": 0.5
+      },
+      "patlak_sd_0.02_delay_5.csv": {
+        "arterial_delay_s": 5.0,
+        "ps_ref_per_min": 0.05,
+        "source_label": "case_8_delayed",
+        "vp_ref": 0.5
+      }
+    },
+    "case_9": {
+      "patlak_sd_0.02_delay_0.csv": {
+        "arterial_delay_s": 0.0,
+        "ps_ref_per_min": 0.15,
+        "source_label": "case_9",
+        "vp_ref": 0.5
+      },
+      "patlak_sd_0.02_delay_5.csv": {
+        "arterial_delay_s": 5.0,
+        "ps_ref_per_min": 0.15,
+        "source_label": "case_9_delayed",
+        "vp_ref": 0.5
+      }
+    }
+  },
+  "source_files": [
+    "patlak_sd_0.02_delay_0.csv",
+    "patlak_sd_0.02_delay_5.csv"
+  ]
+}

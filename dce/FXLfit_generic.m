@@ -288,9 +288,9 @@ elseif strcmp(model, 'tissue_uptake')
             constraints(1,i) = prefs.lower_limit_ktrans;
             constraints(2,i) = prefs.upper_limit_ktrans;
             constraints(3,i) = prefs.lower_limit_vp;
-            constraints(3,i) = prefs.upper_limit_vp;
-            constraints(3,i) = prefs.lower_limit_fp;
-            constraints(3,i) = prefs.upper_limit_fp;
+            constraints(4,i) = prefs.upper_limit_vp;
+            constraints(5,i) = prefs.lower_limit_fp;
+            constraints(6,i) = prefs.upper_limit_fp;
         end
         constraints_single = single(constraints);
         % constrain upper and lower bounds for both parameters

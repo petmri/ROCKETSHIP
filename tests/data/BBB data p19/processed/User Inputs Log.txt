@@ -1,0 +1,85 @@
+Part A:
+************** User Input **************
+
+User selected TR (ms): 
+    8.2900
+
+User selected FA (degrees): 
+    15
+
+User selected hematocit (0 to 1.0): 
+    0.4200
+
+User selected SNR threshold for AIF: 
+     5
+
+User selected contrast agent R1 relaxivity (/mmol/sec): 
+    3.6000
+
+User selected end of steady state time (image number): 
+    -1
+
+User selected drift correction: 
+     0
+
+User selected quantification: ie. T1 maps
+************** End User Input **************
+
+Part B:
+************** User Input **************
+
+User selected part A results: 
+C:\A_Dyn-1R1info.mat
+File MD5 hash: 577c6f07859731e21d549b7598075ae9
+
+User selected start time (min): 
+User selected end time (min): 
+User selected start injection (min): 
+    0.5000
+
+User selected end injection (min): 
+    0.7000
+
+User selected fit AIF to model: 
+     1
+
+User selected import AIF path: 
+
+
+User selected time resolution (sec)
+   15.8400
+
+User selected quantification: ie. use T1 maps
+************** End User Input **************
+
+Part D:
+************** User Input **************
+
+User selected part B results: 
+C:\B_Dyn-1fitted_R1info.mat
+File MD5 hash: 6b80cfce008cd1adde50124f8b20f666
+
+User selected dce model: 
+Tofts
+
+User selected time smoothing model: 
+none
+
+User selected time smoothing window size: 
+     5
+
+User selected XY smooth size (sigma)
+     0
+
+User selected number of CPU cores
+     4
+
+User selected ROI list
+ 
+User selected fit individual voxels
+     1
+
+User selected use neuroecon
+     0
+
+************** End User Input **************

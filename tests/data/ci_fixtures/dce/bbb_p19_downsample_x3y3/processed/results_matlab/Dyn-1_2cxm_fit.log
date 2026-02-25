@@ -1,0 +1,72 @@
+************** User Input **************
+
+User selected part B results: 
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/B_Dyn-1fitted_R1info.mat
+User selected dce model: 
+Two Compartment Exchange
+
+User selected time smoothing model: 
+none
+
+User selected time smoothing window size: 
+     0
+
+User selected XY smooth size (sigma)
+     0
+
+Gpufit not detected. Defaulting to CPU.
+User selected number of CPU cores
+     1
+
+User selected ROI list
+ 
+User selected fit individual voxels
+     1
+
+User selected use neuroecon
+     0
+
+************** End User Input **************
+
+
+Starting Part D - Fitting Voxels/ROIs
+17-Feb-2026 15:22:15
+ 
+  
+Begin making maps for 2cxm...
+Starting fitting for 2832 voxels...
+Gpufit not detected. Defaulting to CPU.
+Voxel fitting done
+Elapsed time is 1340.103380 seconds.
+ 
+Voxel results saved to: 
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_2cxm_fit_Ktrans.nii
+File MD5 hash: bf7c303403cac1300f504cb98f15adce
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_2cxm_fit_ve.nii
+File MD5 hash: e875723b3b60e44a99f7f92e345a05e7
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_2cxm_fit_vp.nii
+File MD5 hash: c34c737b98931821706d20883ab6f7dc
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_2cxm_fit_fp.nii
+File MD5 hash: 88be3abc799709da993d45d275a32fff
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_2cxm_fit_sse.nii
+File MD5 hash: 6a6d6a44344c6ff773820911e025d91a
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_2cxm_fit_ktrans_ci_low.nii
+File MD5 hash: 913c6741bd4f97358d62702d1478c548
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_2cxm_fit_ktrans_ci_high.nii
+File MD5 hash: e1de41b44ba724658b8d44aa87a4abb1
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_2cxm_fit_ve_ci_low.nii
+File MD5 hash: 39fcb4380cb0e8692340db045c0f3ca4
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_2cxm_fit_ve_ci_high.nii
+File MD5 hash: c647887d1b45b00dc37663e194355e70
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_2cxm_fit_vp_ci_low.nii
+File MD5 hash: dab93e5c3b3c369cddaaf74a631ac7a7
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_2cxm_fit_vp_ci_high.nii
+File MD5 hash: be81733893a29fdd822a2e037db2c3cc
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_2cxm_fit_fp_ci_low.nii
+File MD5 hash: ed02db496a763ab5d4340b10ff71852d
+/home/mrispec/Code/ROCKETSHIP/test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3/processed/results_matlab/Dyn-1_2cxm_fit_fp_ci_high.nii
+File MD5 hash: 7a12729c5c4044033163769413eb5f29
+Finished making maps for 2cxm...
+ 
+Finished D
+17-Feb-2026 15:44:35
