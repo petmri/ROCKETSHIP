@@ -293,13 +293,15 @@ elseif strcmp(model, 'tissue_uptake')
             constraints(6,i) = prefs.upper_limit_fp;
         end
         constraints_single = single(constraints);
-        
+        % constrain upper and lower bounds for both parameters
+        constraint_type = int32([3,3,3]);
+
         % Load measured data
         indie_vars = single([timer_data' Cp_data]);
         Ct_single = single(Ct_data);
         
         % Execute GPU fit
-        [parameters, states, chi_squares, n_iterations, time] = gpufit_constraints(Ct_single,constraints_single,[],model_id,init_param_single,tolerance, max_n_iterations,[],estimator_id,indie_vars);
+        [parameters, states, chi_squares, n_iterations, time] = gpufit_constrained(Ct_single,[],model_id,init_param_single,constraints_single,constraint_type,tolerance, max_n_iterations,[],estimator_id,indie_vars);
         %[parameters, states, chi_squares, n_iterations, time] = gpufit(Ct_single,[],model_id,init_param_single,tolerance, max_n_iterations,[],estimator_id,indie_vars);
         state_0 = numel(states(states==0));
         state_1 = numel(states(states==1));
@@ -423,13 +425,15 @@ elseif strcmp(model, 'tofts')
             constraints(4,i) = prefs.upper_limit_ve;
         end
         constraints_single = single(constraints);
-        
+        % constrain upper and lower bounds for both parameters
+        constraint_type = int32([3,3]);
+
         % Load measured data
         indie_vars = single([timer_data' Cp_data]);
         Ct_single = single(Ct_data);
         
         % Execute GPU fit
-        [parameters, states, chi_squares, n_iterations, time] = gpufit_constraints(Ct_single,constraints_single,[],model_id,init_param_single,tolerance, max_n_iterations,[],estimator_id,indie_vars);
+        [parameters, states, chi_squares, n_iterations, time] = gpufit_constrained(Ct_single,[],model_id,init_param_single,constraints_single,constraint_type,tolerance, max_n_iterations,[],estimator_id,indie_vars);
         
         % If did not converge discard values
         one_parameter = parameters(1,:);
@@ -779,14 +783,14 @@ elseif strcmp(model, 'patlak')
         end
         constraints_single = single(constraints);
         % constrain upper and lower bounds for both parameters
-        constraint_types = int32([3,3]);
+        constraint_type = int32([3,3]);
         
         % Load measured data
         indie_vars = single([timer_data' Cp_data]);
         Ct_single = single(Ct_data);
         
         % Execute GPU fit
-        [parameters, states, chi_squares, n_iterations, time] = gpufit_constrained(Ct_single,[],model_id,init_param_single,constraints_single, constraint_types, tolerance, max_n_iterations,[],estimator_id,indie_vars);
+        [parameters, states, chi_squares, n_iterations, time] = gpufit_constrained(Ct_single,[],model_id,init_param_single,constraints_single, constraint_type, tolerance, max_n_iterations,[],estimator_id,indie_vars);
 
         % If did not converge discard values
         one_parameter = parameters(1,:);
@@ -948,13 +952,15 @@ elseif strcmp(model, '2cxm')
             constraints(8,i) = prefs.upper_limit_fp;
         end
         constraints_single = single(constraints);
-        
+        % constrain upper and lower bounds for both parameters
+        constraint_type = int32([3,3,3,3]);
+
         % Load measured data
         indie_vars = single([timer_data' Cp_data]);
         Ct_single = single(Ct_data);
         
         % Execute GPU fit
-        [parameters, states, chi_squares, n_iterations, time] = gpufit_constraints(Ct_single,constraints_single,[],model_id,init_param_single,tolerance, max_n_iterations,[],estimator_id,indie_vars);
+        [parameters, states, chi_squares, n_iterations, time] = gpufit_constrained(Ct_single,[],model_id,init_param_single,constraints_single,constraint_type,tolerance, max_n_iterations,[],estimator_id,indie_vars);
         
         % If did not converge discard values
         one_parameter = parameters(1,:);

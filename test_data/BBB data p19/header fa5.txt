@@ -1,0 +1,22 @@
+Manufacturers Model Name       GE MEDICAL SYSTEMS
+Magnetic Field Strength        3
+Patients Age                   030Y
+Study Description              MRI Brain w/ + w/o Contrast
+
+Sequence Name                  
+Protocol Name                  Brain w + wo Contrast H/
+Repetition Time                8.188
+Echo Time                      3.032
+FlipAngle                      5
+Pixel Bandwidth                150.234
+
+Rows                           256
+Columns                        256
+Pixel Spacing                  0.7031\0.7031
+Slice Thickness                5
+
+Spacing Between Slices         5
+
+Series Number                  12
+Instance Number                7
+Image Orientation Patient      0.995908\-0.0864283\-0.0263985\0.00314342\0.32502\-0.945702

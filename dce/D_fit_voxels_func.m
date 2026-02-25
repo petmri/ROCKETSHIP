@@ -1,6 +1,6 @@
-function results = D_fit_voxels_func(results_b_path, B_vars, dce_model, ...
+function results = D_fit_voxels_func(results_b_path, dce_model, ...
     time_smoothing,time_smoothing_window,xy_smooth_size,number_cpus, ...
-    roi_list,fit_voxels,neuroecon, outputft, save_output)
+    roi_list,fit_voxels,neuroecon, outputft, B_vars, save_output)
 
 % D_fit_voxels_func - Fit DCE curve to various models on a voxel by voxel
 % or ROI basis
@@ -69,10 +69,17 @@ end
 %************************
 
 % a) Load the data files
-% load(results_b_path);
-Bdata = B_vars;
-% results_a_path = Bdata.results_a_path;
-% load(results_a_path);
+if ~exist('B_vars', 'var') || isempty(B_vars)
+    if ~exist(results_b_path, 'file')
+        warning( 'File does not exist' );
+        disp(results_b_path);
+        return;
+    end
+    load(results_b_path);
+else
+    disp('Using B_vars from input');
+    Bdata = B_vars;
+end
 
 quant = Bdata.quant;
 
