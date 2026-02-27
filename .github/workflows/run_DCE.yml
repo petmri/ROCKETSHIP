@@ -113,7 +113,7 @@ jobs:
       - name: Generate MATLAB parity baseline maps (downsample fixture)
         uses: matlab-actions/run-command@v2
         with:
-          command: addpath .; addpath tests/matlab/; generate_dce_tofts_parity_map('subjectRoot', 'test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3', 'models', {'tofts'});
+          command: addpath .; addpath tests/matlab/; generate_dce_tofts_parity_map('subjectRoot', 'tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3', 'models', {'tofts'});
 
       - name: Run Python contract parity checks
         run: |
@@ -124,12 +124,12 @@ jobs:
         run: |
           python -m pytest tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_tofts_ktrans \
             --run-parity \
-            --dataset-root test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3 \
+            --dataset-root tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3 \
             -q
 
   matlab_checks:
     strategy:
-      #fail-fast: false
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-22.04]
         release: [R2020b, R2022a, latest]

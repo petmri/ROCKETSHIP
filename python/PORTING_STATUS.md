@@ -50,7 +50,7 @@ Latest qualification packet run:
   - TR/FA/time resolution for real data must come from sidecar JSON or be fully specified in config (no silent defaults).
 - CI topology update (2026-02-27):
   - Python-MATLAB parity checks moved to dedicated `parity_checks` job in `.github/workflows/run_DCE.yml`.
-  - Parity job now generates required downsample MATLAB baseline maps in-job before running `test_downsample_bbb_p19_tofts_ktrans`.
+  - Parity job now uses `tests/data/ci_fixtures/...` dataset paths and generates required downsample MATLAB baseline maps in-job before running `test_downsample_bbb_p19_tofts_ktrans`.
   - `python_portability` matrix now includes `ubuntu-22.04` in addition to macOS/Windows.
   - Unified `matlab_checks` matrix now targets `R2020b`, `R2022a`, and `latest` for both push and pull-request events (legacy PR-smoke-only MATLAB job removed).
   - Workflow-level concurrency now cancels superseded in-progress CI runs for the same workflow/ref.
