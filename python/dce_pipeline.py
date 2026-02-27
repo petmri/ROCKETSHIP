@@ -388,16 +388,6 @@ def probe_acceleration_backend() -> Dict[str, Any]:
             cuda_available = bool(pygpufit_module.cuda_available())
         except Exception:
             cuda_available = False
-        if cuda_available:
-            return {
-                "backend": "gpufit_cuda",
-                "reason": "pygpufit imported and CUDA is available",
-                "cuda_available": True,
-                "pygpufit_imported": True,
-                "pycpufit_imported": False,
-                "pygpufit_error": pygpufit_error,
-                "pycpufit_error": pycpufit_error,
-            }
 
     try:
         import pycpufit.cpufit as cf  # type: ignore
@@ -405,6 +395,17 @@ def probe_acceleration_backend() -> Dict[str, Any]:
         pycpufit_module = cf
     except Exception as exc:
         pycpufit_error = str(exc)
+
+    if cuda_available:
+        return {
+            "backend": "gpufit_cuda",
+            "reason": "pygpufit imported and CUDA is available",
+            "cuda_available": True,
+            "pygpufit_imported": pygpufit_module is not None,
+            "pycpufit_imported": pycpufit_module is not None,
+            "pygpufit_error": pygpufit_error,
+            "pycpufit_error": pycpufit_error,
+        }
 
     if pycpufit_module is not None:
         return {
