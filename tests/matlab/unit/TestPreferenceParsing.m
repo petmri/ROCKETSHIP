@@ -12,7 +12,6 @@ classdef TestPreferenceParsing < matlab.unittest.TestCase
             fprintf(fid, '%% comment line\n');
             fprintf(fid, 'gamma = value with spaces\n');
             clear cleanupFid
-            fclose(fid);
 
             prefs = parse_preference_file(tmpFile, 0, {'alpha', 'beta', 'gamma'}, {'', '', ''});
 
