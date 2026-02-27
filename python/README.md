@@ -6,14 +6,14 @@ currently in this repository.
 ## Current status
 
 - Primary Python entrypoint for DCE pipeline:
-  - `/Users/samuelbarnes/code/ROCKETSHIP/run_dce_python_cli.py`
+  - `/path/to/ROCKETSHIP/run_dce_python_cli.py`
 - Primary Python entrypoint for parametric T1 pipeline:
-  - `/Users/samuelbarnes/code/ROCKETSHIP/run_parametric_python_cli.py`
+  - `/path/to/ROCKETSHIP/run_parametric_python_cli.py`
 - Optional GUI entrypoints:
-  - `/Users/samuelbarnes/code/ROCKETSHIP/run_dce_python_gui.py`
-  - `/Users/samuelbarnes/code/ROCKETSHIP/run_parametric_python_gui.py`
+  - `/path/to/ROCKETSHIP/run_dce_python_gui.py`
+  - `/path/to/ROCKETSHIP/run_parametric_python_gui.py`
 - BIDS dataset/session discovery utility:
-  - `/Users/samuelbarnes/code/ROCKETSHIP/run_bids_discovery.py`
+  - `/path/to/ROCKETSHIP/run_bids_discovery.py`
 - Current implemented workflow focus:
   - DCE parts `A -> B -> D` (single-process, in-memory handoff; CLI-first with optional GUI wrapper)
   - Parametric VFA T1 mapping (linear, nonlinear, and two-point fit types; CLI + GUI v1)
@@ -24,16 +24,16 @@ currently in this repository.
 
 For detailed port status and todo items, see:
 
-- `/Users/samuelbarnes/code/ROCKETSHIP/python/ROADMAP.md`
-- `/Users/samuelbarnes/code/ROCKETSHIP/python/PORTING_STATUS.md`
-- `/Users/samuelbarnes/code/ROCKETSHIP/TODO.md`
+- `/path/to/ROCKETSHIP/python/ROADMAP.md`
+- `/path/to/ROCKETSHIP/python/PORTING_STATUS.md`
+- `/path/to/ROCKETSHIP/TODO.md`
 
 ## Environment setup
 
 Recommended setup (default):
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 python3 install_python_acceleration.py
 ```
 
@@ -60,7 +60,7 @@ Common installer options:
 Use this path only if you do not want to use the automated installer.
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip setuptools wheel
 .venv/bin/python -m pip install -r requirements.txt
@@ -70,7 +70,7 @@ python3 -m venv .venv
 Manual acceleration package install (from local wheel/source paths):
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 .venv/bin/python -m pip install /path/to/pyCpufit-*.whl
 .venv/bin/python -m pip install /path/to/pyGpufit-*.whl
 ```
@@ -80,31 +80,31 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 Use the example config:
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 .venv/bin/python run_dce_python_cli.py --config tests/python/dce_cli_config.example.json
 ```
 
 Run with built-in default config template:
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 .venv/bin/python run_dce_python_cli.py
 ```
 
 Default template location:
 
-- `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_default.json`
+- `/path/to/ROCKETSHIP/python/dce_default.json`
 - This default is prewired to the tiny fixture:
-  - `/Users/samuelbarnes/code/ROCKETSHIP/tests/data/ci_fixtures/dce/tiny_settings_case`
-  - outputs to `/Users/samuelbarnes/code/ROCKETSHIP/out/dce_gui_tiny`
+  - `/path/to/ROCKETSHIP/tests/data/ci_fixtures/dce/tiny_settings_case`
+  - outputs to `/path/to/ROCKETSHIP/out/dce_gui_tiny`
 
 Optional runtime overrides:
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 .venv/bin/python run_dce_python_cli.py \
   --config tests/python/dce_cli_config.example.json \
-  --dce-preferences /Users/samuelbarnes/code/ROCKETSHIP/dce/dce_preferences.txt \
+  --dce-preferences /path/to/ROCKETSHIP/dce/dce_preferences.txt \
   --set voxel_MaxFunEvals=100 \
   --set blood_t1_ms=1600
 ```
@@ -123,13 +123,13 @@ Typical outputs:
 Run with built-in default config template:
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 .venv/bin/python run_parametric_python_cli.py
 ```
 
 Default template location:
 
-- `/Users/samuelbarnes/code/ROCKETSHIP/python/parametric_default.json`
+- `/path/to/ROCKETSHIP/python/parametric_default.json`
 
 Typical outputs:
 
@@ -152,7 +152,7 @@ Parametric input notes:
 Generate a manifest of all discoverable sessions under a BIDS root:
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 .venv/bin/python run_bids_discovery.py \
   --bids-root tests/data/BIDS_test \
   --output-json out/bids_manifest.json \
@@ -166,8 +166,8 @@ exist in both trees, so other tools can run over the same discovered set.
 
 Config fields are parsed by:
 
-- `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_cli.py`
-- `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_pipeline.py`
+- `/path/to/ROCKETSHIP/python/dce_cli.py`
+- `/path/to/ROCKETSHIP/python/dce_pipeline.py`
 
 Key expectations:
 
@@ -177,7 +177,7 @@ Key expectations:
   - if no metadata JSON is available, you must provide all three manually in `stage_overrides`
     (`tr_ms`/`tr_sec`, `fa_deg`/`fa`, `time_resolution_sec`/`time_resolution`)
   - partial manual override when metadata JSON is present is rejected (set all three or none)
-- MATLAB-style `dce_preferences.txt` defaults are loaded automatically from `/Users/samuelbarnes/code/ROCKETSHIP/dce/dce_preferences.txt` when present
+- MATLAB-style `dce_preferences.txt` defaults are loaded automatically from `/path/to/ROCKETSHIP/dce/dce_preferences.txt` when present
 - Supported backend values: `auto`, `cpu`, `gpufit`
 - Backend selection behavior:
   - `auto`: tries `pygpufit` with CUDA first, then `pycpufit` CPU backend, then pure CPU path
@@ -193,12 +193,12 @@ Key expectations:
 
 Part E work-in-progress:
 
-- Python post-fit statistical core is available in `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_postfit_analysis.py`.
+- Python post-fit statistical core is available in `/path/to/ROCKETSHIP/python/dce_postfit_analysis.py`.
 - Current coverage includes f-test and AIC/relative-likelihood helpers plus ROI CSV and voxel-map reconstruction utilities.
 - Reproducible output helpers are available via `run_ftest_analysis(...)` and `run_aic_analysis(...)` (JSON/CSV/NPY artifacts).
 - Part E outputs now include statistical summary fields and optional plot PNGs for troubleshooting (`p` histograms, model-count histograms, best-vs-second likelihood histograms).
 - Stage D can optionally export Part E-ready fit arrays (`*_postfit_arrays.npz`) using `stage_overrides.write_postfit_arrays=true`.
-- NPZ loader is available via `load_dce_fit_stats_from_npz(...)` with runner script `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/run_dce_postfit_analysis.py`.
+- NPZ loader is available via `load_dce_fit_stats_from_npz(...)` with runner script `/path/to/ROCKETSHIP/tests/python/run_dce_postfit_analysis.py`.
 
 Preference precedence:
 
@@ -208,7 +208,7 @@ Preference precedence:
 
 Shared options documentation for CLI + GUI:
 
-- `/Users/samuelbarnes/code/ROCKETSHIP/docs/dce_options.md`
+- `/path/to/ROCKETSHIP/docs/dce_options.md`
 
 ## What is intentionally not supported in Python port scope
 
@@ -223,14 +223,14 @@ Shared options documentation for CLI + GUI:
 ### Unit + integration-style Python tests
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 .venv/bin/python -m pytest tests/python -q
 ```
 
 Coverage summary + XML report:
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 .venv/bin/python -m pytest tests/python -q \
   --cov=python \
   --cov-report=term-missing \
@@ -245,7 +245,7 @@ pipeline output/event contract checks (`tests/python/test_install_python_acceler
 ### Contract parity against MATLAB baseline JSON
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 .venv/bin/python tests/contracts/generate_python_results.py --output /tmp/python_results.json
 .venv/bin/python tests/contracts/compare_with_matlab_baseline.py --python-results /tmp/python_results.json --require-all
 ```
@@ -255,7 +255,7 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 Fast downsample parity:
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 .venv/bin/python -m pytest \
   tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_tofts_ktrans \
   --parity
@@ -264,7 +264,7 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 Optional VE parity mask threshold (measurable-Ktrans voxels only):
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 .venv/bin/python -m pytest \
   tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_tofts_ktrans \
   --parity \
@@ -279,7 +279,7 @@ Notes:
 Optional full-volume parity (slower; reserve for occasional thorough checks):
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 .venv/bin/python -m pytest \
   tests/python/test_dce_pipeline_parity_metrics.py::test_full_bbb_p19_tofts_ktrans \
   --parity --full-parity
@@ -288,7 +288,7 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 Optional CPU model-map + ROI table parity (`tofts`, `ex_tofts`, `patlak`, `tissue_uptake`):
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 .venv/bin/python -m pytest \
   tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_model_maps_and_roi_xls_cpu \
   --parity
@@ -296,12 +296,12 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 
 Default downsample fixture used for parity:
 
-- `/Users/samuelbarnes/code/ROCKETSHIP/tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3`
+- `/path/to/ROCKETSHIP/tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3`
 
 ### Tiny settings matrix (fast)
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 .venv/bin/python tests/data/scripts/generate_tiny_dce_settings_fixture.py --clean
 .venv/bin/python -m pytest tests/python/test_dce_pipeline_settings_matrix.py -v
 ```
@@ -309,7 +309,7 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 ### OSIPI T1 + SI-to-concentration checks
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 .venv/bin/python -m pytest \
   tests/python/test_osipi_t1_reliability.py \
   tests/python/test_osipi_si_to_conc_reliability.py \
@@ -319,14 +319,14 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 ### OSIPI primary backend consistency checks
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 .venv/bin/python -m pytest tests/python/test_osipi_backend_consistency.py -v
 ```
 
 ### OSIPI primary merge-gate reliability summary
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 .venv/bin/python tests/python/run_osipi_reliability.py \
   --suite all \
   --summary-json /tmp/osipi_primary_reliability_summary.json
@@ -336,7 +336,7 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 
 Workflow:
 
-- `/Users/samuelbarnes/code/ROCKETSHIP/.github/workflows/run_DCE.yml`
+- `/path/to/ROCKETSHIP/.github/workflows/run_DCE.yml`
 
 CI currently runs:
 
@@ -352,28 +352,28 @@ CI currently runs:
 Install GUI dependency:
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 .venv/bin/python -m pip install -r requirements_gui.txt
 ```
 
 Launch GUI:
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 .venv/bin/python run_dce_python_gui.py
 ```
 
 Launch parametric T1 GUI:
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 .venv/bin/python run_parametric_python_gui.py
 ```
 
 One-click test run:
 
 - Launch the GUI and click `Run DCE` without changing fields.
-- It uses `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_default.json` and the tiny fixture by default.
+- It uses `/path/to/ROCKETSHIP/python/dce_default.json` and the tiny fixture by default.
 
 GUI v1 behavior:
 
