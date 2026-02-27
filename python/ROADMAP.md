@@ -50,6 +50,7 @@ Current status:
 - Backend-consistency checks now cover CPU vs CPUfit/GPUfit (where available) in `tests/python/test_osipi_backend_consistency.py`.
 - Accelerated `ex_tofts` qualification failures on `cpufit_cpu` were resolved locally by adopting shared accelerated tolerance `gpu_tolerance=1e-6` (previous `1e-12` was too tight and drove max-iteration failures).
 - Full `tests/python` suite and current BIDS-test qualification now pass with the updated accelerated tolerance.
+- CI gating now isolates MATLAB-backed parity in dedicated `parity_checks` that generates downsample MATLAB baseline maps before parity assertions, while Python-only checks remain in `python_checks`; portability includes `ubuntu-22.04`; and a unified `matlab_checks` matrix (`R2020b`/`R2022a`/`latest`) runs on both pushes and pull requests with per-ref cancellation of superseded runs.
 - Remaining work is broader real-data/CUDA backend qualification in end-to-end workflows.
 
 Required outputs:

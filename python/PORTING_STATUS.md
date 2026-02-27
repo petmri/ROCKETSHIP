@@ -48,6 +48,12 @@ Latest qualification packet run:
 - Real-data DCE inputs are now stricter by design:
   - Stage A requires a dedicated AIF ROI mask (or future auto-AIF routine); brain-mask fallback as AIF is rejected.
   - TR/FA/time resolution for real data must come from sidecar JSON or be fully specified in config (no silent defaults).
+- CI topology update (2026-02-27):
+  - Python-MATLAB parity checks moved to dedicated `parity_checks` job in `.github/workflows/run_DCE.yml`.
+  - Parity job now generates required downsample MATLAB baseline maps in-job before running `test_downsample_bbb_p19_tofts_ktrans`.
+  - `python_portability` matrix now includes `ubuntu-22.04` in addition to macOS/Windows.
+  - Unified `matlab_checks` matrix now targets `R2020b`, `R2022a`, and `latest` for both push and pull-request events (legacy PR-smoke-only MATLAB job removed).
+  - Workflow-level concurrency now cancels superseded in-progress CI runs for the same workflow/ref.
 - DCE baseline auto-detection port status (updated 2026-02-24):
   - Python Stage A now supports explicit baseline-end detectors via `stage_overrides.steady_state_auto_method`:
     - `legacy_sobel` (from `dce_auto_aif` baseline-end path)

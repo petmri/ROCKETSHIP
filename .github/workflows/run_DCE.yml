@@ -11,6 +11,10 @@ on:
       - master
       - dev
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   python_checks:
     runs-on: ubuntu-latest
@@ -58,24 +62,12 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-      - name: Run Python contract parity checks
-        run: |
-          python tests/contracts/generate_python_results.py --output /tmp/python_results.json
-          python tests/contracts/compare_with_matlab_baseline.py --python-results /tmp/python_results.json --require-all
-
-      - name: Run Python DCE pipeline parity (downsample fixture)
-        run: |
-          python -m pytest tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_tofts_ktrans \
-            --run-parity \
-            --dataset-root test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3 \
-            -q
-
   python_portability:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [windows-latest, macos-latest, ubuntu-22.04]
         python-version: ["3.11"]
 
     steps:
@@ -95,13 +87,52 @@ jobs:
       - name: Run Python unit/integration tests (non-parity mode)
         run: python -m pytest tests/python -m "not parity" -q
 
-  build_push:
-    if: github.event_name == 'push'
+  parity_checks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: "pip"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Set up MATLAB
+        uses: matlab-actions/setup-matlab@v2
+        with:
+          products: Curve_Fitting_Toolbox Image_Processing_Toolbox Optimization_Toolbox Parallel_Computing_Toolbox Statistics_and_Machine_Learning_Toolbox
+          release: R2022a
+
+      - name: Generate MATLAB parity baseline maps (downsample fixture)
+        uses: matlab-actions/run-command@v2
+        with:
+          command: addpath .; addpath tests/matlab/; generate_dce_tofts_parity_map('subjectRoot', 'test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3', 'models', {'tofts'});
+
+      - name: Run Python contract parity checks
+        run: |
+          python tests/contracts/generate_python_results.py --output /tmp/python_results.json
+          python tests/contracts/compare_with_matlab_baseline.py --python-results /tmp/python_results.json --require-all
+
+      - name: Run Python DCE pipeline parity (downsample fixture)
+        run: |
+          python -m pytest tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_tofts_ktrans \
+            --run-parity \
+            --dataset-root test_data/ci_fixtures/dce/bbb_p19_downsample_x3y3 \
+            -q
+
+  matlab_checks:
     strategy:
       #fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-22.04]
-        release: [R2020b, R2021a, R2022a]
+        release: [R2020b, R2022a, latest]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -143,41 +174,5 @@ jobs:
         with:
           name: Ktrans_result_${{ matrix.os }}-${{ matrix.release }}
           path: test_data/BIDS_test/derivatives/sub-01/ses-01/dce/dce_patlak_fit_Ktrans.nii
-          retention-days: 7
-          if-no-files-found: error
-
-  build_pr:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up MATLAB
-        uses: matlab-actions/setup-matlab@v2
-        with:
-          products: Curve_Fitting_Toolbox Image_Processing_Toolbox Optimization_Toolbox Parallel_Computing_Toolbox Statistics_and_Machine_Learning_Toolbox
-          release: R2022a
-
-      - name: Run Algorithm Unit Tests
-        uses: matlab-actions/run-command@v2
-        with:
-          command: addpath .; addpath tests/matlab/; addpath tests/matlab/helpers/; results = run_unit_tests(); assert(~any([results.Failed]), 'Unit tests failed.');
-
-      - name: Run Algorithm Integration Tests
-        uses: matlab-actions/run-command@v2
-        with:
-          command: addpath .; addpath tests/matlab/; addpath tests/matlab/helpers/; results = run_all_tests('suite','integration'); assert(~any([results.Failed]), 'Integration tests failed.');
-
-      - name: Run DCE (PR Smoke)
-        uses: matlab-actions/run-command@v2
-        with:
-          command: run_dce_cli('test_data/ci_fixtures/dce/downsample_x2_bids/rawdata/sub-01/ses-01/', 'test_data/ci_fixtures/dce/downsample_x2_bids/derivatives/sub-01/ses-01/')
-
-      - name: Upload Ktrans result (PR Smoke)
-        uses: actions/upload-artifact@v4
-        with:
-          name: Ktrans_result_pr_ubuntu-latest-R2022a
-          path: test_data/ci_fixtures/dce/downsample_x2_bids/derivatives/sub-01/ses-01/dce/dce_patlak_fit_Ktrans.nii
           retention-days: 7
           if-no-files-found: error
