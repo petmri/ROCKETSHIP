@@ -179,5 +179,30 @@ email_preferences.txt
 dce_last_state.mat
 *info.log
 dce/*info.log
-test_data/BIDS_test/derivatives
+tests/data/synthetic/generated
+tests/data/BBB data p19/Dyn-1_timecurves.fig
+tests/data/BBB data p19/Dyn-1dynamicCt.nii.gz
+tests/data/BBB data p19/processed/python_out/
+tests/data/BBB data p19/processed/python_out_tofts_kmax100/
+tests/data/BBB data p19/processed/results_matlab/
+tests/data/ci_fixtures/dce/downsample_x2_bids/derivatives/sub-01/ses-01/dce/A_*
+tests/data/ci_fixtures/dce/downsample_x2_bids/derivatives/sub-01/ses-01/dce/B_*
+tests/data/ci_fixtures/dce/downsample_x2_bids/derivatives/sub-01/ses-01/dce/dceAIF_fitting.*
+tests/data/ci_fixtures/dce/downsample_x2_bids/derivatives/sub-01/ses-01/dce/dce_timecurves.*
+tests/data/ci_fixtures/dce/downsample_x2_bids/derivatives/sub-01/ses-01/dce/dcedynamicCt.nii.gz
+tests/data/ci_fixtures/dce/downsample_x2_bids/derivatives/sub-01/ses-01/dce/dce_patlak_fit*
+out/
+
+# Installer-generated acceleration artifacts
+external_programs/CpufitMex*
+external_programs/GpufitCudaAvailableMex*
+external_programs/Gpufit*Mex*
+external_programs/cpufit*.m
+external_programs/gpufit*.m
+external_programs/Gpufit*.m
+external_programs/ConstraintType.m
+external_programs/EstimatorID.m
+external_programs/ModelID.m
+external_programs/libCpufit.*
+external_programs/libGpufit.*
 
