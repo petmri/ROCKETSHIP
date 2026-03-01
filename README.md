@@ -1,7 +1,5 @@
 # ROCKETSHIP v1.2,  2016
 ---
-[![Docs](https://github.com/petmri/ROCKETSHIP/actions/workflows/docs.yml/badge.svg)](https://petmri.github.io/ROCKETSHIP/)
-
 _Copyright (c) 2016, Thomas Ng, Samuel Barnes_
 
 All rights reserved.
@@ -18,18 +16,14 @@ GNU General Public License for more details.
 
 Contains program and associated files to process and analyze parametric MRI and DCE-MRI files. Developed at the Biological Imaging Center at the California Institute of Technology. 
 
-## Help
-For documentation and how-to guides, use the project docs site:
-
-- https://petmri.github.io/ROCKETSHIP/
-
-The GitHub Wiki is being migrated and will be kept for transition notices.
+### [SEE GITHUB WIKI FOR HELP](https://github.com/petmri/ROCKETSHIP/wiki)
 
 Please see Barnes, Ng et al BMC Bioinformatics (2015) for more information.
 
 Thomas Ng 	thomasn@caltech.edu
 
 Samuel Barnes 	srbarnes@caltech.edu
+
 
 
 ## ROCKETSHIP Papers
@@ -241,3 +235,4 @@ Listing of various programs incorporated under BSD license as part of ROCKETSHIP
 'niftitools'
 'uirecall'
 ```
+
