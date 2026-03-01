@@ -1,5 +1,7 @@
 # ROCKETSHIP v2.0.rc
 ---
+[![Docs](https://github.com/petmri/ROCKETSHIP/actions/workflows/docs.yml/badge.svg)](https://petmri.github.io/ROCKETSHIP/)
+
 
 ROCKETSHIP is a toolbox for processing and analyzing parametric MRI and DCE-MRI data. It was developed at the Biological Imaging Center at the California Institute of Technology and Loma Linda University.
 
@@ -10,7 +12,11 @@ Ng, T.S.C., et al. [ROCKETSHIP: a flexible and modular software tool for the pla
 ![ROCKETSHIP Logo](image.png)
 
 ## Help
-For more information, and how-to guides [SEE GITHUB WIKI](https://github.com/petmri/ROCKETSHIP/wiki)
+For documentation and how-to guides, use the project docs site:
+
+- https://petmri.github.io/ROCKETSHIP/
+
+The GitHub Wiki is being migrated and will be kept for transition notices.
 
 
 ## ROCKETSHIP Papers
