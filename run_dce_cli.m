@@ -75,6 +75,9 @@ function run_dce_cli(subject_source_path, subject_tp_path)
         if isfield(json, 'RepetitionTimeExcitation')
             tr = json.RepetitionTimeExcitation;
             time_resolution = json.RepetitionTime;
+        elseif isfield (json, 'TemporalResolution')
+            tr = json.RepetitionTime;
+            time_resolution = json.TemporalResolution;
         elseif isfield(json, 'AcquisitionDuration')
             tr = json.RepetitionTime;
             time_resolution = json.AcquisitionDuration;
@@ -272,6 +275,16 @@ function run_dce_cli(subject_source_path, subject_tp_path)
 
     if (~isempty(script_prefs.roi_list))
         roi_list = split(script_prefs.roi_list);
+        for i = 1:numel(roi_list)
+            search_path = fullfile(subject_tp_path, roi_list{i});
+            file = dir(search_path);
+
+            if ~isempty(file)
+                roi_list{i} = fullfile(file(1).folder, file(1).name);
+            else
+                warning('ROI file not found: %s', search_path)
+            end
+        end
     else
         roi_list = '';
     end

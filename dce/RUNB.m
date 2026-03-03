@@ -371,8 +371,9 @@ if get(handles.timevectyn, 'Value')
 else
     timevectpath = '';
 end
-
-saved_results = B_AIF_fitting_func(results_a_path,start_time,end_time,start_injection,end_injection,fit_aif,import_aif_path,time_resolution, timevectpath);
+Adata = load(results_a_path);
+Adata = Adata.Adata;
+saved_results = B_AIF_fitting_func(results_a_path, Adata, start_time,end_time,start_injection,end_injection,fit_aif,import_aif_path,time_resolution, timevectpath);
 %set(handles.results_b_path,'String',saved_results);
 handles.saved_results = saved_results;
 guidata(hObject, handles);
