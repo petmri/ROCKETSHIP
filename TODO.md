@@ -3,6 +3,11 @@
 ## Objective
 Finish the Python transition to the point that it can be merged to `dev` and tested on real-data workflows, with clear quality gates and maintainable code.
 
+## Recent Update (2026-03-02)
+- [x] Batch DCE config assembly now prefers per-session DCE metadata JSON for `tr`/`fa`, and avoids template `tr`/`fa` defaults unless explicitly passed via `--set`.
+- [x] Batch mode now forces `dce_metadata_path` to the current session sidecar by default (prevents template test-fixture metadata paths from leaking into real-data runs unless explicitly overridden via `--set dce_metadata_path=...`).
+- [x] When sidecar JSON lacks frame spacing, Stage A now falls back to explicit `time_resolution[_sec]` overrides and then repository `script_preferences.txt` (`time_resolution`), with provenance recorded in `a_out.json`.
+
 ## Primary (Blockers for Dev-Branch Trial)
 1. Parametric maps and T1 fitting workflow
 - [x] Port remaining workflow behavior from `parametric_scripts/custom_scripts/T1mapping_fit.m` and required `calculateMap` path components.

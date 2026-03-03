@@ -12,6 +12,8 @@ The transition is "dev-branch ready" when all items below are true:
 5. Documentation and runbooks are updated so users can execute Python workflows without reading MATLAB source.
 
 ## Engineering Constraints
+- Metadata-first policy for DCE timing inputs: per-session DCE JSON sidecars should supply TR/flip-angle/frame-spacing by default; template timing values are treated as opt-in explicit overrides.
+
 - Python path is pre-production: correctness and maintainability are higher priority than preserving legacy implementation details that are not scientifically required.
 - Favor readable, unit-explicit, modular code suitable for academic extension.
 - Remove dead Python code and unused compatibility layers once replacement paths are validated.

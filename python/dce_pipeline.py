@@ -807,6 +807,24 @@ def _resolve_dynamic_metadata(config: DcePipelineConfig, n_timepoints: int) -> D
             time_resolution_sec = float(payload["TemporalResolution"])
             metadata_sources["time_resolution_sec"] = f"{source_prefix}.TemporalResolution"
 
+    if time_resolution_sec is None:
+        pref_time = _stage_override(config, "time_resolution_sec", None)
+        if not _override_value_is_set(pref_time):
+            pref_time = _stage_override(config, "time_resolution", None)
+        if _override_value_is_set(pref_time):
+            time_resolution_sec = float(pref_time)
+            metadata_sources["time_resolution_sec"] = "preferences_or_stage_overrides.time_resolution[_sec]"
+
+    if time_resolution_sec is None:
+        script_pref_path = Path(__file__).resolve().parents[1] / "script_preferences.txt"
+        if script_pref_path.exists():
+            stat = script_pref_path.stat()
+            script_prefs = _parse_preference_file(str(script_pref_path), int(stat.st_mtime_ns))
+            script_time = script_prefs.get("time_resolution")
+            if _override_value_is_set(script_time):
+                time_resolution_sec = float(script_time)
+                metadata_sources["time_resolution_sec"] = f"script_preferences:{script_pref_path}.time_resolution"
+
     if (
         time_resolution_sec is not None
         and "NumberOfAverages" in payload
@@ -1753,6 +1771,8 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
         "relaxivity": relaxivity,
         "hematocrit": hematocrit,
         "aif_concentration_kind": timing.get("aif_concentration_kind"),
+        "metadata_source_path": timing.get("metadata_source_path"),
+        "metadata_sources": timing.get("metadata_sources"),
         "blood_t1_override_sec": blood_t1_override_sec,
         "steady_state_time": [ss_start + 1, ss_end],
         "steady_state_auto": baseline_info,

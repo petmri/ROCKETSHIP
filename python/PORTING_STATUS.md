@@ -1,6 +1,9 @@
 # Python Porting Status
 
 ## Snapshot
+- Date: 2026-03-02
+- Update: Batch DCE config now prefers per-session metadata JSON timing values over template timing defaults unless explicitly overridden via `--set`; Stage A checkpoint now records metadata provenance (`metadata_source_path`, `metadata_sources`) for traceability.
+
 - Date: 2026-02-22
 - Branch: `codex/algorithm-test-suite`
 - Commit: working tree (uncommitted)
