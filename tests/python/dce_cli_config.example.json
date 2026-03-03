@@ -1,0 +1,47 @@
+{
+  "subject_source_path": "/ABS/PATH/TO/BIDS_example/rawdata/sub-01/ses-01",
+  "subject_tp_path": "/ABS/PATH/TO/BIDS_example/derivatives/sub-01/ses-01",
+  "output_dir": "./out/dce_cli",
+  "checkpoint_dir": "./out/dce_cli/checkpoints",
+  "backend": "auto",
+  "write_xls": true,
+  "aif_mode": "auto",
+  "dynamic_files": [
+    "/ABS/PATH/TO/BIDS_example/derivatives/sub-01/ses-01/dce/sub-01_ses-01_desc-bfcz_DCE.nii.gz"
+  ],
+  "aif_files": [
+    "/ABS/PATH/TO/BIDS_example/derivatives/sub-01/ses-01/anat/sub-01_ses-01_space-DCEref_desc-brain_mask.nii.gz"
+  ],
+  "roi_files": [
+    "/ABS/PATH/TO/BIDS_example/derivatives/sub-01/ses-01/anat/sub-01_ses-01_space-DCEref_desc-brain_mask.nii.gz"
+  ],
+  "t1map_files": [
+    "/ABS/PATH/TO/BIDS_example/rawdata/sub-01/ses-01/anat/sub-01_ses-01_flip-01_VFA.nii.gz"
+  ],
+  "noise_files": [],
+  "drift_files": [],
+  "model_flags": {
+    "tofts": 1,
+    "ex_tofts": 1,
+    "patlak": 1,
+    "tissue_uptake": 1,
+    "two_cxm": 1,
+    "fxr": 1,
+    "auc": 0,
+    "nested": 0,
+    "FXL_rr": 0
+  },
+  "stage_overrides": {
+    "dce_preferences_path": "",
+    "stage_a_mode": "real",
+    "stage_b_mode": "real",
+    "stage_d_mode": "real",
+    "aif_curve_mode": "fitted",
+    "time_smoothing": "none",
+    "time_smoothing_window": 0,
+    "write_postfit_arrays": false,
+    "steady_state_start": 1,
+    "steady_state_end": 2,
+    "snr_filter": 0.0
+  }
+}

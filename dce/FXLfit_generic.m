@@ -151,13 +151,13 @@ if strcmp(model, 'ex_tofts')
         
         % If did not converge discard values
         one_parameter = parameters(1,:);
-        one_parameter(states~=0) = -0.000001;  %Ktrans
+        one_parameter(states~=0) = NaN;  %Ktrans
         parameters(1,:) = one_parameter;
         one_parameter = parameters(2,:);
-        one_parameter(states~=0) = -0.000001;  %ve
+        one_parameter(states~=0) = NaN;  %ve
         parameters(2,:) = one_parameter;
         one_parameter = parameters(3,:);
-        one_parameter(states~=0) = -0.000001;  %vp
+        one_parameter(states~=0) = NaN;  %vp
         parameters(3,:) = one_parameter;
         
         GG = [parameters' chi_squares'];
@@ -288,18 +288,20 @@ elseif strcmp(model, 'tissue_uptake')
             constraints(1,i) = prefs.lower_limit_ktrans;
             constraints(2,i) = prefs.upper_limit_ktrans;
             constraints(3,i) = prefs.lower_limit_vp;
-            constraints(3,i) = prefs.upper_limit_vp;
-            constraints(3,i) = prefs.lower_limit_fp;
-            constraints(3,i) = prefs.upper_limit_fp;
+            constraints(4,i) = prefs.upper_limit_vp;
+            constraints(5,i) = prefs.lower_limit_fp;
+            constraints(6,i) = prefs.upper_limit_fp;
         end
         constraints_single = single(constraints);
-        
+        % constrain upper and lower bounds for both parameters
+        constraint_type = int32([3,3,3]);
+
         % Load measured data
         indie_vars = single([timer_data' Cp_data]);
         Ct_single = single(Ct_data);
         
         % Execute GPU fit
-        [parameters, states, chi_squares, n_iterations, time] = gpufit_constraints(Ct_single,constraints_single,[],model_id,init_param_single,tolerance, max_n_iterations,[],estimator_id,indie_vars);
+        [parameters, states, chi_squares, n_iterations, time] = gpufit_constrained(Ct_single,[],model_id,init_param_single,constraints_single,constraint_type,tolerance, max_n_iterations,[],estimator_id,indie_vars);
         %[parameters, states, chi_squares, n_iterations, time] = gpufit(Ct_single,[],model_id,init_param_single,tolerance, max_n_iterations,[],estimator_id,indie_vars);
         state_0 = numel(states(states==0));
         state_1 = numel(states(states==1));
@@ -313,13 +315,13 @@ elseif strcmp(model, 'tissue_uptake')
         fprintf('ratio gpu not read = %s\n',num2str(state_4));
         % If did not converge discard values
 %         one_parameter = parameters(1,:);
-%         one_parameter(states~=0) = -0.000001;  %Ktrans
+%         one_parameter(states~=0) = NaN;  %Ktrans
 %         parameters(1,:) = one_parameter;
 %         one_parameter = parameters(2,:);
-%         one_parameter(states~=0) = -0.000001;  %vp
+%         one_parameter(states~=0) = NaN;  %vp
 %         parameters(2,:) = one_parameter;
 %         one_parameter = parameters(3,:);
-%         one_parameter(states~=0) = -0.000001;  %fp
+%         one_parameter(states~=0) = NaN;  %fp
 %         parameters(3,:) = one_parameter;
         
         GG = [parameters' chi_squares'];
@@ -423,20 +425,22 @@ elseif strcmp(model, 'tofts')
             constraints(4,i) = prefs.upper_limit_ve;
         end
         constraints_single = single(constraints);
-        
+        % constrain upper and lower bounds for both parameters
+        constraint_type = int32([3,3]);
+
         % Load measured data
         indie_vars = single([timer_data' Cp_data]);
         Ct_single = single(Ct_data);
         
         % Execute GPU fit
-        [parameters, states, chi_squares, n_iterations, time] = gpufit_constraints(Ct_single,constraints_single,[],model_id,init_param_single,tolerance, max_n_iterations,[],estimator_id,indie_vars);
+        [parameters, states, chi_squares, n_iterations, time] = gpufit_constrained(Ct_single,[],model_id,init_param_single,constraints_single,constraint_type,tolerance, max_n_iterations,[],estimator_id,indie_vars);
         
         % If did not converge discard values
         one_parameter = parameters(1,:);
-        one_parameter(states~=0) = -0.000001;  %Ktrans
+        one_parameter(states~=0) = NaN;  %Ktrans
         parameters(1,:) = one_parameter;
         one_parameter = parameters(2,:);
-        one_parameter(states~=0) = -0.000001;  %ve
+        one_parameter(states~=0) = NaN;  %ve
         parameters(2,:) = one_parameter;
         
         GG = [parameters' chi_squares'];
@@ -779,7 +783,7 @@ elseif strcmp(model, 'patlak')
         end
         constraints_single = single(constraints);
         % constrain upper and lower bounds for both parameters
-        constraint_types = int32([3,3]);
+        constraint_type = int32([3,3]);
         
         % Load measured data
         % Ensure timer_data is a row vector and not the same size as Cp_data
@@ -836,10 +840,10 @@ elseif strcmp(model, 'patlak')
 
         % If did not converge discard values
         one_parameter = parameters(1,:);
-        one_parameter(states~=0) = -0.000001;  %Ktrans
+        one_parameter(states~=0) = NaN;  %Ktrans
         parameters(1,:) = one_parameter;
         one_parameter = parameters(2,:);
-        one_parameter(states~=0) = -0.000001;  %vp
+        one_parameter(states~=0) = NaN;  %vp
         parameters(2,:) = one_parameter;
         
         GG = [parameters' chi_squares'];
@@ -994,27 +998,29 @@ elseif strcmp(model, '2cxm')
             constraints(8,i) = prefs.upper_limit_fp;
         end
         constraints_single = single(constraints);
-        
+        % constrain upper and lower bounds for both parameters
+        constraint_type = int32([3,3,3,3]);
+
         % Load measured data
         indie_vars = single([timer_data' Cp_data]);
         Ct_single = single(Ct_data);
         
         % Execute GPU fit
-        [parameters, states, chi_squares, n_iterations, time] = gpufit_constraints(Ct_single,constraints_single,[],model_id,init_param_single,tolerance, max_n_iterations,[],estimator_id,indie_vars);
+        [parameters, states, chi_squares, n_iterations, time] = gpufit_constrained(Ct_single,[],model_id,init_param_single,constraints_single,constraint_type,tolerance, max_n_iterations,[],estimator_id,indie_vars);
         
         % If did not converge discard values
         one_parameter = parameters(1,:);
-        one_parameter(states~=0) = -0.000001;  %Ktrans
+        one_parameter(states~=0) = NaN;  %Ktrans
         parameters(1,:) = one_parameter;
         one_parameter = parameters(2,:);
-        one_parameter(states~=0) = -0.000001;  %ve
+        one_parameter(states~=0) = NaN;  %ve
         parameters(2,:) = one_parameter;
         one_parameter = parameters(3,:);
-        one_parameter(states~=0) = -0.000001;  %vp
+        one_parameter(states~=0) = NaN;  %vp
         parameters(3,:) = one_parameter;
-        one_parameter = parameters(3,:);
-        one_parameter(states~=0) = -0.000001;  %fp
-        parameters(3,:) = one_parameter;
+        one_parameter = parameters(4,:);
+        one_parameter(states~=0) = NaN;  %fp
+        parameters(4,:) = one_parameter;
         
         GG = [parameters' chi_squares'];
         % add zeros for the unknown + and - 95 CI

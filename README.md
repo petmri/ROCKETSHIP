@@ -1,238 +1,330 @@
-# ROCKETSHIP v1.2,  2016
+# ROCKETSHIP v2.0.rc
 ---
-_Copyright (c) 2016, Thomas Ng, Samuel Barnes_
+[![Docs](https://github.com/petmri/ROCKETSHIP/actions/workflows/docs.yml/badge.svg)](https://petmri.github.io/ROCKETSHIP/)
 
-All rights reserved.
 
-This program is free software; you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation; either version 2 of the License, or
-(at your option) any later version.
+ROCKETSHIP is a toolbox for processing and analyzing parametric MRI and DCE-MRI data. It was developed at the Biological Imaging Center at the California Institute of Technology and Loma Linda University.
 
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
+If you use ROCKETSHIP in your project, please cite:
 
-Contains program and associated files to process and analyze parametric MRI and DCE-MRI files. Developed at the Biological Imaging Center at the California Institute of Technology. 
+Ng, T.S.C., et al. [ROCKETSHIP: a flexible and modular software tool for the planning, processing and analysis of dynamic MRI studies](https://doi.org/10.1186/s12880-015-0062-3). *BMC Medical Imaging*, 15, 19 (2015). PMID: 26076957
 
-### [SEE GITHUB WIKI FOR HELP](https://github.com/petmri/ROCKETSHIP/wiki)
+![ROCKETSHIP Logo](image.png)
 
-Please see Barnes, Ng et al BMC Bioinformatics (2015) for more information.
+## Help
+For documentation and how-to guides, use the project docs site:
 
-Thomas Ng 	thomasn@caltech.edu
+- https://petmri.github.io/ROCKETSHIP/
 
-Samuel Barnes 	srbarnes@caltech.edu
-
+The GitHub Wiki is being migrated and will be kept for transition notices.
 
 
 ## ROCKETSHIP Papers
 
-If you use ROCKETSHIP in your project please reference
+If you are using ROCKETSHIP for DCE-MRI, please cite this paper, which also has detailed information about the DCE models used in this project:
 
-[Ng et al. ROCKETSHIP: a flexible and modular software tool for the planning, processing and analysis of dynamic MRI studies. BMC Med Img 2015](https://doi.org/10.1186/s12880-015-0062-3)
+Ng, T.S.C., et al. [ROCKETSHIP: a flexible and modular software tool for the planning, processing and analysis of dynamic MRI studies](https://doi.org/10.1186/s12880-015-0062-3). *BMC Medical Imaging*, 15, 19 (2015). PMID: 26076957
 
-in any papers. This reference also has detailed information about the various DCE models used in this project. If you are pursing BBB human applications please consider these papers for parameter suggestions
 
-[Barnes et al. Optimal acquisition and modeling parameters for accurate assessment of low Ktrans blood-brain barrier permeability using dynamic contrast-enhanced MRI. MRM 2015](http://www.ncbi.nlm.nih.gov/pubmed/26077645)
+If you are pursuing BBB human applications, please also consider:
 
-[Montagne et al. Blood-brain barrier breakdown in the aging human hippocampus. Neuron 2015](http://www.ncbi.nlm.nih.gov/pubmed/25611508)
+Barnes, S.R., et al. [Optimal acquisition and modeling parameters for accurate assessment of low Ktrans blood-brain barrier permeability using dynamic contrast-enhanced MRI](https://pubmed.ncbi.nlm.nih.gov/26077645/). *Magnetic Resonance in Medicine*, 75(5), 1967-1977 (2016). PMID: 26077645
 
-or this for mouse applications
+Montagne, A., et al. [Blood-brain barrier breakdown in the aging human hippocampus](https://pubmed.ncbi.nlm.nih.gov/25611508/). *Neuron*, 85(2), 296-302 (2015). PMID: 25611508
 
-[Montagne et al. Pericyte degeneration causes white matter dysfunction in the mouse central nervous system. Nature Medicine 2018](https://pubmed.ncbi.nlm.nih.gov/29400711/)
 
-Other Publications using ROCKETSHIP for a more complete list see [google scholar](https://scholar.google.com/scholar?cites=17209875609254734596&as_sdt=2005&sciodt=0,5&hl=en)
-* [Sta Maria et al. Low Dose Focused Ultrasound Induces Enhanced Tumor Accumulation of Natural Killer Cells. PLOS One 2015](http://doi.org/10.1371/journal.pone.0142767)
-* [Montagne et al. APOE4 leads to blood–brain barrier dysfunction predicting cognitive decline. Nature 2020](https://pubmed.ncbi.nlm.nih.gov/32376954/)
-* [Backhaus et al. Toward precise arterial input functions derived from DCE‐MRI through a novel extracorporeal circulation approach in mice. MRM 2020](https://pubmed.ncbi.nlm.nih.gov/32077523/)
-* [Bagley et al. Clinical Utility of Plasma Cell-Free DNA in Adult Patients with Newly Diagnosed Glioblastoma: A Pilot Prospective Study. Clinical Cancer Research 2020](https://pubmed.ncbi.nlm.nih.gov/31666247/)
-* [Ng et al. Clinical Implementation of a Free-Breathing, Motion-Robust Dynamic Contrast-Enhanced MRI Protocol to Evaluate Pleural Tumors. American Journal of Roentgenology 2020](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7341067/)
-* [Pacia et al. Feasibility and safety of focused ultrasound-enabled liquid biopsy in the brain of a porcine model. Scientific Reports 2020](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7198482/)
-* [Boehm-Sturm et al. Low-Molecular-Weight Iron Chelates May Be an Alternative to Gadolinium-based Contrast Agents for T1-weighted Contrast-enhanced MR Imaging. Radiology 2017](https://pubmed.ncbi.nlm.nih.gov/28880786/) 
-## ROCKETSHIP Requirements:
+Other publications using ROCKETSHIP (for a more complete list, see [Google Scholar](https://scholar.google.com/scholar?cites=17209875609254734596&as_sdt=2005&sciodt=0,5&hl=en)):
+- Pan, H., et al. [Liganded magnetic nanoparticles for magnetic resonance imaging of α-synuclein](https://doi.org/10.1038/s41531-025-00918-z). *npj Parkinson's Disease*, 11(1), 88 (2025). PMID: 40268938
+- Llull, B., et al. [Blood-Brain Barrier Disruption Predicts Poor Outcome in Subarachnoid Hemorrhage: A Dynamic Contrast-Enhanced MRI Study](https://doi.org/10.1161/STROKEAHA.125.051455). *Stroke*, 56(9), 2633-2643 (2025). PMID: 40557536
+- Reas, E.T., et al. [APOE ε4-related blood-brain barrier breakdown is associated with microstructural abnormalities](https://doi.org/10.1002/alz.14302). *Alzheimer's & Dementia*, 20(12), 8615-8624 (2024). PMID: 39411970
+- Montagne, A., et al. [APOE4 leads to blood-brain barrier dysfunction predicting cognitive decline](https://pubmed.ncbi.nlm.nih.gov/32376954/). *Nature*, 581(7806), 71-76 (2020). PMID: 32376954
+- Backhaus, P., et al. [Toward precise arterial input functions derived from DCE-MRI through a novel extracorporeal circulation approach in mice](https://pubmed.ncbi.nlm.nih.gov/32077523/). *Magnetic Resonance in Medicine*, 84(3), 1404-1415 (2020). PMID: 32077523
+- Bagley, S.J., et al. [Clinical Utility of Plasma Cell-Free DNA in Adult Patients with Newly Diagnosed Glioblastoma: A Pilot Prospective Study](https://pubmed.ncbi.nlm.nih.gov/31666247/). *Clinical Cancer Research*, 26(2), 397-407 (2020). PMID: 31666247
+- Ng, T.S.C., et al. [Clinical Implementation of a Free-Breathing, Motion-Robust Dynamic Contrast-Enhanced MRI Protocol to Evaluate Pleural Tumors](https://pubmed.ncbi.nlm.nih.gov/32348181/). *AJR American Journal of Roentgenology*, 215(1), 94-104 (2020). PMID: 32348181
+- Pacia, C.P., et al. [Feasibility and safety of focused ultrasound-enabled liquid biopsy in the brain of a porcine model](https://pubmed.ncbi.nlm.nih.gov/32366915/). *Scientific Reports*, 10(1), 7449 (2020). PMID: 32366915
+- Boehm-Sturm, P., et al. [Low-Molecular-Weight Iron Chelates May Be an Alternative to Gadolinium-based Contrast Agents for T1-weighted Contrast-enhanced MR Imaging](https://pubmed.ncbi.nlm.nih.gov/28880786/). *Radiology*, 286(2), 537-546 (2018). PMID: 28880786
+- Sta Maria, N.S., et al. [Low Dose Focused Ultrasound Induces Enhanced Tumor Accumulation of Natural Killer Cells](https://doi.org/10.1371/journal.pone.0142767). *PLOS ONE*, 10(11), e0142767 (2015). PMID: 26556731
 
-* Matlab Version
-  * Verified Working: Matlab 2014a, 2014b
-  * Should Work: Matlab 2015a, 2015b (please let me know if you have tried this)
-  * Will Not Work: Matlab 2011
+## ROCKETSHIP Python 
+
+The newly developed Python module provides a command-line interface (CLI) and GUI for DCE-MRI and parametric mapping workflows, with optional GPU acceleration via `pyGpufit` and CPU fallback via `pyCpufit`. The Python scripts are designed to be modular and scriptable, allowing users to run the same core processing stages as the MATLAB version, but with more flexible configuration and automation options. The MATLAB scripts remain available for users who prefer that environment or have existing workflows built around it, but the Python module is the recommended path forward for new users and projects.
+
+### Automated setup, recommended for most users
+
+Recommended setup (default):
+
+```bash
+cd /path/to/ROCKETSHIP
+python3 install_python_acceleration.py
+```
+
+What this script does:
+
+- creates/reuses `.venv` (use `--recreate-venv` to rebuild)
+- installs Python requirements (including GUI by default)
+- downloads latest stable release package from `ironictoo/Gpufit`
+- auto-detects host platform/arch and picks matching release asset
+- detects local CUDA version (when available) and prefers the closest matching CUDA asset for your host
+- falls back to CPU asset IDs when CUDA builds are not a good local match
+- installs both `pyCpufit` and `pyGpufit` into the venv
+- verifies imports and reports CUDA availability
+
+Common installer options:
+
+- `--release-tag <tag>`: pin to a specific Gpufit release
+- `--asset-id <id>`: force specific asset id
+- `--venv-path <path>`: custom venv path
+- `--no-gui`: skip GUI dependency install
+
+### Manual setup
+
+Use this path only if you do not want to use the automated installer.
+
+```bash
+cd /path/to/ROCKETSHIP
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip setuptools wheel
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m pip install -r requirements_gui.txt
+```
+
+Manual acceleration package install (from local wheel/source paths):
+
+```bash
+cd /path/to/ROCKETSHIP
+.venv/bin/python -m pip install /path/to/pyCpufit-*.whl
+.venv/bin/python -m pip install /path/to/pyGpufit-*.whl
+```
+
+### Run the Python DCE CLI
+
+Use the example config, fromt the ROCKETSHIP root:
+
+```bash
+source .venv/bin/activate
+python run_dce_python_cli.py --config tests/python/dce_cli_config.example.json
+```
+
+Run with built-in default config template:
+
+```bash
+source .venv/bin/activate
+python run_dce_python_cli.py
+```
+
+Default template location:
+
+- `/path/to/ROCKETSHIP/python/dce_default.json`
+- This default is prewired to the tiny fixture:
+  - `/path/to/ROCKETSHIP/tests/data/ci_fixtures/dce/tiny_settings_case`
+  - outputs to `/path/to/ROCKETSHIP/out/dce_gui_tiny`
+
+Optional runtime overrides:
+
+```bash
+python run_dce_python_cli.py \
+  --config tests/python/dce_cli_config.example.json \
+  --dce-preferences /path/to/ROCKETSHIP/dce/dce_preferences.txt \
+  --set voxel_MaxFunEvals=100 \
+  --set blood_t1_ms=1600
+```
+
+Typical outputs:
+
+- Stage summary JSON: `<output_dir>/dce_pipeline_run.json`
+- Event log JSONL: `<output_dir>/dce_pipeline_events.jsonl`
+- Stage checkpoints (optional): `<checkpoint_dir>/a_out.json`, `b_out.json`, `d_out.json`
+- DCE model maps (NIfTI when possible; fallback `.npy`)
+- ROI spreadsheet output (`.xls`) for ROI-enabled runs
+- QC figures for Stage A/B real runs
+
+### Run the Python Parametric T1 CLI
+
+Run with built-in default config template:
+
+```bash
+source .venv/bin/activate
+python run_parametric_python_cli.py
+```
+
+Default template location:
+
+- `/path/to/ROCKETSHIP/python/parametric_default.json`
+
+Typical outputs:
+
+- Run summary JSON: `<output_dir>/parametric_t1_run.json`
+- Event log JSONL: `<output_dir>/parametric_t1_events.jsonl`
+- T1 map NIfTI: `<output_dir>/T1_map_<fit_type>_<label>.nii.gz`
+- R-squared map NIfTI: `<output_dir>/Rsquared_<fit_type>_<label>.nii.gz`
+
+Parametric input notes:
+
+- `fit_type` supports `t1_fa_linear_fit`, `t1_fa_fit`, and `t1_fa_two_point_fit`.
+- `b1_map_file` is optional; when provided, per-voxel effective flip angles are `flip_angles_deg * b1_scale`.
+- If `b1_map_file` is omitted, the pipeline auto-detects `B1_scaled_FAreg.nii` or `B1_scaled_FAreg.nii.gz` in the VFA directory.
+- `tr_ms` is optional if VFA sidecars contain `RepetitionTime`; otherwise the pipeline falls back to `script_preferences.txt` key `tr` (or explicit `script_preferences_path`).
+- `odd_echoes=true` keeps only odd-positioned samples from the VFA stack (indices `0,2,4,...`) before fitting, matching MATLAB workflow behavior.
+- `xy_smooth_sigma` (alias `xy_smooth_size`) applies optional per-frame XY Gaussian smoothing before fitting.
+
+### Discover BIDS datasets/sessions
+
+Generate a manifest of all discoverable sessions under a BIDS root:
+
+```bash
+cd /path/to/ROCKETSHIP
+source .venv/bin/activate
+python run_bids_discovery.py \
+  --bids-root tests/data/BIDS_test \
+  --output-json out/bids_manifest.json \
+  --print-json
+```
+
+This utility reads `rawdata/` and `derivatives/` and emits subject/session pairs that
+exist in both trees, so other tools can run over the same discovered set.
+
+### Python GUI (PySide6)
+
+Install GUI dependency:
+
+```bash
+cd /path/to/ROCKETSHIP
+source .venv/bin/activate
+python -m pip install -r requirements_gui.txt
+```
+
+Launch GUI:
+
+```bash
+cd /path/to/ROCKETSHIP
+source .venv/bin/activate
+python run_dce_python_gui.py
+```
+
+Launch parametric T1 GUI:
+
+```bash
+cd /path/to/ROCKETSHIP
+source .venv/bin/activate
+python run_parametric_python_gui.py
+```
+
+One-click test run:
+
+- Launch the GUI and click `Run DCE` without changing fields.
+- It uses `/path/to/ROCKETSHIP/python/dce_default.json` and the tiny fixture by default.
+
+Parametric GUI v1 behavior:
+
+- Edits the parametric T1 config (`vfa_files`, flip angles, TR, thresholds, B1 map, script-preferences path, output controls).
+- Runs `run_parametric_python_cli.py` in a subprocess and streams event progress.
+- Shows summary metrics from `parametric_t1_run.json` and lists output artifact paths.
+
+## ROCKETSHIP MATLAB, Legacy
+The MATLAB scripts are the original implementation of ROCKETSHIP and are still available in this repository for users who prefer that environment or have existing workflows built around it. However, the Python module is the recommended path forward for new users and projects, as it offers more flexible configuration, and automation options. New features and updates will primarily be developed in the Python module, while the MATLAB scripts will be maintained for compatibility but may not receive all new features or optimizations.
+
+### Requirements:
+
+* MATLAB Version
+  * CI tested: MATLAB 2020b, 2022a, 2025a (likely compatible with older versions, but not tested).
 * Toolboxes:
   * Curve fitting
   * Parallel
   * Statistics
   * Image processing
-  * Optimization (currently required for some functions, working to remove this requirement)
+
 * Computer:
   * Some of the processing is very CPU intensive, a modern multi-core (≥4) processor, while not required, helps keep the processing time reasonable (heavily dependent on image matrix size).
   * (Optional) An NVIDIA GPU can be used to significantly speed up processing by using the [gpufit](https://github.com/ironictoo/Gpufit) library.
+  * Python port note: Stage-D `tofts`/`patlak` can also accelerate on CPU via `pyCpufit` when CUDA is not available (see `python/README.md`).
 
-## File formats
+### MATLAB Quick Start
 
-ROCKETSHIP prefers all images to be input in the NIFTI format. DCE fitting does have some limited support for directly processing DICOM images, but it is recommended to convert from DICOM to NIFTI first, then use the NIFTI images for all processing. Additionally the parametric fitting (T1, T2, ADC) requires NIFTI files. To convert from DICOM to NIFTI we recommend using the dcm2nii tool that comes with MRIcron, it is available for Windows, Linux, and Mac and is easy to use (although any converter can be used). For dcm2nii select the FSL 4D NIFTI format. Compressed NIFTI images (.nii.gz) can be read by ROCKETSHIP, but not written.
-
-## Quick Start
-
-1. Clone ROCKETSHIP git clone --recursive https://github.com/petmri/ROCKETSHIP.git
-2. Add ROCKETSHIP folder to Matlab path
+1. Clone ROCKETSHIP: `git clone --recursive https://github.com/petmri/ROCKETSHIP.git`
+2. Add the ROCKETSHIP folder to the MATLAB path
 3. Calculate T1 maps with script run_parametric.m
 4. Check T1 maps with script run_analysis.m
 5. Calculate DCE maps with script run_dce.m
 
-## Additional Help
+### File formats
 
-If you need help and can't find it here please contact Sam Barnes sabarnes@llu.edu.
+ROCKETSHIP prefers NIFTI input images. DCE fitting has limited support for direct DICOM processing, but converting DICOM to NIFTI first is recommended. Parametric fitting (T1, T2, ADC) requires NIFTI files. For conversion, we recommend `dcm2nii` (bundled with MRIcron), available on Windows, Linux, and macOS (any equivalent converter is also acceptable). For `dcm2nii`, select the FSL 4D NIFTI format. Compressed NIFTI images (`.nii.gz`) can be read by ROCKETSHIP, but are not written.
 
 
+### MATLAB file map (curated)
 
-## Listing of files and brief descriptor
+This section intentionally lists the major legacy MATLAB entry points and core implementation files, rather than every helper file.
 
-### README.md				- This file
+#### DCE module (`dce/`)
 
-### i) dce: ROCKETSHIP DCE module  (94 files)
-```
-'ADDLUT.m'				- File parsing helper file		
-'AIFbiexpcon.m'				- Fits AIF to biexponential model
-'AIFbiexpfithelp.m'			- Helping file for AIF fitting
-'A_make_R1maps_func.m'			- Submodule A for processing DCE-MRI files
-'B_AIF_fitting_func.m'			- Submodule B for processing AIF/Reference regions
-'D_fit_voxels_batch_func.m'		- Submodule D for curve fitting batch program
-'D_fit_voxels_func.m'			- Submodule D for curve fitting
-'FXLfit_generic.m'			- Model fitting file
-'REMOVELUT.m'				- File parsing helper file 
-'RUNA.fig'				- GUI for submodule A
-'RUNA.m'				- GUI for submodule A
-'RUNB.fig'				- GUI for submodule B
-'RUNB.m'				- GUI for submodule B
-'RUND.fig'				- GUI for submodule D
-'RUND.m'				- GUI for submodule D
-'allnumeric.m'				- File parsing helper file 
-'appendLISTS.m'				- File parsing helper file 
-'auc_helper.m'				- File for area-under curve calculation
-'average_aifs.fig'			- GUI for submodule B: generate population AIF
-'average_aifs.m'			- GUI for submodule B: generate population AIF
-'cleanAB.m'				- Helper file for submodule A
-'cleanR1t.m'				- Helper file for submodule A
-'compare_fits.m'			- Helper file for submodule E
-'compare_gui.fig'			- Helper file for submodule E
-'compare_gui.m'				- Helper file for submodule E
-'consistencyCHECKRUNA.m'		- Helper file for submodule A
-'dce.fig'				- MAIN File for ROCKETSHIP module GUI
-'dce.m'					- MAIN File for ROCKETSHIP module GUI
-'dce_auto_aif.m'			- Helper file for submodule A
-'dce_last_state.mat'			- Data file storing previous GUI states
-'dce_preferences.txt'			- Preference file containing parameters for fitting. Edit as necessary
-'disp_error.m'				- Helper file to display error messages in GUIs
-'double2uint16Scale.m'			- Helper file to parse DICOM images
-'findLUTPLACE.m'			- File parsing helper file 
-'findRod.m'				- Helper file for submodule A
-'findrootname.m'			- File parsing helper file 
-'findsubjectID.m'			- File parsing helper file
-'finduniqueID.m'			- File parsing helper file
-'finduniqueID_B.m'			- File parsing helper file
-'finduniqueID_B_helper.m'		- File parsing helper file
-'finduniqueIDhelper.m'			- File parsing helper file
-'finduniqueIDhelperB.m'			- File parsing helper file
-'fitting_analysis.fig'			- GUI for submodule E
-'fitting_analysis.m'			- GUI for submodule E
-'generatefullpath.m'			- File parsing helper file
-'isDICOM.m'				- File parsing helper file
-'isDICOMhdr.m'				- File parsing helper file
-'isNIFTI.m'				- File parsing helper file
-'license.txt'				- License file
-'loadIMGVOL.m'				- File parsing helper file
-'longestfilename.m'			- File parsing helper file
-'matchindex.m'				- File parsing helper file
-'model_0.m'				- Helper file for submodule D: model fitting
-'model_2cxm.m'				- Helper file for submodule D: model fitting
-'model_2cxm_cfit.m'			- Helper file for submodule D: model fitting
-'model_extended_tofts.m'		- Helper file for submodule D: model fitting
-'model_extended_tofts_cfit.m'		- Helper file for submodule D: model fitting
-'model_fxr.m'				- Helper file for submodule D: model fitting
-'model_fxr_cfit.m'			- Helper file for submodule D: model fitting
-'model_patlak.m'			- Helper file for submodule D: model fitting
-'model_patlak_cfit.m'			- Helper file for submodule D: model fitting
-'model_patlak_linear.m'			- Helper file for submodule D: model fitting
-'model_patlak_linear_fit.m'		- Helper file for submodule D: model fitting
-'model_tissue_uptake.m'			- Helper file for submodule D: model fitting
-'model_tissue_uptake_cfit.m'		- Helper file for submodule D: model fitting
-'model_tofts.m'				- Helper file for submodule D: model fitting
-'model_tofts_cfit.m'			- Helper file for submodule D: model fitting
-'model_vp.m'				- Helper file for submodule D: model fitting
-'model_vp_cfit.m'			- Helper file for submodule D: model fitting
-'myginput.m'				- Helper file for submodule D: model fitting
-'natORDER.m'				- File parsing helper file: sorts lists in natural order
-'natORDERhelper.m'			- File parsing helper file: sorts lists in natural order
-'nested_fit_helper.m'			- Helper file for submodule D: model fitting
-'niftipathfind.m'			- File parsing helper file: sorts lists in natural order
-'parse_cfit.m'				- Helper file for submodule D
-'parse_cfit_helper.m'			- Helper file for submodule D
-'parse_preference_file.m'		- Parses preference text file as needed.
-'plot_curve.m'				- Plot time activity curves
-'plot_dce_curve.m'			- Plot time activity curves
-'reorderLUT.m'				- File parsing helper file
-'rescaleDICOM.m'			- Helper file to parse DICOM images
-'run_neuroecon_job.m'			- Legacy file to enable batch job on external server
-'sortIMGVOL.m'				- Image parsing helper file
-'sort_parse_2Dvol.m'			- Image parsing helper file
-'sort_parse_2Dvol_helper.m'		- Image parsing helper file
-'sort_parse_3Dvol.m'			- Image parsing helper file
-'sort_parse_3Dvol_helper.m'		- Image parsing helper file
-'sort_parse_INPUTS.m'			- Image parsing helper file
-'split2subsets.m'			- Image parsing helper file
-'updateLUT.m'				- File parsing helper file
-'update_segmentlist.m'			- File parsing helper file
-'visualize_list.m'			- File parsing helper file
-'visualize_list_dce.m'			- File parsing helper file
-'visualize_runD.m'			- File parsing helper file
-```
+**Top-level workflow / GUI**
+- `dce.m`, `dce.fig` — legacy main DCE GUI wrapper.
+- `RUNA.m`/`RUNA.fig` — Stage A controls (signal/T1 to concentration prep).
+- `RUNB.m`/`RUNB.fig` — Stage B controls (AIF/reference-region setup and fitting).
+- `RUND.m`/`RUND.fig` — Stage D controls (model fitting and map generation).
 
-### ii) parametric_scripts 
-ROCKETSHIP fitting module to generate T2/T2*, T1, ADC and other parametric maps (31 files)
-```
-'calculateMap.m'			- Helper file for fitting
-'calculateMap_batch.m'			- Helper file for fitting
-'check_TRfit.m'				- Helper file to check TR fitting
-'disp_error.m'				- Helper file to display error messages in GUI
-'double2uint16Scale.m'			- Image parsing helper file 
-'fitParameter.m'			- Helper file for fitting
-'fitting_gui.fig'			- MAIN file for ROCKETSHIP fitting module
-'fitting_gui.m'				- MAIN file for ROCKETSHIP fitting module
-'fitting_script.m'			- Helper file for fitting
-'generatefullpath.m'			- File parsing helper file
-'instantiate_dataset.m'			- File parsing helper file
-'isDICOM.m'				- File parsing helper file
-'license.txt'				- License file
-'load_batch.m'				- File parsing helper file
-'load_image_files.m'			- File parsing helper file
-'makeNewbatch.m'			- File parsing helper file
-'miscellaneous_aux_files'		- Directory containing miscellaneous auxilary files, likely unnecessary, but kept for legacy purposes.
-'parallelFit.m'				- Helper file for fitting
-'parseDICOM.m'				- File parsing helper file
-'prepareFit.m'				- Helper file for fitting
-'preprocessIMGvol.m'			- Image parsing helper file
-'quick_check.m'				- Check for error prior to fitting
-'rescaleDICOM.m'			- Image parsing helper file
-'setup_file_list.m'			- File parsing helper file
-'setup_job.m'				- Helper file for fitting
-'sortIMGVOL.m'				- Image parsing helper file
-'update_handles.m'			- Helper file for fitting
-'update_parameters.m'			- Helper file for fitting
-'visualize_R2.m'			- Helper file for GUI, visualize R2 maps
-'visualize_list.m'			- Image parsing helper file
-```
+**Core pipeline stages (used by CLI and GUI paths)**
+- `A_make_R1maps_func.m` — Stage A processing from input images/masks.
+- `B_AIF_fitting_func.m` — Stage B AIF/reference fitting and timing handling.
+- `D_fit_voxels_func.m` — Stage D voxel/ROI model fitting and output maps.
+- `FXLfit_generic.m` — shared constrained-fit machinery used across models.
 
-### iii) external_programs
+**Primary kinetic models**
+- `model_tofts.m`, `model_tofts_cfit.m`
+- `model_extended_tofts.m`, `model_extended_tofts_cfit.m`
+- `model_patlak.m`, `model_patlak_linear.m`, `model_patlak_cfit.m`
+- `model_tissue_uptake.m`, `model_tissue_uptake_cfit.m`
+- `model_2cxm.m`, `model_2cxm_cfit.m`
+- `model_vp.m`, `model_vp_cfit.m`
+- `model_fxr.m`, `model_fxr_cfit.m`
+- `model_FXL_reference_region.m`, `model_FXL_reference_region_cfit.m`
 
-Listing of various programs incorporated under BSD license as part of ROCKETSHIP. Please go to the relevant page on MATLABCentral for details for each particular app.
-```
-'DataHash'
-'ProgressBar'
-'ReadImageJROI'
-'TimedProgressBar'
-'dirr'
-'ftest'
-'imshow3d'
-'niftitools'
-'uirecall'
-```
+**Post-fit analysis / review**
+- `fitting_analysis.m`, `fitting_analysis.fig` — legacy Part E analysis GUI.
+- `compare_fits.m`, `compare_gui.m`, `compare_gui.fig` — model comparison helpers.
+- `auc_helper.m`, `plot_curve.m`, `plot_dce_curve.m` — reporting/curve utilities.
 
+**Configuration and key shared helpers**
+- `dce_preferences.txt` — model/solver defaults and limits.
+- `parse_preference_file.m` — preference parser used across DCE MATLAB workflows.
+- `dce_auto_aif.m`, `AIFbiexpcon.m`, `AIFbiexpfithelp.m` — AIF-specific logic.
+- `loadIMGVOL.m`, `sortIMGVOL.m`, `sort_parse_INPUTS.m` — image input/parsing helpers.
+
+#### Parametric mapping module (`parametric_scripts/`)
+
+**Top-level workflow / GUI**
+- `fitting_gui.m`, `fitting_gui.fig` — legacy parametric fitting GUI.
+- `fitting_script.m` — script-driven fitting wrapper.
+
+**Core fitting implementation**
+- `calculateMap.m`, `calculateMap_batch.m` — map-level execution.
+- `fitParameter.m` — model fitting backend for T1/T2/ADC-type fits.
+- `parallelFit.m`, `prepareFit.m`, `setup_job.m` — parallel and setup helpers.
+- `check_TRfit.m`, `quick_check.m` — input sanity and fit checks.
+
+**Custom scripts and configuration**
+- `custom_scripts/T1mapping_fit.m` — legacy T1 map workflow script.
+- `parametric_preferences.txt` — parametric defaults.
+
+#### External MATLAB dependencies (`external_programs/`)
+
+Included third-party utilities and accelerator interfaces used by legacy MATLAB workflows:
+
+**General utilities / UI**
+- `DataHash.m`
+- `ProgressBar.m`, `TimedProgressBar.m`
+- `ftest.m`
+- `ReadImageJROI.m`
+- `imshow3D.m`, `imshow3D_new.m`, `imshow3D_overlays.m`
+- `uiremember.m`, `uirestore.m`
+
+**NIfTI I/O**
+- `niftitools/` — bundled NIfTI read/write toolbox used by MATLAB paths.
+
+**GPUfit / CPUfit interfaces**
+- MATLAB wrappers: `gpufit.m`, `gpufit_constrained.m`, `cpufit.m`, `gpufit_version.m`, `gpufit_cuda_available.m`
+- MEX binaries: `GpufitMex.mexa64`, `GpufitConstrainedMex.mexa64`, `GpufitCudaAvailableMex.mexa64`, `CpufitMex.mexa64`
+- Shared libraries: `libGpufit.so`, `libCpufit.so`
+- Enums: `ModelID.m`, `EstimatorID.m`, `ConstraintType.m`
+
+For license details, see the corresponding `*_license.txt` files in `external_programs/`.

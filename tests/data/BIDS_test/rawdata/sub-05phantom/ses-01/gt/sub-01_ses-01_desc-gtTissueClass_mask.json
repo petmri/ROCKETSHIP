@@ -1,0 +1,3 @@
+{
+    "Description": "Ground truth tissue class labels: 0=background, 1=muscle/fat, 2=brain, 3=vessel"
+}

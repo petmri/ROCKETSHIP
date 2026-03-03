@@ -1,0 +1,269 @@
+function output = generate_dce_tofts_parity_map(varargin)
+% generate_dce_tofts_parity_map Build MATLAB DCE parity baselines.
+%
+% This runs parts A->B->D non-interactively on a dataset and writes
+% `<rootname>_<model>_fit_*.nii` maps into `outputRoot`.
+%
+% Example:
+%   output = generate_dce_tofts_parity_map();
+%   output = generate_dce_tofts_parity_map( ...
+%       'subjectRoot', '/path/to/tests/data/BBB data p19', ...
+%       'outputRoot', '/path/to/tests/data/BBB data p19/processed/results_matlab', ...
+%       'models', {'tofts','ex_tofts','patlak','tissue_uptake','2cxm'});
+
+thisFile = mfilename('fullpath');
+testsMatlabDir = fileparts(thisFile);
+helpersDir = fullfile(testsMatlabDir, 'helpers');
+if exist(helpersDir, 'dir')
+    addpath(helpersDir);
+end
+
+if exist('add_rocketship_paths', 'file')
+    repoRoot = add_rocketship_paths();
+else
+    repoRoot = fileparts(fileparts(testsMatlabDir));
+    addpath(repoRoot);
+    addpath(fullfile(repoRoot, 'dce'));
+    addpath(fullfile(repoRoot, 'dsc'));
+    addpath(fullfile(repoRoot, 'external_programs'));
+    addpath(fullfile(repoRoot, 'external_programs', 'niftitools'));
+    addpath(fullfile(repoRoot, 'parametric_scripts'));
+    addpath(fullfile(repoRoot, 'parametric_scripts', 'custom_scripts'));
+end
+
+% Force DCE helpers to win over same-name DSC helpers.
+addpath(fullfile(repoRoot, 'dce'), '-begin');
+selectedAifFitHelper = which('AIFbiexpfithelp');
+if isempty(selectedAifFitHelper) || isempty(strfind(selectedAifFitHelper, [filesep 'dce' filesep])) %#ok<STREMP>
+    error('Unexpected AIFbiexpfithelp on path: %s', selectedAifFitHelper);
+end
+
+p = inputParser;
+addParameter(p, 'subjectRoot', fullfile(repoRoot, 'tests/data', 'BBB data p19'), @is_text_scalar);
+addParameter(p, 'outputRoot', '', @is_text_scalar);
+addParameter(p, 'rootname', 'Dyn-1', @is_text_scalar);
+addParameter(p, 'trMs', 8.29, @isscalar);
+addParameter(p, 'faDeg', 15.0, @isscalar);
+addParameter(p, 'timeResolutionSec', 15.84, @isscalar);
+addParameter(p, 'startInjectionMin', 0.5, @isscalar);
+addParameter(p, 'endInjectionMin', 0.7, @isscalar);
+addParameter(p, 'steadyStateTime', -2, @isscalar);
+addParameter(p, 'hematocrit', 0.42, @isscalar);
+addParameter(p, 'snrFilter', 5.0, @isscalar);
+addParameter(p, 'relaxivity', 3.6, @isscalar);
+addParameter(p, 'models', {'tofts'}, @is_model_list);
+addParameter(p, 'roiList', {}, @is_text_list_or_scalar);
+parse(p, varargin{:});
+
+subjectRoot = char(p.Results.subjectRoot);
+outputRoot = char(p.Results.outputRoot);
+rootname = char(p.Results.rootname);
+modelList = normalize_models(p.Results.models);
+roiList = normalize_text_list(p.Results.roiList);
+if isempty(outputRoot)
+    outputRoot = fullfile(subjectRoot, 'processed', 'results_matlab');
+end
+
+if ~exist(outputRoot, 'dir')
+    mkdir(outputRoot);
+end
+
+dynamicPath = fullfile(subjectRoot, 'Dynamic_t1w.nii');
+processedRoot = fullfile(subjectRoot, 'processed');
+t1AifPath = fullfile(processedRoot, 'T1_AIF_roi.nii');
+t1RoiPath = fullfile(processedRoot, 'T1_brain_roi.nii');
+t1MapPath = fullfile(processedRoot, 'T1_map_t1_fa_fit_fa10.nii');
+noisePath = fullfile(processedRoot, 'T1_noise_roi.nii');
+
+required = {dynamicPath, t1AifPath, t1RoiPath, t1MapPath, noisePath};
+for i = 1:numel(required)
+    if ~exist(required{i}, 'file')
+        error('Missing required input file: %s', required{i});
+    end
+end
+
+filevolume = 1;
+noise_pathpick = true;
+noise_pixsize = 16;
+LUT = 1;
+filelist = {dynamicPath};
+t1aiffiles = {t1AifPath};
+t1roifiles = {t1RoiPath};
+t1mapfiles = {t1MapPath};
+noisefiles = {noisePath};
+driftfiles = {};
+fileorder = 'xyzt';
+quant = true;
+mask_roi = true;
+mask_aif = true;
+aif_rr_type = 'aif_roi';
+tr = p.Results.trMs;
+fa = p.Results.faDeg;
+hematocrit = p.Results.hematocrit;
+snr_filter = p.Results.snrFilter;
+relaxivity = p.Results.relaxivity;
+steady_state_time = p.Results.steadyStateTime;
+if steady_state_time >= 1
+    steady_state_time = round(steady_state_time);
+end
+drift_global = false;
+blood_t1 = 0;
+injection_duration = 1;
+start_t = 0;
+end_t = 0;
+
+[~, A_vars, errormsg] = A_make_R1maps_func(filevolume, noise_pathpick, ...
+    noise_pixsize, LUT, filelist, t1aiffiles, t1roifiles, t1mapfiles, ...
+    noisefiles, driftfiles, rootname, fileorder, quant, mask_roi, ...
+    mask_aif, aif_rr_type, tr, fa, hematocrit, snr_filter, relaxivity, ...
+    steady_state_time, drift_global, blood_t1, injection_duration, ...
+    start_t, end_t, false);
+if ~isempty(errormsg)
+    error('A_make_R1maps_func failed: %s', errormsg);
+end
+
+resultsAPath = fullfile(outputRoot, ['A_' rootname 'R1info.mat']);
+startTime = 0;
+endTime = 0;
+fitAif = 1;
+importAifPath = '';
+timeResolutionMin = p.Results.timeResolutionSec / 60.0;
+timevectPath = '';
+[~, B_vars] = B_AIF_fitting_func(resultsAPath, startTime, endTime, ...
+    p.Results.startInjectionMin, p.Results.endInjectionMin, fitAif, ...
+    importAifPath, timeResolutionMin, timevectPath, A_vars, false);
+
+resultsBPath = fullfile(outputRoot, ['B_' rootname 'fitted_R1info.mat']);
+dce_model = struct( ...
+    'tofts', 0, ...
+    'ex_tofts', 0, ...
+    'fxr', 0, ...
+    'fractal', 0, ...
+    'auc', 0, ...
+    'nested', 0, ...
+    'patlak', 0, ...
+    'tissue_uptake', 0, ...
+    'two_cxm', 0, ...
+    'FXL_rr', 0);
+for i = 1:numel(modelList)
+    modelName = modelList{i};
+    if strcmp(modelName, '2cxm')
+        dce_model.two_cxm = 1;
+    elseif isfield(dce_model, modelName)
+        dce_model.(modelName) = 1;
+    else
+        error('Unsupported model requested: %s', modelName);
+    end
+end
+
+time_smoothing = 'none';
+time_smoothing_window = 0;
+xy_smooth_size = 0;
+number_cpus = 1;
+roi_list = roiList;
+fit_voxels = 1;
+neuroecon = 0;
+outputft = 1;
+
+D_fit_voxels_func(resultsBPath, dce_model, time_smoothing, ...
+    time_smoothing_window, xy_smooth_size, number_cpus, roi_list, ...
+    fit_voxels, neuroecon, outputft, B_vars, false);
+
+missing = {};
+ktransPaths = cell(numel(modelList), 1);
+for i = 1:numel(modelList)
+    modelName = modelList{i};
+    ktransPaths{i} = fullfile(outputRoot, [rootname '_' modelName '_fit_Ktrans.nii']);
+    if ~exist(ktransPaths{i}, 'file')
+        missing{end + 1} = ktransPaths{i}; %#ok<AGROW>
+    end
+end
+if ~isempty(missing)
+    errText = sprintf('%s\n', missing{:});
+    error('Expected Ktrans map(s) not found:\n%s', errText);
+end
+
+output = struct();
+output.subjectRoot = subjectRoot;
+output.outputRoot = outputRoot;
+output.models = modelList;
+output.ktransPaths = ktransPaths;
+output.resultsAPath = resultsAPath;
+output.resultsBPath = resultsBPath;
+
+fprintf('MATLAB DCE baseline written for models: %s\n', strjoin(modelList, ', '));
+end
+
+function ok = is_text_scalar(value)
+ok = ischar(value) || (isstring(value) && isscalar(value));
+end
+
+function ok = is_model_list(value)
+ok = is_text_scalar(value) || iscellstr(value) || ...
+    (iscell(value) && all(cellfun(@is_text_scalar, value)));
+end
+
+function ok = is_text_list_or_scalar(value)
+ok = is_text_scalar(value) || isempty(value) || iscellstr(value) || ...
+    (iscell(value) && all(cellfun(@is_text_scalar, value))) || isstring(value);
+end
+
+function out = normalize_models(value)
+if is_text_scalar(value)
+    raw = {char(value)};
+elseif isstring(value)
+    raw = cellstr(value(:));
+elseif iscell(value)
+    raw = cell(size(value));
+    for i = 1:numel(value)
+        raw{i} = char(value{i});
+    end
+else
+    error('Unsupported model list input');
+end
+
+out = {};
+for i = 1:numel(raw)
+    modelName = lower(strtrim(raw{i}));
+    if isempty(modelName)
+        continue;
+    end
+    if any(strcmp(modelName, out))
+        continue;
+    end
+    out{end + 1} = modelName; %#ok<AGROW>
+end
+
+if isempty(out)
+    out = {'tofts'};
+end
+end
+
+function out = normalize_text_list(value)
+if isempty(value)
+    out = {};
+    return;
+end
+
+if is_text_scalar(value)
+    out = {char(value)};
+    return;
+end
+
+if isstring(value)
+    value = cellstr(value(:));
+end
+
+if ~iscell(value)
+    error('Unsupported text-list input');
+end
+
+out = {};
+for i = 1:numel(value)
+    text = strtrim(char(value{i}));
+    if isempty(text)
+        continue;
+    end
+    out{end + 1} = text; %#ok<AGROW>
+end
+end

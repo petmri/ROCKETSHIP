@@ -1,0 +1,39 @@
+{
+    "Description": "Synthetic phantom ground truth AIF time series",
+    "Columns": [
+        "frame_idx",
+        "time_min",
+        "aif_gd_mM",
+        "aif_si_norm"
+    ],
+    "TimeUnits": "min",
+    "ConcentrationUnits": "mM",
+    "SignalUnits": "normalized SI",
+    "AIFConcentrationKind": "plasma",
+    "PlasmaCorrectionApplied": false,
+    "Hematocrit": 0.0,
+    "RecommendedROCKETSHIPHematocrit": 0.0,
+    "BaselineImages": 4,
+    "TemporalResolutionMin": 0.01666667,
+    "TemporalResolution": 1.0,
+    "RepetitionTime": 0.008579,
+    "FlipAngle": 17.021,
+    "Relaxivity_per_mM_per_s": 5.209561,
+    "AIFPrecontrastT1_ms": 1472.34714,
+    "AIFRho": 894.966039,
+    "SyntheticAIFModel": "parker",
+    "Seed": 42,
+    "VoxelSNRRange": {
+        "min": 5000.0,
+        "max": 10000.0
+    },
+    "VFAFlipAnglesDeg": [
+        2.0,
+        5.0,
+        10.0,
+        15.0
+    ],
+    "VFANoiseAdded": false,
+    "ForcedTemporalResolutionSec": 1.0,
+    "Intent": "Low-noise phantom with 1 s temporal resolution for DCE fitting evaluation"
+}

@@ -1,5 +1,0 @@
--DONE Fix TR->temporal resolution for 2D versus 3D
--Copy header/orientation info over for nifti files
--handle .nii.gz files
--Remove dependance on findpeak (see git notes)
--Ask what noise is for, masking?, option for better/manual masking

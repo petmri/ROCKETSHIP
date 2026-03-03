@@ -802,7 +802,7 @@ Sttum = Sttum(:,GOODspaceAB);
 Sstar = Sstar(GOODspaceAB);
 
 
-[R1tTOI, T1TUM, tumind, BADspaceT, GOODspaceT,] = cleanR1t(R1tTOI, T1TUM,tumind, 'Tumor', min(numel(T1TUM)), 0.7, quant);
+[R1tTOI, T1TUM, tumind, BADspaceT, GOODspaceT] = cleanR1t(R1tTOI, T1TUM,tumind, 'Tumor', min(numel(T1TUM)), 0.7, quant);
 if numel(T1TUM)==0
     error('Error all voxels removed due to bad/negative values, check ROI, T1 values, and image quality');
 end
@@ -967,9 +967,8 @@ if save_output==true
     disp('MAT results saved to: ')
     disp(saved_results)
     disp(['File MD5 hash: ' mat_md5])
-else
-    RUNA_vars=Adata;
 end
+RUNA_vars=Adata;
     
 disp(' ');
 disp('Finished A');

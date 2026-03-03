@@ -1,0 +1,334 @@
+{
+  "source_file": "script_preferences.txt",
+  "status_values": [
+    "supported",
+    "intentionally_dropped",
+    "pending"
+  ],
+  "entries": [
+    {
+      "key": "filevolume",
+      "python_target": "n/a",
+      "status": "intentionally_dropped",
+      "notes": "Python expects a single 4D NIfTI dynamic input and does not switch volume loading modes."
+    },
+    {
+      "key": "noise_pathpick",
+      "python_target": "config.noise_files (implicit)",
+      "status": "intentionally_dropped",
+      "notes": "Python uses explicit noise mask files when provided, otherwise derives a corner noise mask."
+    },
+    {
+      "key": "noise_pixsize",
+      "python_target": "stage_overrides.noise_pixsize",
+      "status": "supported",
+      "notes": "Used when no noise mask file is supplied."
+    },
+    {
+      "key": "lut",
+      "python_target": "n/a",
+      "status": "intentionally_dropped",
+      "notes": "MATLAB LUT path is not used in the Python CLI pipeline."
+    },
+    {
+      "key": "dynamic_files",
+      "python_target": "config.dynamic_files",
+      "status": "supported",
+      "notes": "Top-level required input list."
+    },
+    {
+      "key": "aif_files",
+      "python_target": "config.aif_files",
+      "status": "supported",
+      "notes": "Top-level required input list."
+    },
+    {
+      "key": "roi_files",
+      "python_target": "config.roi_files",
+      "status": "supported",
+      "notes": "Top-level ROI/mask input list."
+    },
+    {
+      "key": "t1map_files",
+      "python_target": "config.t1map_files",
+      "status": "supported",
+      "notes": "Top-level required input list."
+    },
+    {
+      "key": "noise_files",
+      "python_target": "config.noise_files",
+      "status": "supported",
+      "notes": "Top-level optional noise mask list."
+    },
+    {
+      "key": "drift_files",
+      "python_target": "config.drift_files",
+      "status": "pending",
+      "notes": "Accepted in config but drift correction flow is not implemented in Python Stage-A."
+    },
+    {
+      "key": "start_t",
+      "python_target": "n/a",
+      "status": "pending",
+      "notes": "Direct Stage-A time-index clipping parity is not wired yet."
+    },
+    {
+      "key": "end_t",
+      "python_target": "n/a",
+      "status": "pending",
+      "notes": "Direct Stage-A time-index clipping parity is not wired yet."
+    },
+    {
+      "key": "rootname",
+      "python_target": "stage_overrides.rootname",
+      "status": "supported",
+      "notes": "Controls output filename prefix."
+    },
+    {
+      "key": "fileorder",
+      "python_target": "n/a",
+      "status": "intentionally_dropped",
+      "notes": "Python reads NIfTI data directly and does not expose MATLAB file-order toggles."
+    },
+    {
+      "key": "quant",
+      "python_target": "n/a",
+      "status": "intentionally_dropped",
+      "notes": "Python DCE CLI is quantitative-only."
+    },
+    {
+      "key": "roimaskroi",
+      "python_target": "n/a",
+      "status": "intentionally_dropped",
+      "notes": "Python expects ROI inputs to be mask volumes."
+    },
+    {
+      "key": "aifmaskroi",
+      "python_target": "n/a",
+      "status": "intentionally_dropped",
+      "notes": "Python expects AIF inputs to be mask volumes."
+    },
+    {
+      "key": "aif_rr_type",
+      "python_target": "n/a",
+      "status": "pending",
+      "notes": "Only arterial ROI-style behavior is currently covered; reference-region variants are not wired."
+    },
+    {
+      "key": "tr",
+      "python_target": "stage_overrides.tr (alias to tr_ms)",
+      "status": "supported",
+      "notes": "MATLAB script-level TR (ms) alias is now consumed."
+    },
+    {
+      "key": "fa",
+      "python_target": "stage_overrides.fa (alias to fa_deg)",
+      "status": "supported",
+      "notes": "MATLAB script-level flip-angle alias is now consumed."
+    },
+    {
+      "key": "hematocrit",
+      "python_target": "stage_overrides.hematocrit",
+      "status": "supported",
+      "notes": "Used in Cp conversion."
+    },
+    {
+      "key": "snr_filter",
+      "python_target": "stage_overrides.snr_filter",
+      "status": "supported",
+      "notes": "AIF voxel SNR filtering threshold."
+    },
+    {
+      "key": "injection_time",
+      "python_target": "n/a",
+      "status": "pending",
+      "notes": "MATLAB interactive/auto injection selection token is not mapped directly."
+    },
+    {
+      "key": "relaxivity",
+      "python_target": "stage_overrides.relaxivity",
+      "status": "supported",
+      "notes": "Used in Ct/Cp conversion and Stage-D summaries."
+    },
+    {
+      "key": "force_use_default_relaxivity",
+      "python_target": "n/a",
+      "status": "pending",
+      "notes": "MATLAB-specific relaxivity forcing flow is not mapped in Python CLI."
+    },
+    {
+      "key": "drift_global",
+      "python_target": "n/a",
+      "status": "pending",
+      "notes": "Drift-correction parity is not implemented in Python Stage-A."
+    },
+    {
+      "key": "blood_t1",
+      "python_target": "stage_overrides.blood_t1 (alias)",
+      "status": "supported",
+      "notes": "Script-level static blood T1 alias is consumed."
+    },
+    {
+      "key": "injection_duration",
+      "python_target": "stage_overrides.injection_duration",
+      "status": "supported",
+      "notes": "Used to estimate end-injection from detected start index in Stage-A."
+    },
+    {
+      "key": "start_time",
+      "python_target": "stage_overrides.start_time",
+      "status": "supported",
+      "notes": "Alias consumed by Stage-B windowing."
+    },
+    {
+      "key": "end_time",
+      "python_target": "stage_overrides.end_time",
+      "status": "supported",
+      "notes": "Alias consumed by Stage-B windowing."
+    },
+    {
+      "key": "auto_find_injection",
+      "python_target": "n/a",
+      "status": "intentionally_dropped",
+      "notes": "Python auto-detects injection by default and supports explicit start/end overrides."
+    },
+    {
+      "key": "start_injection",
+      "python_target": "stage_overrides.start_injection (alias to start_injection_min)",
+      "status": "supported",
+      "notes": "Script-level injection start alias is consumed as minutes."
+    },
+    {
+      "key": "end_injection",
+      "python_target": "stage_overrides.end_injection (alias to end_injection_min)",
+      "status": "supported",
+      "notes": "Script-level injection end alias is consumed as minutes."
+    },
+    {
+      "key": "time_resolution",
+      "python_target": "stage_overrides.time_resolution (alias to time_resolution_sec)",
+      "status": "supported",
+      "notes": "Script-level temporal resolution alias is consumed in seconds."
+    },
+    {
+      "key": "aif_type",
+      "python_target": "stage_overrides.aif_type (alias to aif_curve_mode)",
+      "status": "supported",
+      "notes": "MATLAB numeric modes map as 1=fitted, 2=raw, 3=imported."
+    },
+    {
+      "key": "import_aif_path",
+      "python_target": "stage_overrides.import_aif_path (alias)",
+      "status": "supported",
+      "notes": "Accepted as a fallback path when imported AIF mode is selected."
+    },
+    {
+      "key": "timevectyn",
+      "python_target": "stage_overrides.timevectyn",
+      "status": "supported",
+      "notes": "Controls whether legacy timevectpath is honored in Stage-B timer resolution."
+    },
+    {
+      "key": "timevectpath",
+      "python_target": "stage_overrides.timevectpath",
+      "status": "supported",
+      "notes": "Manual timer path alias (legacy)."
+    },
+    {
+      "key": "tofts",
+      "python_target": "config.model_flags.tofts",
+      "status": "supported",
+      "notes": "Maps directly to Stage-D model selection."
+    },
+    {
+      "key": "ex_tofts",
+      "python_target": "config.model_flags.ex_tofts",
+      "status": "supported",
+      "notes": "Maps directly to Stage-D model selection."
+    },
+    {
+      "key": "fxr",
+      "python_target": "config.model_flags.fxr",
+      "status": "supported",
+      "notes": "Maps directly to Stage-D model selection."
+    },
+    {
+      "key": "auc",
+      "python_target": "config.model_flags.auc",
+      "status": "supported",
+      "notes": "Maps directly to Stage-D model selection."
+    },
+    {
+      "key": "nested",
+      "python_target": "config.model_flags.nested",
+      "status": "pending",
+      "notes": "Flag is parsed but model execution is currently skipped (unsupported)."
+    },
+    {
+      "key": "patlak",
+      "python_target": "config.model_flags.patlak",
+      "status": "supported",
+      "notes": "Maps directly to Stage-D model selection."
+    },
+    {
+      "key": "tissue_uptake",
+      "python_target": "config.model_flags.tissue_uptake",
+      "status": "supported",
+      "notes": "Maps directly to Stage-D model selection."
+    },
+    {
+      "key": "two_cxm",
+      "python_target": "config.model_flags.two_cxm",
+      "status": "supported",
+      "notes": "Maps directly to Stage-D model selection."
+    },
+    {
+      "key": "fxl_rr",
+      "python_target": "config.model_flags.FXL_rr",
+      "status": "pending",
+      "notes": "Flag is parsed but model execution is currently skipped (unsupported)."
+    },
+    {
+      "key": "time_smoothing",
+      "python_target": "stage_overrides.time_smoothing",
+      "status": "supported",
+      "notes": "Supported values include none and moving-average behavior."
+    },
+    {
+      "key": "time_smoothing_window",
+      "python_target": "stage_overrides.time_smoothing_window",
+      "status": "supported",
+      "notes": "Window size for temporal smoothing."
+    },
+    {
+      "key": "xy_smooth_size",
+      "python_target": "n/a",
+      "status": "pending",
+      "notes": "Spatial XY smoothing parity is not implemented in Python Stage-D."
+    },
+    {
+      "key": "number_cpus",
+      "python_target": "n/a",
+      "status": "intentionally_dropped",
+      "notes": "Python backend/thread selection is managed by NumPy/SciPy/accelerator backend and not via this key."
+    },
+    {
+      "key": "roi_list",
+      "python_target": "config.roi_files (partial)",
+      "status": "pending",
+      "notes": "Python can use multiple ROI files, but MATLAB-style separate roi_list semantics are not fully mirrored."
+    },
+    {
+      "key": "fit_voxels",
+      "python_target": "n/a",
+      "status": "pending",
+      "notes": "Python Stage-D currently always fits voxel-level outputs."
+    },
+    {
+      "key": "outputft",
+      "python_target": "n/a",
+      "status": "intentionally_dropped",
+      "notes": "Python output format is fixed to NIfTI/JSON artifacts; MATLAB outputft toggle is not exposed."
+    }
+  ]
+}

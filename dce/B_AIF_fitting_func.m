@@ -1,6 +1,6 @@
-function [results, B_vars] = B_AIF_fitting_func(results_a_path, RUNA_struct, start_time, ...
+function [results, B_vars] = B_AIF_fitting_func(results_a_path, start_time, ...
     end_time,start_injection,end_injection,fit_aif,import_aif_path,time_resolution, ...
-    timevectpath, save_output)
+    timevectpath, RUNA_struct, save_output)
 
 % B_AIF_fitting_func - This file is used to apply a model fitting to the
 % arterial input function. AIF is fit to a bi-exponential model with a
@@ -57,7 +57,11 @@ end
 
 %% 1. Load the data array from previous script
 
-Adata=RUNA_struct;
+if ~exist('RUNA_struct','var')
+    load(results_a_path);
+else
+    Adata = RUNA_struct;
+end
 
 % unload the variables from previous data array
 quant    = Adata.quant;
