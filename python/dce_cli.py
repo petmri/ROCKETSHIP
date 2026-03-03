@@ -39,12 +39,7 @@ def _parse_set_overrides(values: list[str]) -> Dict[str, Any]:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=_default_config_path(),
-        help="Path to JSON pipeline config (default: python/dce_default.json)",
-    )
+    parser.add_argument("--config", type=Path, default=_default_config_path(), help="Path to JSON pipeline config (default: python/dce_default.json)")
     parser.add_argument("--output-dir", type=Path, help="Optional override for output_dir in config")
     parser.add_argument("--checkpoint-dir", type=Path, help="Optional override for checkpoint_dir in config")
     parser.add_argument("--backend", choices=["auto", "cpu", "gpufit"], help="Optional override for backend in config")

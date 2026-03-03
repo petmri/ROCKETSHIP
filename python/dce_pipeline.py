@@ -1521,7 +1521,6 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
 
     if not config.roi_files:
         raise ValueError("Stage-A real mode requires at least one ROI mask file")
-
     aif_mask_img = _load_nifti_data(config.aif_files[0])
     roi_mask_img = _load_nifti_data(config.roi_files[0])
     t1map_img = _load_nifti_data(config.t1map_files[0])
@@ -1593,16 +1592,20 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     sttum = dyn_2d[:, tumind]
     dynam_noise = np.std(dyn_2d[:, noiseind], axis=1)
     noise_mean = float(np.mean(dynam_noise))
-    if noise_mean <= 0:
-        raise ValueError("Noise estimate is non-positive")
+    if noise_mean < 0:
+        raise ValueError("Noise estimate is negative (internal error)")
 
     snr_filter = float(_stage_override(config, "snr_filter", 0.0))
-    voxel_snr = np.mean(stlv, axis=0) / noise_mean
-    keep_snr = voxel_snr >= snr_filter
-    if not np.any(keep_snr):
-        raise ValueError("SNR filter removed all AIF voxels; lower snr_filter")
-    lvind = lvind[keep_snr]
-    stlv = stlv[:, keep_snr]
+    
+    # Skip SNR filtering if noise is effectively zero (e.g., synthetic/perfect data)
+    if noise_mean > 1e-12 and snr_filter > 0:
+        voxel_snr = np.mean(stlv, axis=0) / noise_mean
+        keep_snr = voxel_snr >= snr_filter
+        if not np.any(keep_snr):
+            raise ValueError("SNR filter removed all AIF voxels; lower snr_filter or noise threshold")
+        lvind = lvind[keep_snr]
+        stlv = stlv[:, keep_snr]
+    
     t1_lv = t1_flat[lvind].astype(np.float64)
     blood_t1_override = _stage_override(config, "blood_t1_ms", None)
     if blood_t1_override is None:
@@ -1650,6 +1653,16 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
 
     # AIF path to R1
     sss = np.mean(stlv[baseline_slice, :], axis=0)
+    
+    # Filter out voxels with zero/near-zero baseline signal to prevent divide-by-zero
+    valid_baseline = sss > 1e-10
+    if not np.any(valid_baseline):
+        raise ValueError("All AIF voxels have zero baseline signal")
+    stlv = stlv[:, valid_baseline]
+    t1_lv = t1_lv[valid_baseline]
+    lvind = lvind[valid_baseline]
+    sss = sss[valid_baseline]
+    
     sstar_lv = (1.0 - np.exp(-tr_sec / t1_lv)) / (1.0 - np.cos(np.deg2rad(fa_deg)) * np.exp(-tr_sec / t1_lv))
     a = 1.0 - np.cos(np.deg2rad(fa_deg)) * sstar_lv[np.newaxis, :] * stlv / sss[np.newaxis, :]
     b = 1.0 - sstar_lv[np.newaxis, :] * stlv / sss[np.newaxis, :]
@@ -1669,6 +1682,16 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
 
     # ROI path to R1
     ss_tum = np.mean(sttum[baseline_slice, :], axis=0)
+    
+    # Filter out voxels with zero/near-zero baseline signal to prevent divide-by-zero
+    valid_baseline_tum = ss_tum > 1e-10
+    if not np.any(valid_baseline_tum):
+        raise ValueError("All ROI voxels have zero baseline signal")
+    sttum = sttum[:, valid_baseline_tum]
+    t1_tum = t1_tum[valid_baseline_tum]
+    tumind = tumind[valid_baseline_tum]
+    ss_tum = ss_tum[valid_baseline_tum]
+    
     sstar_tum = (1.0 - np.exp(-tr_sec / t1_tum)) / (1.0 - np.cos(np.deg2rad(fa_deg)) * np.exp(-tr_sec / t1_tum))
     a_tum = 1.0 - np.cos(np.deg2rad(fa_deg)) * sstar_tum[np.newaxis, :] * sttum / ss_tum[np.newaxis, :]
     b_tum = 1.0 - sstar_tum[np.newaxis, :] * sttum / ss_tum[np.newaxis, :]
@@ -3883,6 +3906,9 @@ def run_dce_pipeline(
     event_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     """Run DCE stages A->B->D in memory with optional checkpoints."""
+    import time
+
+    start_time = time.perf_counter()
     config.validate()
     config.output_dir.mkdir(parents=True, exist_ok=True)
     if config.checkpoint_dir:
@@ -3968,13 +3994,37 @@ def run_dce_pipeline(
         )
         raise
 
+
+    # Calculate execution time
+    duration_sec = time.perf_counter() - start_time
+
+    # Extract backend from stage D
+    backend_used = str(stage_d.get("impl", "cpu"))
+
+    # Build provenance
+    provenance = {
+        "execution_timestamp": datetime.now(timezone.utc).isoformat(),
+        "duration_sec": duration_sec,
+        "inputs": {
+            "dynamic": [str(p) for p in config.dynamic_files],
+            "aif_mask": [str(p) for p in config.aif_files],
+            "roi_mask": [str(p) for p in config.roi_files],
+            "t1_map": [str(p) for p in config.t1map_files],
+            "noise_mask": [str(p) for p in config.noise_files] if config.noise_files else None,
+        },
+        "backend_requested": config.backend,
+        "backend_used": backend_used,
+    }
+
     summary = {
         "meta": {
             "pipeline": "dce_cli_in_memory",
             "status": "ok",
             "single_process": True,
             "dce_preferences_path": str(prefs_path) if prefs_path else None,
+            "duration_sec": duration_sec,
         },
+        "provenance": provenance,
         "config": config.to_dict(),
         "stages": {
             "A": _stage_summary(stage_a),
@@ -3988,3 +4038,4 @@ def run_dce_pipeline(
     summary["meta"]["summary_path"] = str(summary_path)
     _emit_progress(event_callback, "run_done", summary_path=str(summary_path), status="ok")
     return summary
+

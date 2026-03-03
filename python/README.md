@@ -162,6 +162,99 @@ cd /path/to/ROCKETSHIP
 This utility reads `rawdata/` and `derivatives/` and emits subject/session pairs that
 exist in both trees, so other tools can run over the same discovered set.
 
+## Batch processing DCE across BIDS datasets
+
+Process all (or filtered) sessions in a BIDS dataset:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python run_dce_bids_batch.py \
+  --bids-root /path/to/bids_root \
+  --pipeline-folder dceprep \
+  --backend gpufit
+```
+
+Batch processor features:
+
+- **BIDS-native derivatives**: Use `--pipeline-folder` to read/write in `derivatives/{pipeline}/sub-X/ses-Y/` structure
+- **Automatic file discovery**: Scans `derivatives/{pipeline}/sub-*/[ses-*]/` for dceprep-standard files
+- **Flexible configuration**: Load base config template and override specific values
+- **Session filtering**: Run specific subjects/sessions with `--subject sub-01 --session ses-baseline`
+- **Batch aggregation**: Writes summary to `derivatives/reports/{pipeline}/batch_summary_YYYYMMDD.json` with per-session status
+- **Error resilience**: Continues on single-session failures, reports aggregate statistics
+- **Provenance tracking**: Each session outputs pipeline run report to `sub-X/ses-Y/reports/` with BIDS-compliant naming
+
+Output organization:
+
+- `--pipeline-folder dceprep`: Reads from and writes to `bids_root/derivatives/dceprep/sub-X/ses-Y/` BIDS structure
+- `--pipeline-folder dceprep --output-pipeline dce-postproc`: Reads from dceprep, writes to dce-postproc
+- `--output-root /path`: Uses custom flat directory `{output-root}/sub-X_ses-Y/` structure
+- Neither specified: Defaults to flat `bids_root/derivatives/dce_batch_output/sub-X_ses-Y/`
+
+Configuration precedence (lowest to highest priority):
+
+1. Hardcoded defaults (sensible baseline values)
+2. Config template JSON (`--config-template`)
+3. Auto-discovered BIDS inputs (override file paths)
+4. CLI `--set` overrides (stage_overrides keys)
+5. CLI `--backend` and `--dce-models` (highest priority)
+
+Example: BIDS-native run with config template:
+
+```bash
+.venv/bin/python run_dce_bids_batch.py \
+  --bids-root /path/to/data \
+  --pipeline-folder dceprep \
+  --config-template python/dce_default.json \
+  --set blood_t1_ms=1600 \
+  --set aif_curve_mode=fitted \
+  --backend auto
+```
+
+Example: Process only session 1 with specific models:
+
+```bash
+.venv/bin/python run_dce_bids_batch.py \
+  --bids-root /path/to/data \
+  --pipeline-folder dceprep \
+  --session ses-01 \
+  --dce-models tofts,ex_tofts,patlak
+```
+
+Typical batch output structure (with --pipeline-folder):
+
+```
+bids_root/derivatives/
+├── reports/
+│   └── dceprep/
+│       └── batch_summary_20260227.json  # Overall batch status and per-session results
+└── dceprep/
+    ├── sub-01/
+    │   └── ses-baseline/
+    │       ├── reports/
+    │       │   └── sub-01_ses-baseline_desc-provenance.json
+    │       ├── dce/
+    │       │   ├── sub-01_ses-baseline_patlak_fit_Ktrans.nii.gz
+    │       │   ├── sub-01_ses-baseline_patlak_fit_rois.xls
+    │       │   └── [other model outputs...]
+    │       └── dce_pipeline_events.jsonl
+    ├── sub-02/
+    │   └── ses-baseline/
+    │       └── [same structure...]
+    └── ...
+```
+
+Or with flat `--output-root` structure:
+
+```
+output_root/
+├── batch_summary.json
+├── sub-01_ses-baseline/
+│   ├── dce_pipeline_run.json
+│   └── [outputs...]
+└── ...
+```
+
 ## Input expectations (DCE)
 
 Config fields are parsed by:
@@ -171,13 +264,17 @@ Config fields are parsed by:
 
 Key expectations:
 
+- **Configuration priority**: Python workflows use `dce_default.json` as the primary config. Optional MATLAB-style `dce_preferences.txt` can override defaults. The precedence chain is:
+  - `dce_default.json` (base defaults)
+  - `dce_preferences.txt` (optional legacy override from `dce/dce_preferences.txt` or `./dce_preferences.txt`)
+  - `stage_overrides` in JSON config (explicit overrides)
+  - CLI arguments (final overrides)
 - Dynamic image + ROI/AIF/T1/noise masks are provided (NIfTI path lists)
 - TR/FA/time-resolution for real Stage A are resolved strictly:
   - preferred from DCE metadata JSON sidecar (or explicit `stage_overrides.dce_metadata_path`)
   - if no metadata JSON is available, you must provide all three manually in `stage_overrides`
     (`tr_ms`/`tr_sec`, `fa_deg`/`fa`, `time_resolution_sec`/`time_resolution`)
   - partial manual override when metadata JSON is present is rejected (set all three or none)
-- MATLAB-style `dce_preferences.txt` defaults are loaded automatically from `/path/to/ROCKETSHIP/dce/dce_preferences.txt` when present
 - Supported backend values: `auto`, `cpu`, `gpufit`
 - Backend selection behavior:
   - `auto`: tries `pygpufit` with CUDA first, then `pycpufit` CPU backend, then pure CPU path
@@ -200,15 +297,61 @@ Part E work-in-progress:
 - Stage D can optionally export Part E-ready fit arrays (`*_postfit_arrays.npz`) using `stage_overrides.write_postfit_arrays=true`.
 - NPZ loader is available via `load_dce_fit_stats_from_npz(...)` with runner script `/path/to/ROCKETSHIP/tests/python/run_dce_postfit_analysis.py`.
 
-Preference precedence:
+Preference precedence (highest to lowest):
 
-- explicit `stage_overrides` value
-- `dce_preferences.txt` value
-- Python built-in fallback default
+1. CLI arguments (e.g., `--roi-mask-path`)
+2. `stage_overrides` in JSON config
+3. MATLAB-style `dce_preferences.txt` (optional legacy file)
+4. `dce_default.json` base values
+5. Python built-in fallback defaults
 
 Shared options documentation for CLI + GUI:
 
-- `/path/to/ROCKETSHIP/docs/dce_options.md`
+- `/Users/samuelbarnes/code/ROCKETSHIP/docs/dce_options.md`
+
+## Pipeline outputs and provenance
+
+Each DCE run generates `dce_pipeline_run.json` in the output directory with the following structure:
+
+```json
+{
+  "meta": {
+    "pipeline": "dce_cli_in_memory",
+    "status": "ok",
+    "single_process": true,
+    "duration_sec": 42.3,
+    "dce_preferences_path": null,
+    "summary_path": "/path/to/dce_pipeline_run.json"
+  },
+  "provenance": {
+    "execution_timestamp": "2026-02-26T15:30:00+00:00",
+    "duration_sec": 42.3,
+    "inputs": {
+      "dynamic": ["/path/to/dynamic_image.nii.gz"],
+      "aif_mask": ["/path/to/aif_mask.nii.gz"],
+      "roi_mask": ["/path/to/roi_mask.nii.gz"],
+      "t1_map": ["/path/to/t1_map.nii.gz"],
+      "noise_mask": null
+    },
+    "backend_requested": "auto",
+    "backend_used": "cpufit_cpu"
+  },
+  "config": { /* full resolved configuration */ },
+  "stages": {
+    "A": { /* Stage A output metadata */ },
+    "B": { /* Stage B output metadata */ },
+    "D": { /* Stage D output metadata */ }
+  }
+}
+```
+
+The provenance section provides:
+
+- **execution_timestamp**: ISO 8601 timestamp for reproducibility and audit trails
+- **duration_sec**: Wall-clock execution time (useful for performance analysis)
+- **inputs**: Full resolved paths to all input files (supports tracing data lineage)
+- **backend_requested** + **backend_used**: Documents actual backend selection for each run
+  - Helpful for debugging when `--backend auto` chains multiple fallbacks
 
 ## What is intentionally not supported in Python port scope
 
