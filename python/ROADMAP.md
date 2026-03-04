@@ -13,6 +13,7 @@ The transition is "dev-branch ready" when all items below are true:
 
 ## Engineering Constraints
 - Metadata-first policy for DCE timing inputs: per-session DCE JSON sidecars should supply TR/flip-angle/frame-spacing by default; template timing values are treated as opt-in explicit overrides.
+- Injection-window policy for Python batch/CLI parity: do not hardcode study-specific injection windows in templates; default to Stage-A/Stage-B auto injection and require explicit overrides only when intentionally running manual injection timing.
 
 - Python path is pre-production: correctness and maintainability are higher priority than preserving legacy implementation details that are not scientifically required.
 - Favor readable, unit-explicit, modular code suitable for academic extension.
@@ -29,7 +30,7 @@ Scope:
 Current status:
 - CLI v1 for VFA T1 mapping is implemented (`run_parametric_python_cli.py`, `python/parametric_cli.py`, `python/parametric_pipeline.py`) with linear/nonlinear/two-point fit support.
 - Optional B1-scaled FA handling is implemented in the Python parametric pipeline (explicit `b1_map_file` or auto-detected `B1_scaled_FAreg.nii(.gz)` in VFA directory).
-- MATLAB-style TR fallback is implemented for parametric T1 when sidecar TR is absent (`script_preferences.txt` key `tr`, with optional explicit `script_preferences_path`).
+- Parametric T1 now requires TR from sidecar metadata (`RepetitionTime`) or explicit `tr_ms`; no repository preference-file fallback for scan parameters.
 - MATLAB-style `odd_echoes` selection and XY Gaussian smoothing (`xy_smooth_sigma` / `xy_smooth_size`) are implemented in the Python parametric pipeline.
 - GUI v1 is implemented for parametric T1 (`run_parametric_python_gui.py`, `python/parametric_gui.py`).
 - Fixture-backed and BIDS-based integration tests for map outputs and naming are in place (`tests/python/test_parametric_pipeline.py`).
@@ -54,6 +55,18 @@ Current status:
 - Full `tests/python` suite and current BIDS-test qualification now pass with the updated accelerated tolerance.
 - CI gating now isolates MATLAB-backed parity in dedicated `parity_checks` that generates downsample MATLAB baseline maps before parity assertions, while Python-only checks remain in `python_checks`; portability includes `ubuntu-22.04`; and a unified `matlab_checks` matrix (`R2020b`/`R2022a`/`latest`) runs on both pushes and pull requests with per-ref cancellation of superseded runs.
 - Remaining work is broader real-data/CUDA backend qualification in end-to-end workflows.
+- MATLAB CLI timing parity update (2026-03-03):
+  - Stage-A `start_t`/`end_t` frame clipping is now implemented in Python before Stage-A concentration math.
+  - Auto injection timing now mirrors MATLAB auto path (`start=end_ss`, `end=mean AIF peak frame`) and is propagated to Stage B as minute-domain auto values.
+  - Legacy Sobel baseline detection now matches MATLAB numerics (`smooth(...,'moving')` endpoint behavior + Sobel scaling).
+  - Batch config generation now strips template hardcoded injection windows unless explicitly requested via CLI override.
+- DCE frame spacing now requires sidecar metadata or explicit override; accepted sidecar fields include `time_resolution_sec`, `TemporalResolution`, MATLAB-style `RepetitionTime` (when `RepetitionTimeExcitation` exists), `AcquisitionDuration`, and `TriggerDelayTime/nReps`; missing scan timing parameters are hard errors.
+- Batch-parity Stage-D isolation + contract checks were formalized in `tests/python/run_batch_stage_d_diagnostics.py`:
+  - Stage-B arrays (`Ct`, `Cp_use`, `timer`) are now numerically aligned with MATLAB for the latest clean-reference rerun (`dceprep-python-batch-cleanref-aifw2`).
+  - CPU path on those identical Stage-B arrays matches MATLAB Patlak maps on sampled voxels (`corr=1.0`, slope `~1.0`).
+  - CPUfit Patlak remains session-dependent on real data (`ses-01` near-match, `ses-02` large drift with sampled `corr~0.44`, slope `~0.21`).
+  - MATLAB-vs-Python Patlak contracts on identical `(Ct, Cp_use, timer, bounds/init/tolerances)` are numerically identical for sampled single curves and ROI aggregate curves.
+  - Current unresolved `backend=auto` batch drift is therefore localized to accelerated Stage-D Patlak behavior (`cpufit_cpu`), not Stage-A/B assembly and not the Python CPU Patlak implementation.
 
 Required outputs:
 - strict pass/fail criteria on primary model parity and reliability tests.

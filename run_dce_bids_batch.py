@@ -213,6 +213,22 @@ def _build_session_config(
         # Merge stage_overrides from template
         if "stage_overrides" in config_template:
             base_config["stage_overrides"].update(config_template["stage_overrides"])
+
+    # Injection timing should default to automatic Stage-A/B detection unless
+    # explicitly provided via CLI --set. Strip template hard-codes here.
+    injection_override_keys = {
+        "start_injection",
+        "end_injection",
+        "start_injection_min",
+        "end_injection_min",
+    }
+    explicit_injection_override = any(
+        str(key).strip().lower() in injection_override_keys for key in set_overrides
+    )
+    if not explicit_injection_override:
+        for key in list(base_config["stage_overrides"].keys()):
+            if str(key).strip().lower() in injection_override_keys:
+                base_config["stage_overrides"].pop(key, None)
     
     # Helper to resolve file lists from template patterns and optional auto-discovery fallback.
     def _resolve_file_list(

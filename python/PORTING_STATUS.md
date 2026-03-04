@@ -1,6 +1,39 @@
 # Python Porting Status
 
 ## Snapshot
+- Date: 2026-03-03
+- Update: Batch Stage-D parity diagnostics were formalized in
+  `tests/python/run_batch_stage_d_diagnostics.py` and run on clean-reference
+  `RUNNER_DATA/sub-1101743/{ses-01,ses-02}` checkpoints:
+  - Stage-B arrays (`Ct`, `Cp_use`, `timer`) are now numerically aligned with MATLAB in
+    `dceprep-python-batch-cleanref-aifw2` after the weighted AIF fit update.
+  - Backend isolation on identical Stage-B arrays shows CPU path aligns to MATLAB
+    (`corr=1.0`, slope `~1.0` on sampled voxels), while accelerated `cpufit_cpu`
+    remains session-dependent (`ses-01` near-match; `ses-02` large drift).
+  - Direct MATLAB-vs-Python Patlak contract checks on identical
+    `(Ct, Cp_use, timer, bounds/init/tolerances)` are numerically identical for sampled
+    single curves and ROI-aggregate curves.
+  - Current implication: residual batch parity gap in end-to-end `backend=auto` runs is
+    localized to accelerated Patlak backend behavior (`cpufit_cpu`), not Stage-A/B assembly
+    and not the Python CPU Patlak core fit implementation.
+
+- Date: 2026-03-03
+- Update: Python DCE timing metadata resolution now includes MATLAB `run_dce_cli.m` JSON branches for frame spacing:
+  - `RepetitionTime` when `RepetitionTimeExcitation` is present,
+  - `AcquisitionDuration`,
+  - `TriggerDelayTime / n_reps / 1000` (using full dynamic frame count before `start_t`/`end_t` clipping),
+  - plus existing `time_resolution_sec` / `TemporalResolution`.
+  `NumberOfAverages` scaling is still applied for JSON-derived frame spacing.
+
+- Date: 2026-03-03
+- Update: Python DCE now supports MATLAB-style Stage-A `start_t`/`end_t` frame clipping and MATLAB-aligned auto injection timing (`start=end_ss`, `end=mean argmax(AIF voxels)`); batch config now strips template hardcoded injection windows unless explicitly overridden via `--set`. Legacy Sobel baseline detection now matches MATLAB numerics (`smooth(...,'moving')` endpoint behavior and Sobel derivative scaling).
+
+- Date: 2026-03-03
+- Update: Removed Python runtime fallbacks from `script_preferences.txt` for scan parameters:
+  - DCE no longer falls back to `script_preferences.txt` for frame spacing.
+  - Parametric T1 no longer falls back to `script_preferences.txt` for `tr`.
+  - Required scan parameters must come from sidecar metadata or explicit user config; missing values now hard-fail.
+
 - Date: 2026-03-02
 - Update: Batch DCE config now prefers per-session metadata JSON timing values over template timing defaults unless explicitly overridden via `--set`; Stage A checkpoint now records metadata provenance (`metadata_source_path`, `metadata_sources`) for traceability.
 
@@ -48,6 +81,9 @@ Latest qualification packet run:
 - Accelerated-vs-CPU tolerance mapping is not 1:1:
   - Accelerated path uses single `gpu_tolerance` (now default `1e-6`) for CPUfit/GPUfit constrained LM solver.
   - CPU SciPy path uses `tol_fun` -> `ftol` default `1e-12` and `tol_x` -> `xtol` default `1e-6` in `python/dce_models.py`.
+- PATLAK accelerated backend caveat (2026-03-03):
+  - On clean-reference real-data checkpoints (`RUNNER_DATA/sub-1101743/{ses-01,ses-02}`), `cpufit_cpu` PATLAK can diverge from MATLAB/CPU while reporting all fits `CONVERGED`.
+  - External repro package: `tests/contracts/handoffs/cpufit_patlak_batch/`.
 - Real-data DCE inputs are now stricter by design:
   - Stage A requires a dedicated AIF ROI mask (or future auto-AIF routine); brain-mask fallback as AIF is rejected.
   - TR/FA/time resolution for real data must come from sidecar JSON or be fully specified in config (no silent defaults).
@@ -63,6 +99,16 @@ Latest qualification packet run:
     - `piecewise_constant` (from `find_end_ss` branch implementation)
     - `glr` and `tv` (ported from `synthetic_dce` `ismrm_submit/end_baseline_detect.py`)
   - Manual `steady_state_end` still takes precedence; if no manual end and no auto method are provided, Python now defaults to `legacy_sobel`.
+- DCE timing/injection parity update (2026-03-03):
+  - Python Stage A now applies `stage_overrides.start_t` / `stage_overrides.end_t` as a MATLAB-style 1-based frame window before Stage-A conversion math.
+  - Python Stage A auto injection now follows MATLAB CLI auto behavior:
+    - `start_injection` = Stage-A baseline detector end (`end_ss`).
+    - `end_injection` = mean peak frame across AIF voxels.
+    - Stage A emits `start_injection_min_auto` / `end_injection_min_auto` for Stage B.
+  - Python Stage B now honors script-style `auto_find_injection` precedence:
+    - `auto_find_injection=1` forces use of Stage-A auto injection window.
+    - Explicit manual `start_injection[_min]` / `end_injection[_min]` are used when auto mode is not forcing auto.
+  - Batch assembly (`run_dce_bids_batch.py`) now removes template injection-window defaults unless user explicitly passes injection window via `--set`.
 - Synthetic phantom GT reliability checks now exist for calibration/guarding:
   - `tests/python/test_phantom_gt_reliability.py` reconstructs T1 in-test and compares T1 + primary DCE maps against `rawdata/.../gt` ground-truth maps for `sub-05phantom`/`sub-06phantom`/`sub-07phantom`.
   - Tolerances are region- and model-specific (`tests/data/BIDS_test/phantom_gt_mae_tolerances.json`) because model assumptions intentionally bias some tissue classes.
@@ -92,7 +138,7 @@ Latest qualification packet run:
 | DCE legacy GUIDE GUI | `dce/dce.m`, `dce/RUNA.m`, `dce/RUNB.m`, `dce/RUND.m` | Not ported 1:1 | will not port | Python keeps CLI-first flow with modern GUI wrapper instead. |
 | DCE neuroecon/email/manual AIF UX | `dce/run_neuroecon_job.m`, manual GUI AIF flows | Not ported | will not port | Previously marked out of scope. |
 | Parametric core model math | `parametric_scripts/fitParameter.m` (`t2_linear_fast`, `t1_fa_linear_fit`, `t1_fa_fit`) | Partial in `python/parametric_models.py` | primary | Linear + nonlinear + two-point VFA are implemented; MATLAB contract parity now covers `t2_linear_fast`, `t1_fa_linear_fit`, and `t1_fa_fit` with automated runner checks in Python tests. |
-| Parametric T1 mapping workflow | `parametric_scripts/custom_scripts/T1mapping_fit.m`, `parametric_scripts/calculateMap.m` | Partial (`python/parametric_pipeline.py`, `python/parametric_cli.py`, `run_parametric_python_cli.py`) | primary | VFA linear/nonlinear/two-point fit types are available with fixture + BIDS-based naming/integrity tests; optional B1-scaled FA support (`b1_map_file` or auto-detected `B1_scaled_FAreg.nii(.gz)`), MATLAB-style TR fallback (`script_preferences.txt` key `tr`, or explicit `script_preferences_path`), MATLAB-style `odd_echoes` frame selection, and XY Gaussian smoothing (`xy_smooth_sigma` / `xy_smooth_size`) are implemented. |
+| Parametric T1 mapping workflow | `parametric_scripts/custom_scripts/T1mapping_fit.m`, `parametric_scripts/calculateMap.m` | Partial (`python/parametric_pipeline.py`, `python/parametric_cli.py`, `run_parametric_python_cli.py`) | primary | VFA linear/nonlinear/two-point fit types are available with fixture + BIDS-based naming/integrity tests; optional B1-scaled FA support (`b1_map_file` or auto-detected `B1_scaled_FAreg.nii(.gz)`), strict TR requirement from sidecar or explicit `tr_ms` (no script-preference fallback), MATLAB-style `odd_echoes` frame selection, and XY Gaussian smoothing (`xy_smooth_sigma` / `xy_smooth_size`) are implemented. |
 | Parametric GUI workflow | `parametric_scripts/fitting_gui.m`, `run_parametric.m` | Partial (`python/parametric_gui.py`, `run_parametric_python_gui.py`) | primary | GUI v1 exists for file selection/run/progress/summary; additional MATLAB behavior and QC parity may still be needed. |
 | SI->Concentration conversion | `dce/A_make_R1maps_func.m` signal-to-R1/concentration steps | Partial (`python/dce_pipeline.py` Stage A + `python/dce_signal.py`) | primary | OSIPI SI2Conc reliability test and merge-gate summary runner are in place (`tests/python/test_osipi_si_to_conc_reliability.py`, `tests/python/run_osipi_reliability.py`). |
 | DSC core functions | `dsc/import_AIF.m`, `dsc/previous_AIF.m`, `dsc/DSC_convolution_sSVD.m` | Implemented (`python/dsc_helpers.py`, `python/dsc_models.py`) | done | Core parity contract coverage exists. |

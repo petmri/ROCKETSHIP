@@ -6,7 +6,28 @@ Finish the Python transition to the point that it can be merged to `dev` and tes
 ## Recent Update (2026-03-02)
 - [x] Batch DCE config assembly now prefers per-session DCE metadata JSON for `tr`/`fa`, and avoids template `tr`/`fa` defaults unless explicitly passed via `--set`.
 - [x] Batch mode now forces `dce_metadata_path` to the current session sidecar by default (prevents template test-fixture metadata paths from leaking into real-data runs unless explicitly overridden via `--set dce_metadata_path=...`).
-- [x] When sidecar JSON lacks frame spacing, Stage A now falls back to explicit `time_resolution[_sec]` overrides and then repository `script_preferences.txt` (`time_resolution`), with provenance recorded in `a_out.json`.
+- [x] DCE frame spacing now has strict metadata behavior: it must come from sidecar JSON (`time_resolution_sec`, `TemporalResolution`, MATLAB-style `RepetitionTime` when `RepetitionTimeExcitation` exists, `AcquisitionDuration`, or `TriggerDelayTime/nReps`) or explicit config override (`time_resolution_sec`/`time_resolution`); missing values are a hard error.
+- [x] Python Stage A now supports MATLAB-style `start_t`/`end_t` timepoint clipping (1-based frame window) before concentration conversion.
+- [x] Python Stage A/B auto injection timing now mirrors MATLAB CLI auto behavior:
+  - Stage A auto start = baseline detector end (`end_ss`)
+  - Stage A auto end = mean AIF-voxel peak frame
+  - Stage B consumes Stage-A auto injection minutes by default.
+- [x] Batch template hardcoded `start_injection[_min]`/`end_injection[_min]` values are stripped unless explicitly passed via `--set`, so auto injection is the default batch behavior.
+- [x] MATLAB legacy Sobel parity fix completed:
+  - Python now matches MATLAB `smooth(...,'moving')` endpoint behavior (odd-span edge ramp) and Sobel derivative scaling.
+  - Verified on `RUNNER_DATA/sub-1101743/{ses-01,ses-02}` with `steady_state_time=[1,1]` and non-negative AIF baseline values in Python QC outputs.
+- [x] Stage-D batch parity diagnostics completed on clean-reference `RUNNER_DATA` packet (`sub-1101743/{ses-01,ses-02}`):
+  - `tests/python/run_batch_stage_d_diagnostics.py` now reproduces backend-isolation and MATLAB contract checks.
+  - Stage-B arrays (`Ct`, `Cp_use`, `timer`) now match MATLAB numerically after weighted AIF-fit update (`dceprep-python-batch-cleanref-aifw2`).
+  - CPU path on those arrays matches MATLAB Patlak maps on sampled voxels (`corr=1.0`, slope `~1.0`).
+  - Remaining parity gap is localized to accelerated Patlak (`cpufit_cpu`) in `ses-02` (sampled `corr~0.44`, slope `~0.21`), not to Stage-A/B assembly or Python core Patlak fitter.
+
+### Scan Parameter Policy (No Silent Defaults)
+- [x] Policy set: there are no implicit defaults for scan parameters in Python workflows.
+- [x] Required scan parameters (`TR`, `flip angle`, dynamic frame spacing, and other acquisition-dependent values) must be:
+  - read from scan metadata files (`DICOM`/`NIfTI` sidecar JSON), or
+  - explicitly provided by the user in config/CLI/GUI.
+- [x] If required scan parameters are missing, the pipeline must fail with a hard error (no fallback to repository preference files).
 
 ## Primary (Blockers for Dev-Branch Trial)
 1. Parametric maps and T1 fitting workflow
@@ -26,7 +47,7 @@ Finish the Python transition to the point that it can be merged to `dev` and tes
 - [x] Ensure backend consistency across `cpu`, `cpufit`, and `gpufit` where available.
 - [x] Add regression tests for known edge cases (bounds, low SNR, non-uniform timer inputs).
 - [x] Implement automatic DCE baseline-window detection methods for Stage A (`steady_state_auto_method` = `legacy_sobel` and `piecewise_constant`), with explicit method selection and manual `steady_state_end` precedence.
-- [ ] Validate the current default DCE baseline auto method (`legacy_sobel`) on representative real datasets (MATLAB comparison + qualification impact), and confirm whether the default should remain `legacy_sobel` vs `glr`/`tv`.
+- [x] Validate the current default DCE baseline auto method (`legacy_sobel`) on representative real datasets (MATLAB comparison + qualification impact), and keep `legacy_sobel` as default for now (`RUNNER_DATA/sub-1101743/{ses-01,ses-02}` parity check completed; broader `glr`/`tv` comparison remains follow-up tuning).
 - [x] Add qualification gating for non-finite primary-model parameter maps (see `python/qualification.py` and `tests/python/test_python_qualification.py`).
 - [x] Resolve qualification blocker from `ex_tofts` non-finite accelerated maps by falling back to next backend/CPU when accelerated output has no usable finite primary parameters (`python/dce_pipeline.py`, `tests/python/test_dce_pipeline.py`).
 - [x] Adopt accelerated DCE `gpu_tolerance=1e-6` default (was `1e-12`) after CPUfit/Cpufit max-iteration diagnosis; verified with full Python test suite and `run_python_qualification.py` on 5-session `tests/data/BIDS_test`.
@@ -91,6 +112,14 @@ Finish the Python transition to the point that it can be merged to `dev` and tes
 
 ## GPUfit / CPUfit Handoff Items (for external accelerator project)
 Current observed accelerator issues to hand off / track:
+- `patlak` accelerated backend (`cpufit_cpu`) real-data drift on clean `RUNNER_DATA` reference:
+  - Repro runner: `tests/python/run_batch_stage_d_diagnostics.py`
+  - Repro command:
+    - `.venv/bin/python tests/python/run_batch_stage_d_diagnostics.py --python-cleanref-root RUNNER_DATA/derivatives/dceprep-python-batch-cleanref-aifw2 --matlab-cleanref-root RUNNER_DATA/derivatives/dceprep-matlab-cleanref --sample-size 10000 --skip-matlab-contract --output-json out/batch_stage_d_diagnostics_aifw2_10000_20260303.json`
+  - Observed:
+    - `ses-01`: CPUfit close (`corr=0.997320`, slope `1.001818`)
+    - `ses-02`: CPUfit diverges (`corr=0.444784`, slope `0.205971`) while CPU path is near-identical to MATLAB (`corr=1.0`, slope `1.000012`).
+  - Local cpufit source trial (Patlak trapezoid loop bound fix in CPU/CUDA) did not resolve ses-02 drift (`out/batch_stage_d_diagnostics_aifw2_10000_patlakfix_20260303.json`).
 - `test_osipi_pycpufit_2cxm_fast`:
   - `vp` absolute error too large (`actual=0.070445478`, `expected=0.02`, tolerance `0.01857123`).
 - `test_osipi_pycpufit_tissue_uptake_fast`:
@@ -108,8 +137,19 @@ Current observed accelerator issues to hand off / track:
   - Historical observed output before upstream/local fix:
     - BIDS payload: `cpufit state=2, iterations=0` while CPU reference parameters are finite.
     - OSIPI payload: `cpufit state=0` with close agreement to CPU reference.
+- Repro package (new PATLAK real-data drift handoff):
+  - `/Users/samuelbarnes/code/ROCKETSHIP/tests/contracts/handoffs/cpufit_patlak_batch/`
+  - Runner:
+    - `.venv/bin/python tests/contracts/handoffs/cpufit_patlak_batch/run_cpufit_patlak_repro.py --json`
+  - Payloads:
+    - `ses01_control_repro.npz`
+    - `ses02_drift_repro.npz`
+  - Local observed behavior:
+    - CPU vs MATLAB remains near-identical in both payloads (`corr~1.0`, slope `~1.0`).
+    - CPUfit vs MATLAB diverges while fit states remain all `CONVERGED`.
 
 Requested handoff topics:
+- [ ] Resolve `PATLAK` Cpufit/Cpufit real-data divergence in multi-fit constrained runs (RUNNER_DATA ses-02 payload; all fits currently report `CONVERGED` but parameter agreement is poor).
 - [ ] Improve constrained fit robustness for multi-parameter DCE models (`2cxm`, `tissue_uptake`).
 - [ ] Ensure deterministic handling/reporting of failed fits (no silent NaN propagation).
 - [ ] Verify bound handling and initialization behavior consistency across GPUfit/CPUfit implementations.
@@ -146,7 +186,7 @@ Current handling in main suite:
 - Parametric T1 real-data naming/integrity tests added for BIDS-based multifile and stacked inputs (`tests/python/test_parametric_pipeline.py`).
 - Parametric pipeline now supports nonlinear and two-point VFA fit types in addition to linear, with tiny-fixture integration tests (`python/parametric_pipeline.py`, `tests/python/test_parametric_pipeline.py`).
 - Parametric pipeline now supports optional B1-scaled flip-angle fitting (`b1_map_file` explicit or auto-detected `B1_scaled_FAreg.nii(.gz)`) with integration coverage (`python/parametric_pipeline.py`, `tests/python/test_parametric_pipeline.py`).
-- Parametric pipeline now supports MATLAB-style TR fallback from `script_preferences.txt` (`tr`) when sidecar TR is unavailable, including explicit `script_preferences_path` config support and integration coverage (`python/parametric_pipeline.py`, `tests/python/test_parametric_pipeline.py`).
+- Parametric pipeline now requires TR from VFA sidecar metadata (`RepetitionTime`) or explicit `tr_ms`; missing TR is a hard error (`python/parametric_pipeline.py`, `tests/python/test_parametric_pipeline.py`).
 - Parametric pipeline now supports MATLAB-style `odd_echoes` frame selection and optional XY Gaussian smoothing (`xy_smooth_sigma` / `xy_smooth_size`), including integration coverage and GUI/config wiring (`python/parametric_pipeline.py`, `python/parametric_gui.py`, `tests/python/test_parametric_pipeline.py`).
 - Part E statistical core port started: Python helpers now cover MATLAB-style model support checks, SSE extraction, f-test, AIC/relative-likelihood comparison, ROI CSV outputs, voxel-vector-to-volume reconstruction, and artifact writers for reproducible JSON/CSV/NPY outputs (`python/dce_postfit_analysis.py`, `tests/python/test_dce_postfit_analysis.py`).
 - Stage D optional Part E array export added via `stage_overrides.write_postfit_arrays` (`*_postfit_arrays.npz`), with NPZ loader/runner path in `python/dce_postfit_analysis.py` and `tests/python/run_dce_postfit_analysis.py`, plus regression coverage in `tests/python/test_dce_postfit_analysis.py` and `tests/python/test_dce_pipeline.py`.

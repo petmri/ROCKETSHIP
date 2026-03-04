@@ -138,7 +138,6 @@ class ParametricGuiWindow(QMainWindow):
         self.xy_smooth_sigma_edit = QLineEdit("0.0")
         self.mask_file_edit = QLineEdit("")
         self.b1_map_file_edit = QLineEdit("")
-        self.script_preferences_edit = QLineEdit("")
         self.odd_echoes_check = QCheckBox()
         self.write_rsq_check = QCheckBox()
         self.write_rho_check = QCheckBox()
@@ -170,13 +169,6 @@ class ParametricGuiWindow(QMainWindow):
             self._line_edit_with_browse(
                 self.b1_map_file_edit,
                 lambda: self._choose_file_for(self.b1_map_file_edit, "Select b1_map_file"),
-            ),
-        )
-        form.addRow(
-            "script_preferences_path",
-            self._line_edit_with_browse(
-                self.script_preferences_edit,
-                lambda: self._choose_file_for(self.script_preferences_edit, "Select script_preferences_path"),
             ),
         )
         form.addRow("write_r_squared", self.write_rsq_check)
@@ -340,7 +332,6 @@ class ParametricGuiWindow(QMainWindow):
         self.xy_smooth_sigma_edit.setText(str(payload.get("xy_smooth_sigma", payload.get("xy_smooth_size", 0.0))))
         self.mask_file_edit.setText(str(payload.get("mask_file", "")))
         self.b1_map_file_edit.setText(str(payload.get("b1_map_file", "")))
-        self.script_preferences_edit.setText(str(payload.get("script_preferences_path", "")))
         self.odd_echoes_check.setChecked(bool(payload.get("odd_echoes", False)))
         self.write_rsq_check.setChecked(bool(payload.get("write_r_squared", True)))
         self.write_rho_check.setChecked(bool(payload.get("write_rho_map", False)))
@@ -371,9 +362,6 @@ class ParametricGuiWindow(QMainWindow):
         b1_text = self.b1_map_file_edit.text().strip()
         if b1_text:
             payload["b1_map_file"] = b1_text
-        script_prefs_text = self.script_preferences_edit.text().strip()
-        if script_prefs_text:
-            payload["script_preferences_path"] = script_prefs_text
         return payload
 
     def _prepare_run_config_path(self, payload: Dict[str, Any]) -> Path:

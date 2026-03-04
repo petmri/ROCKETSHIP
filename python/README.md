@@ -143,7 +143,7 @@ Parametric input notes:
 - `fit_type` supports `t1_fa_linear_fit`, `t1_fa_fit`, and `t1_fa_two_point_fit`.
 - `b1_map_file` is optional; when provided, per-voxel effective flip angles are `flip_angles_deg * b1_scale`.
 - If `b1_map_file` is omitted, the pipeline auto-detects `B1_scaled_FAreg.nii` or `B1_scaled_FAreg.nii.gz` in the VFA directory.
-- `tr_ms` is optional if VFA sidecars contain `RepetitionTime`; otherwise the pipeline falls back to `script_preferences.txt` key `tr` (or explicit `script_preferences_path`).
+- `tr_ms` is optional only when VFA sidecars contain `RepetitionTime`; if sidecar TR is missing, `tr_ms` must be explicitly provided.
 - `odd_echoes=true` keeps only odd-positioned samples from the VFA stack (indices `0,2,4,...`) before fitting, matching MATLAB workflow behavior.
 - `xy_smooth_sigma` (alias `xy_smooth_size`) applies optional per-frame XY Gaussian smoothing before fitting.
 
@@ -275,6 +275,7 @@ Key expectations:
   - if no metadata JSON is available, you must provide all three manually in `stage_overrides`
     (`tr_ms`/`tr_sec`, `fa_deg`/`fa`, `time_resolution_sec`/`time_resolution`)
   - partial manual override when metadata JSON is present is rejected (set all three or none)
+  - there is no fallback to repository preference files for scan parameters
 - Supported backend values: `auto`, `cpu`, `gpufit`
 - Backend selection behavior:
   - `auto`: tries `pygpufit` with CUDA first, then `pycpufit` CPU backend, then pure CPU path

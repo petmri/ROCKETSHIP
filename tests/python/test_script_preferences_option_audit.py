@@ -57,9 +57,12 @@ def test_script_preferences_audit_status_values_and_new_alias_families() -> None
 
     # Newly-wired script-level alias families should remain explicitly marked supported.
     for key in (
+        "start_t",
+        "end_t",
         "tr",
         "fa",
         "time_resolution",
+        "auto_find_injection",
         "blood_t1",
         "start_injection",
         "end_injection",

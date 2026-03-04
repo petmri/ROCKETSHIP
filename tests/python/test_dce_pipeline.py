@@ -25,9 +25,11 @@ from dce_pipeline import (  # noqa: E402
     _legacy_sobel_baseline_end,
     _piecewise_constant_baseline_end,
     _resolve_baseline_window,
+    _resolve_timepoint_window,
     _resolve_dynamic_metadata,
     _tv_baseline_end,
     run_dce_pipeline,
+    _run_stage_a_real,
     _run_stage_b_real,
     _run_stage_d_real,
 )
@@ -242,14 +244,17 @@ class TestDcePipeline:
             with pytest.raises(ValueError, match=r"Partial manual DCE metadata override is not allowed"):
                 _resolve_dynamic_metadata(config, n_timepoints=8)
 
-    def test_dynamic_metadata_json_requires_explicit_frame_spacing(self) -> None:
+    def test_dynamic_metadata_json_requires_frame_spacing_when_missing_in_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))
+            config.stage_overrides = {
+                "stage_a_mode": "real",
+                "use_dce_preferences": False,
+            }
             dynamic_text = str(config.dynamic_files[0])
             sidecar = Path(dynamic_text[:-7] + ".json")
             sidecar.write_text(json.dumps({"RepetitionTime": 0.005, "FlipAngle": 17}))
-
-            with pytest.raises(ValueError, match=r"TemporalResolution/time_resolution_sec"):
+            with pytest.raises(ValueError, match=r"Unable to determine DCE frame spacing"):
                 _resolve_dynamic_metadata(config, n_timepoints=8)
 
     def test_dynamic_metadata_reads_relaxivity_and_hematocrit_from_json(self) -> None:
@@ -283,6 +288,66 @@ class TestDcePipeline:
             assert "SyntheticPhantom.RecommendedROCKETSHIPHematocrit" in str(
                 out["metadata_sources"].get("hematocrit", "")
             )
+
+    def test_dynamic_metadata_time_resolution_from_repetition_time_with_rte_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            dynamic_text = str(config.dynamic_files[0])
+            sidecar = Path(dynamic_text[:-7] + ".json")
+            sidecar.write_text(
+                json.dumps(
+                    {
+                        "RepetitionTimeExcitation": 0.008,
+                        "RepetitionTime": 15.3239,
+                        "FlipAngle": 17.0,
+                    }
+                )
+            )
+
+            out = _resolve_dynamic_metadata(config, n_timepoints=64)
+            assert out["tr_ms"] == pytest.approx(8.0)
+            assert out["time_resolution_sec"] == pytest.approx(15.3239)
+            assert "RepetitionTime@RepetitionTimeExcitation" in str(out["metadata_sources"]["time_resolution_sec"])
+
+    def test_dynamic_metadata_time_resolution_from_acquisition_duration(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            dynamic_text = str(config.dynamic_files[0])
+            sidecar = Path(dynamic_text[:-7] + ".json")
+            sidecar.write_text(
+                json.dumps(
+                    {
+                        "RepetitionTime": 0.008,
+                        "AcquisitionDuration": 12.8,
+                        "FlipAngle": 15.0,
+                    }
+                )
+            )
+
+            out = _resolve_dynamic_metadata(config, n_timepoints=64)
+            assert out["tr_ms"] == pytest.approx(8.0)
+            assert out["time_resolution_sec"] == pytest.approx(12.8)
+            assert str(out["metadata_sources"]["time_resolution_sec"]).endswith(".AcquisitionDuration")
+
+    def test_dynamic_metadata_time_resolution_from_trigger_delay_time_uses_raw_frame_count(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            dynamic_text = str(config.dynamic_files[0])
+            sidecar = Path(dynamic_text[:-7] + ".json")
+            sidecar.write_text(
+                json.dumps(
+                    {
+                        "RepetitionTime": 0.008,
+                        "TriggerDelayTime": 64000.0,
+                        "FlipAngle": 15.0,
+                    }
+                )
+            )
+
+            out = _resolve_dynamic_metadata(config, n_timepoints=5, n_timepoints_raw=64)
+            assert out["tr_ms"] == pytest.approx(8.0)
+            assert out["time_resolution_sec"] == pytest.approx(1.0)
+            assert "TriggerDelayTime/64/1000" in str(out["metadata_sources"]["time_resolution_sec"])
 
     def test_legacy_sobel_baseline_end_detects_pre_rise_frames(self) -> None:
         n_time = 40
@@ -433,6 +498,47 @@ class TestDcePipeline:
             assert info["method_requested"] == "none"
             assert info["method_used"] == "legacy_sobel"
             assert info["source"] == "default_auto_method:legacy_sobel"
+
+    def test_resolve_timepoint_window_defaults_to_full_range(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            config.stage_overrides = {"stage_a_mode": "scaffold"}
+
+            start_0b, end_0b_exclusive, info = _resolve_timepoint_window(config, n_timepoints=12)
+
+            assert (start_0b, end_0b_exclusive) == (0, 12)
+            assert info["source"] == "default_full_range"
+            assert int(info["n_timepoints_output"]) == 12
+
+    def test_resolve_timepoint_window_uses_start_t_end_t(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            config.stage_overrides = {"stage_a_mode": "scaffold", "start_t": 3, "end_t": 8}
+
+            start_0b, end_0b_exclusive, info = _resolve_timepoint_window(config, n_timepoints=12)
+
+            assert (start_0b, end_0b_exclusive) == (2, 8)
+            assert info["source"] == "start_t/end_t"
+            assert int(info["n_timepoints_output"]) == 6
+
+    def test_resolve_timepoint_window_treats_nonpositive_end_t_as_full_range(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            config.stage_overrides = {"stage_a_mode": "scaffold", "start_t": 4, "end_t": 0}
+
+            start_0b, end_0b_exclusive, info = _resolve_timepoint_window(config, n_timepoints=10)
+
+            assert (start_0b, end_0b_exclusive) == (3, 10)
+            assert info["source"] == "start_t/end_t"
+            assert int(info["n_timepoints_output"]) == 7
+
+    def test_resolve_timepoint_window_rejects_inverted_range(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            config.stage_overrides = {"stage_a_mode": "scaffold", "start_t": 9, "end_t": 2}
+
+            with pytest.raises(ValueError, match=r"start_t=9 must be <= end_t=2"):
+                _resolve_timepoint_window(config, n_timepoints=12)
 
     def test_validate_accepts_import_aif_path_alias_for_imported_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -981,6 +1087,76 @@ class TestDcePipeline:
             assert "array_shapes" in result["stages"]["A"]
             assert "Cp" in result["stages"]["A"]["array_shapes"]
             assert "Ct" in result["stages"]["A"]["array_shapes"]
+            stage_a = result["stages"]["A"]
+            assert float(stage_a["start_injection"]) == pytest.approx(float(stage_a["steady_state_time"][1]))
+            assert float(stage_a["end_injection"]) >= float(stage_a["start_injection"])
+
+    def test_stage_a_real_applies_start_t_end_t_time_window(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            roi_file = config.subject_tp_path / "roi_mask.nii.gz"
+            roi_file.write_text("")
+            config.roi_files = [roi_file]
+            config.stage_overrides = {
+                "stage_a_mode": "real",
+                "tr_ms": 5.0,
+                "fa_deg": 15.0,
+                "time_resolution_sec": 6.0,
+                "steady_state_start": 1,
+                "steady_state_end": 2,
+                "snr_filter": 0.0,
+                "start_t": 3,
+                "end_t": 7,
+            }
+
+            dynamic = np.ones((6, 6, 1, 10), dtype=float) * 100.0
+            dynamic[..., 3:] += 10.0
+            aif_mask = np.zeros((6, 6, 1), dtype=float)
+            aif_mask[1:3, 1:3, :] = 1.0
+            roi_mask = np.zeros((6, 6, 1), dtype=float)
+            roi_mask[3:5, 3:5, :] = 1.0
+            t1map = np.full((6, 6, 1), 1300.0, dtype=float)
+
+            def fake_load(path: Path):
+                p = str(path)
+                if p.endswith("dynamic.nii.gz"):
+                    return dynamic
+                if p.endswith("aif_mask.nii.gz"):
+                    return aif_mask
+                if p.endswith("roi_mask.nii.gz"):
+                    return roi_mask
+                if p.endswith("t1map.nii.gz"):
+                    return t1map
+                raise AssertionError(f"Unexpected path {path}")
+
+            with patch("dce_pipeline._load_nifti_data", side_effect=fake_load):
+                with patch(
+                    "dce_pipeline._save_stage_a_qc_figures",
+                    return_value={"timecurves_png": "/tmp/a.png", "roi_overview_png": "/tmp/b.png"},
+                ):
+                    with patch(
+                        "dce_pipeline._clean_ab",
+                        side_effect=lambda ab, t1_vals, idx_vals, threshold_fraction: (ab, t1_vals, idx_vals),
+                    ):
+                        with patch(
+                            "dce_pipeline._clean_r1",
+                            side_effect=lambda r1_vals, t1_vals, idx_vals, threshold_fraction: (
+                                r1_vals,
+                                t1_vals,
+                                idx_vals,
+                            ),
+                        ):
+                            stage_a = _run_stage_a_real(config)
+
+            assert stage_a["status"] == "ok"
+            assert stage_a["timepoint_window"]["start_1b"] == 3
+            assert stage_a["timepoint_window"]["end_1b"] == 7
+            assert stage_a["timepoint_window"]["n_timepoints_input"] == 10
+            assert stage_a["timepoint_window"]["n_timepoints_output"] == 5
+            cp = np.asarray(stage_a["arrays"]["Cp"], dtype=np.float64)
+            timer = np.asarray(stage_a["arrays"]["timer"], dtype=np.float64)
+            assert cp.shape[0] == 5
+            assert timer.shape[0] == 5
 
     def test_stage_a_real_rejects_identical_aif_and_roi_masks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1049,6 +1225,39 @@ class TestDcePipeline:
             assert result["aif_name"] == "fitted"
             assert "fit_params_cp" in result
             assert result["arrays"]["Cp_use"].shape == result["arrays"]["CpROI"].shape
+
+    def test_stage_b_real_prefers_stage_a_auto_injection_minutes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            config.stage_overrides = {
+                "stage_b_mode": "real",
+                "aif_curve_mode": "raw",
+            }
+            stage_a = _make_stage_a_payload()
+            stage_a["start_injection_min_auto"] = 0.62
+            stage_a["end_injection_min_auto"] = 0.94
+
+            result = _run_stage_b_real(config, stage_a)
+            assert float(result["start_injection_min"]) == pytest.approx(0.62)
+            assert float(result["end_injection_min"]) == pytest.approx(0.94)
+
+    def test_stage_b_real_auto_find_injection_overrides_manual_window(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            config.stage_overrides = {
+                "stage_b_mode": "real",
+                "aif_curve_mode": "raw",
+                "auto_find_injection": 1,
+                "start_injection_min": 0.20,
+                "end_injection_min": 0.30,
+            }
+            stage_a = _make_stage_a_payload()
+            stage_a["start_injection_min_auto"] = 0.61
+            stage_a["end_injection_min_auto"] = 0.96
+
+            result = _run_stage_b_real(config, stage_a)
+            assert float(result["start_injection_min"]) == pytest.approx(0.61)
+            assert float(result["end_injection_min"]) == pytest.approx(0.96)
 
     def test_stage_b_real_imported_mode_npz(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

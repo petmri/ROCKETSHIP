@@ -696,7 +696,12 @@ def _load_nifti_data(path: Path) -> np.ndarray:
     return np.asarray(image.get_fdata(), dtype=np.float64)
 
 
-def _resolve_dynamic_metadata(config: DcePipelineConfig, n_timepoints: int) -> Dict[str, Any]:
+def _resolve_dynamic_metadata(
+    config: DcePipelineConfig,
+    n_timepoints: int,
+    *,
+    n_timepoints_raw: Optional[int] = None,
+) -> Dict[str, Any]:
     metadata_path, _ = _explicit_stage_override(config, ("dce_metadata_path",))
     candidates: List[Path] = []
     if metadata_path is not None:
@@ -806,6 +811,27 @@ def _resolve_dynamic_metadata(config: DcePipelineConfig, n_timepoints: int) -> D
         elif "TemporalResolution" in payload:
             time_resolution_sec = float(payload["TemporalResolution"])
             metadata_sources["time_resolution_sec"] = f"{source_prefix}.TemporalResolution"
+        elif "RepetitionTimeExcitation" in payload and "RepetitionTime" in payload:
+            # MATLAB run_dce_cli.m branch:
+            # if RepetitionTimeExcitation exists, time_resolution is taken from RepetitionTime.
+            time_resolution_sec = float(payload["RepetitionTime"])
+            metadata_sources["time_resolution_sec"] = (
+                f"{source_prefix}.RepetitionTime@RepetitionTimeExcitation"
+            )
+        elif "AcquisitionDuration" in payload:
+            # MATLAB run_dce_cli.m branch:
+            # time_resolution = AcquisitionDuration.
+            time_resolution_sec = float(payload["AcquisitionDuration"])
+            metadata_sources["time_resolution_sec"] = f"{source_prefix}.AcquisitionDuration"
+        elif "TriggerDelayTime" in payload:
+            # MATLAB run_dce_cli.m branch:
+            # time_resolution = TriggerDelayTime / n_reps / 1000.
+            # TriggerDelayTime is in ms and n_reps is full dynamic frame count.
+            n_reps = int(n_timepoints_raw) if n_timepoints_raw is not None else int(n_timepoints)
+            if n_reps <= 0:
+                raise ValueError(f"TriggerDelayTime requires positive frame count; got {n_reps}")
+            time_resolution_sec = float(payload["TriggerDelayTime"]) / float(n_reps) / 1000.0
+            metadata_sources["time_resolution_sec"] = f"{source_prefix}.TriggerDelayTime/{n_reps}/1000"
 
     if time_resolution_sec is None:
         pref_time = _stage_override(config, "time_resolution_sec", None)
@@ -814,16 +840,6 @@ def _resolve_dynamic_metadata(config: DcePipelineConfig, n_timepoints: int) -> D
         if _override_value_is_set(pref_time):
             time_resolution_sec = float(pref_time)
             metadata_sources["time_resolution_sec"] = "preferences_or_stage_overrides.time_resolution[_sec]"
-
-    if time_resolution_sec is None:
-        script_pref_path = Path(__file__).resolve().parents[1] / "script_preferences.txt"
-        if script_pref_path.exists():
-            stat = script_pref_path.stat()
-            script_prefs = _parse_preference_file(str(script_pref_path), int(stat.st_mtime_ns))
-            script_time = script_prefs.get("time_resolution")
-            if _override_value_is_set(script_time):
-                time_resolution_sec = float(script_time)
-                metadata_sources["time_resolution_sec"] = f"script_preferences:{script_pref_path}.time_resolution"
 
     if (
         time_resolution_sec is not None
@@ -889,7 +905,8 @@ def _resolve_dynamic_metadata(config: DcePipelineConfig, n_timepoints: int) -> D
     if time_resolution_sec is None:
         raise ValueError(
             "Unable to determine DCE frame spacing (time resolution); set stage_overrides.time_resolution_sec "
-            "or provide DCE metadata JSON with TemporalResolution/time_resolution_sec."
+            "or provide DCE metadata JSON with one of: time_resolution_sec, TemporalResolution, "
+            "RepetitionTime (when RepetitionTimeExcitation is present), AcquisitionDuration, TriggerDelayTime."
         )
     if fa_deg is None:
         raise ValueError("Unable to determine flip angle; set stage_overrides.fa_deg or provide DCE metadata JSON")
@@ -932,6 +949,56 @@ def _baseline_window(config: DcePipelineConfig, n_timepoints: int) -> Tuple[int,
     return start_1b - 1, end_1b
 
 
+def _resolve_timepoint_window(
+    config: DcePipelineConfig,
+    n_timepoints: int,
+) -> Tuple[int, int, Dict[str, Any]]:
+    if n_timepoints < 1:
+        raise ValueError("Stage-A requires at least one dynamic timepoint")
+
+    start_raw = _stage_override(config, "start_t", None)
+    end_raw = _stage_override(config, "end_t", None)
+    start_is_set = _override_value_is_set(start_raw)
+    end_is_set = _override_value_is_set(end_raw)
+
+    start_1b = 1
+    if start_is_set:
+        try:
+            start_1b = int(float(start_raw))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"stage_overrides.start_t must be numeric, got {start_raw!r}") from exc
+        if start_1b <= 0:
+            start_1b = 1
+
+    end_1b = n_timepoints
+    if end_is_set:
+        try:
+            end_1b = int(float(end_raw))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"stage_overrides.end_t must be numeric, got {end_raw!r}") from exc
+        if end_1b <= 0:
+            end_1b = n_timepoints
+
+    start_1b = max(1, min(start_1b, n_timepoints))
+    end_1b = max(1, min(end_1b, n_timepoints))
+    if end_1b < start_1b:
+        raise ValueError(
+            f"Invalid Stage-A timepoint window: start_t={start_1b} must be <= end_t={end_1b}"
+        )
+
+    source = "default_full_range"
+    if start_is_set or end_is_set:
+        source = "start_t/end_t"
+    info = {
+        "source": source,
+        "start_1b": int(start_1b),
+        "end_1b": int(end_1b),
+        "n_timepoints_input": int(n_timepoints),
+        "n_timepoints_output": int(end_1b - start_1b + 1),
+    }
+    return start_1b - 1, end_1b, info
+
+
 def _moving_average_smooth_1d(values: np.ndarray, window: int) -> np.ndarray:
     arr = np.asarray(values, dtype=np.float64).reshape(-1)
     if arr.size == 0:
@@ -945,6 +1012,40 @@ def _moving_average_smooth_1d(values: np.ndarray, window: int) -> np.ndarray:
     padded = np.pad(arr, (pad, pad), mode="edge")
     kernel = np.ones(window, dtype=np.float64) / float(window)
     return np.convolve(padded, kernel, mode="valid")
+
+
+def _matlab_moving_average_smooth_1d(values: np.ndarray, span: int) -> np.ndarray:
+    """Approximate MATLAB smooth(x, span, 'moving') endpoint behavior.
+
+    MATLAB ``smooth(..., 'moving')`` uses progressively smaller odd window
+    sizes at the boundaries (1,3,5,...,span) instead of fixed-width
+    edge-truncated windows. This helper mirrors that behavior for 1D vectors
+    and is used for legacy Sobel baseline detection parity.
+    """
+    arr = np.asarray(values, dtype=np.float64).reshape(-1)
+    if arr.size == 0:
+        return arr.copy()
+    span = max(1, int(span))
+    if span % 2 == 0:
+        span += 1
+    if span == 1 or arr.size == 1:
+        return arr.copy()
+
+    half = span // 2
+    n = int(arr.size)
+    out = np.empty_like(arr, dtype=np.float64)
+    for i in range(n):
+        if i < half:
+            win = 2 * i + 1
+        elif i > n - half - 1:
+            win = 2 * (n - i) - 1
+        else:
+            win = span
+        local_half = win // 2
+        lo = i - local_half
+        hi = i + local_half + 1
+        out[i] = float(np.mean(arr[lo:hi]))
+    return out
 
 
 def _gaussian_smooth_1d(values: np.ndarray, sigma: float) -> np.ndarray:
@@ -1050,7 +1151,9 @@ def _legacy_sobel_baseline_end(stlv: np.ndarray) -> Dict[str, Any]:
         }
 
     global_dyn = np.mean(curves, axis=1)
-    global_smooth = _moving_average_smooth_1d(global_dyn, window=9)
+    # MATLAB parity: smooth(global_dyn, 9, 'moving') uses truncated endpoint
+    # windows (not edge-padded moving averages).
+    global_smooth = _matlab_moving_average_smooth_1d(global_dyn, span=9)
     global_smooth = _normalize_zero_one(global_smooth)
     if global_smooth.size < 2:
         return {
@@ -1061,12 +1164,14 @@ def _legacy_sobel_baseline_end(stlv: np.ndarray) -> Dict[str, Any]:
             "linefit_r2_threshold": 0.95,
         }
 
-    # Approximate MATLAB's Sobel edge response on a 1D curve.
-    sobel = np.array([1.0, 0.0, -1.0], dtype=np.float64) / 2.0
-    bx = np.convolve(np.pad(global_smooth, (1, 1), mode="edge"), sobel, mode="valid")
-    i0 = int(np.argmin(bx))  # MATLAB uses min(bx) for the strongest rising edge.
-    i0 = max(1, min(i0, global_smooth.size - 1))
-    end_ss_1b = i0  # i (1-based) minus 1 => Python 0-based index i0 corresponds to 1-based i0
+    # MATLAB parity for a 1-column vector:
+    # op = fspecial('sobel')/8; bx = imfilter(global_smooth, op, 'replicate');
+    # With replicate padding in the singleton dimension this reduces to a
+    # central difference: (prev - next) / 2.
+    padded = np.pad(global_smooth, (1, 1), mode="edge")
+    bx = (padded[:-2] - padded[2:]) / 2.0
+    i0 = int(np.argmin(bx))  # MATLAB: [~, i] = min(bx)
+    end_ss_1b = max(1, min(i0, global_smooth.size))  # MATLAB end_ss = i-1, clamped to valid 1-based index
 
     r2_threshold = 0.95
     if i0 >= 2:
@@ -1536,6 +1641,11 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     dynamic = _load_nifti_data(config.dynamic_files[0])
     if dynamic.ndim != 4:
         raise ValueError(f"Expected 4D dynamic input, got shape {dynamic.shape}")
+    n_timepoints_input = int(dynamic.shape[3])
+    time_start_0b, time_end_0b_exclusive, time_window_info = _resolve_timepoint_window(config, n_timepoints_input)
+    dynamic = dynamic[..., time_start_0b:time_end_0b_exclusive]
+    if dynamic.shape[3] < 1:
+        raise ValueError("Stage-A timepoint window produced an empty dynamic series")
 
     if not config.roi_files:
         raise ValueError("Stage-A real mode requires at least one ROI mask file")
@@ -1643,7 +1753,7 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     t1_tum = t1_flat[tumind].astype(np.float64)
 
     n_time = dynamic.shape[3]
-    timing = _resolve_dynamic_metadata(config, n_time)
+    timing = _resolve_dynamic_metadata(config, n_time, n_timepoints_raw=n_timepoints_input)
     tr_ms = float(timing["tr_ms"])
     tr_sec = tr_ms / 1000.0
     fa_deg = float(timing["fa_deg"])
@@ -1734,17 +1844,18 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     delta_r1_toi = r1_toi - np.mean(r1_toi[baseline_slice, :], axis=0)[np.newaxis, :]
 
     timer = np.arange(n_time, dtype=np.float64) * time_resolution_min
-    cp_mean = np.mean(cp, axis=1)
-    cp_delta = np.diff(cp_mean, prepend=cp_mean[0])
-    start_injection = int(np.argmax(cp_delta)) + 1  # 1-based to match MATLAB conventions
-    injection_duration_frames = int(
-        _stage_override(
-            config,
-            "injection_duration_frames",
-            max(1, int(round(float(_stage_override(config, "injection_duration", 1.0))))),
-        )
-    )
-    end_injection = min(n_time, start_injection + injection_duration_frames)
+    # MATLAB auto-find-injection parity:
+    # start_injection := end_ss (baseline detector output)
+    # end_injection   := mean(argmax(DYNAMLV, axis=time))
+    start_injection = float(ss_end)
+    peak_indices_1b = np.argmax(stlv, axis=0).astype(np.float64) + 1.0
+    end_injection = float(np.mean(peak_indices_1b)) if peak_indices_1b.size > 0 else float(start_injection)
+    if not math.isfinite(end_injection):
+        end_injection = float(start_injection)
+    if end_injection < start_injection:
+        end_injection = float(start_injection)
+    start_injection_min_auto = float(start_injection * time_resolution_min)
+    end_injection_min_auto = float(end_injection * time_resolution_min)
 
     figures = _save_stage_a_qc_figures(
         config.output_dir,
@@ -1773,11 +1884,14 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
         "aif_concentration_kind": timing.get("aif_concentration_kind"),
         "metadata_source_path": timing.get("metadata_source_path"),
         "metadata_sources": timing.get("metadata_sources"),
+        "timepoint_window": time_window_info,
         "blood_t1_override_sec": blood_t1_override_sec,
         "steady_state_time": [ss_start + 1, ss_end],
         "steady_state_auto": baseline_info,
         "start_injection": start_injection,
         "end_injection": end_injection,
+        "start_injection_min_auto": start_injection_min_auto,
+        "end_injection_min_auto": end_injection_min_auto,
         "figure_paths": figures,
         "arrays": {
             "Cp": cp,
@@ -2002,11 +2116,24 @@ def _resolve_stage_b_injection_window(
     stage_a: Dict[str, Any],
     timer_full: np.ndarray,
 ) -> Tuple[float, float]:
+    auto_find_raw = _stage_override(config, "auto_find_injection", None)
+    auto_find_set = _override_value_is_set(auto_find_raw)
+    auto_find_enabled = _to_bool(auto_find_raw, False) if auto_find_set else False
+
     start_override = _stage_override(config, "start_injection_min", _stage_override(config, "start_injection", None))
     end_override = _stage_override(config, "end_injection_min", _stage_override(config, "end_injection", None))
+    start_override_is_set = _override_value_is_set(start_override)
+    end_override_is_set = _override_value_is_set(end_override)
 
-    if start_override is not None:
+    # MATLAB CLI parity: auto_find_injection=1 enforces Stage-A auto timing.
+    if auto_find_enabled:
+        start_override_is_set = False
+        end_override_is_set = False
+
+    if start_override_is_set:
         start_val = float(start_override)
+    elif _override_value_is_set(stage_a.get("start_injection_min_auto", None)):
+        start_val = float(stage_a["start_injection_min_auto"])
     else:
         source = float(stage_a.get("start_injection", 1.0))
         if abs(source - round(source)) < 1e-8 and 1 <= int(round(source)) <= timer_full.size:
@@ -2014,8 +2141,10 @@ def _resolve_stage_b_injection_window(
         else:
             start_val = source
 
-    if end_override is not None:
+    if end_override_is_set:
         end_val = float(end_override)
+    elif _override_value_is_set(stage_a.get("end_injection_min_auto", None)):
+        end_val = float(stage_a["end_injection_min_auto"])
     else:
         source = float(stage_a.get("end_injection", start_val))
         if abs(source - round(source)) < 1e-8 and 1 <= int(round(source)) <= timer_full.size:
@@ -2120,7 +2249,7 @@ def _fit_aif_biexp(
     fitting_au: bool,
 ) -> Dict[str, Any]:
     try:
-        from scipy.optimize import curve_fit  # type: ignore
+        from scipy.optimize import least_squares  # type: ignore
     except Exception as exc:
         raise RuntimeError("scipy is required for Stage-B fitted AIF mode") from exc
 
@@ -2168,42 +2297,34 @@ def _fit_aif_biexp(
     def fit_fn(tvals: np.ndarray, a: float, b: float, c: float, d: float) -> np.ndarray:
         return _aif_biexp_con(tvals, fit_step, a, b, c, d, fitting_au=fitting_au, baseline=baseline)
 
+    # Match MATLAB Stage-B weighting in AIFbiexpfithelp:
+    # weights are zero through peak and 10 thereafter.
+    weights = np.ones(curve.size, dtype=np.float64) * 10.0
+    weights[: max_idx + 1] = 0.0
+    if not np.any(weights > 0.0):
+        weights[:] = 1.0
+    sqrt_weights = np.sqrt(weights)
+
+    def weighted_residual(params: np.ndarray) -> np.ndarray:
+        pred = fit_fn(timer, float(params[0]), float(params[1]), float(params[2]), float(params[3]))
+        return (pred - curve) * sqrt_weights
+
     fit_success = True
     params = initial.copy()
     try:
-        fit_kwargs: Dict[str, Any] = {
+        lsq_kwargs: Dict[str, Any] = {
+            "bounds": (lower, upper),
             "method": "trf",
             "max_nfev": max_nfev,
             "ftol": aif_tol_fun,
             "xtol": aif_tol_x,
         }
         if aif_loss != "linear":
-            fit_kwargs["loss"] = aif_loss
-        try:
-            params, _ = curve_fit(
-                fit_fn,
-                timer,
-                curve,
-                p0=initial,
-                bounds=(lower, upper),
-                **fit_kwargs,
-            )
-        except TypeError:
-            # Compatibility fallback for older SciPy builds.
-            fallback_kwargs: Dict[str, Any] = {
-                "method": "trf",
-                "maxfev": max_nfev,
-                "ftol": aif_tol_fun,
-                "xtol": aif_tol_x,
-            }
-            params, _ = curve_fit(
-                fit_fn,
-                timer,
-                curve,
-                p0=initial,
-                bounds=(lower, upper),
-                **fallback_kwargs,
-            )
+            lsq_kwargs["loss"] = aif_loss
+
+        result = least_squares(weighted_residual, x0=initial, **lsq_kwargs)
+        params = np.asarray(result.x, dtype=np.float64)
+        fit_success = bool(result.success)
     except Exception:
         fit_success = False
 
@@ -4058,4 +4179,3 @@ def run_dce_pipeline(
     summary["meta"]["summary_path"] = str(summary_path)
     _emit_progress(event_callback, "run_done", summary_path=str(summary_path), status="ok")
     return summary
-

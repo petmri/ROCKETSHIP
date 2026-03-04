@@ -68,15 +68,15 @@
     },
     {
       "key": "start_t",
-      "python_target": "n/a",
-      "status": "pending",
-      "notes": "Direct Stage-A time-index clipping parity is not wired yet."
+      "python_target": "stage_overrides.start_t",
+      "status": "supported",
+      "notes": "Stage-A supports MATLAB-style 1-based first-frame clipping."
     },
     {
       "key": "end_t",
-      "python_target": "n/a",
-      "status": "pending",
-      "notes": "Direct Stage-A time-index clipping parity is not wired yet."
+      "python_target": "stage_overrides.end_t",
+      "status": "supported",
+      "notes": "Stage-A supports MATLAB-style 1-based final-frame clipping (`0` means through the last frame)."
     },
     {
       "key": "rootname",
@@ -188,9 +188,9 @@
     },
     {
       "key": "auto_find_injection",
-      "python_target": "n/a",
-      "status": "intentionally_dropped",
-      "notes": "Python auto-detects injection by default and supports explicit start/end overrides."
+      "python_target": "stage_overrides.auto_find_injection",
+      "status": "supported",
+      "notes": "Stage-B honors MATLAB-style precedence: when enabled, Stage-A auto injection timing overrides manual start/end injection window values."
     },
     {
       "key": "start_injection",

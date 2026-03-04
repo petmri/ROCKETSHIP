@@ -70,7 +70,7 @@ def discover_dce_inputs(session: BidsSession) -> DceInputs:
     aif = _find_one(dce_deriv, "*desc-AIF_T1map.nii*")
 
     # ROI mask
-    roi = _find_one(anat_deriv, "*desc-brain_mask.nii*")
+    roi = _find_one(anat_deriv, "*space-DCEref_desc-brain_mask.nii*")
 
     # T1 map
     t1map = _find_one(anat_deriv, "*space-DCEref_T1map.nii*")

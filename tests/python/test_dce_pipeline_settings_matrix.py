@@ -241,6 +241,28 @@ def test_script_level_blood_t1_alias(tiny_root: Path) -> None:
 
 
 @pytest.mark.integration
+def test_script_level_start_t_end_t_aliases_clip_stage_a_timepoints(tiny_root: Path) -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        config = _make_config(
+            tiny_root,
+            Path(tmp) / "alias_start_end_t",
+            {
+                "start_t": 3,
+                "end_t": 10,
+            },
+        )
+        stage_a = _run_stage_a_real(config)
+
+        time_window = stage_a["timepoint_window"]
+        assert int(time_window["start_1b"]) == 3
+        assert int(time_window["end_1b"]) == 10
+        assert int(time_window["n_timepoints_input"]) == 18
+        assert int(time_window["n_timepoints_output"]) == 8
+        assert np.asarray(stage_a["arrays"]["Cp"], dtype=np.float64).shape[0] == 8
+        assert np.asarray(stage_a["arrays"]["timer"], dtype=np.float64).shape[0] == 8
+
+
+@pytest.mark.integration
 def test_script_level_aif_type_and_injection_aliases(tiny_root: Path) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         config = _make_config(
