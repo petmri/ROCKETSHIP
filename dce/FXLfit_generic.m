@@ -802,10 +802,10 @@ elseif strcmp(model, 'patlak')
         % weights(start_i:end_i, :) = 0;
         weights = weights(1:size(Ct_single, 1), 1:size(Ct_single,2));
         % Read weights from ODS file
-        [~, ~, raw] = xlsread('/media/network_mriphysics/USC-animal/BIDS/code/brain_avg_scores.xlsx');
-        ids = raw(2:end,1); % skip header
-        weight_starts = cell2mat(raw(2:end,7));
-        weight_ends = cell2mat(raw(2:end,8));
+        % [~, ~, raw] = xlsread('/media/network_mriphysics/USC-animal/BIDS/code/brain_avg_scores.xlsx');
+        % ids = raw(2:end,1); % skip header
+        % weight_starts = cell2mat(raw(2:end,7));
+        % weight_ends = cell2mat(raw(2:end,8));
 
         % Find matching ID for current subject/session
         if isfield(xdata{1}, 'ID')
@@ -821,12 +821,12 @@ elseif strcmp(model, 'patlak')
 
         % Handle NaN or empty cells for start/end indices
         %TODO - automate with start_t choppage
-        start_i = max(1, weight_starts(row_idx)-10);
-        end_i = max(1, weight_ends(row_idx)-10);
+        % start_i = max(1, weight_starts(row_idx)-10);
+        % end_i = max(1, weight_ends(row_idx)-10);
 
         if isempty(start_i) || isnan(start_i) || isempty(end_i) || isnan(end_i)
             % If missing, do not mask any weights
-            warning(['Missing or NaN weight range for ID ' current_id '. No weights will be masked.']);
+            % warning(['Missing or NaN weight range for ID ' current_id '. No weights will be masked.']);
             weights = single(ones(size(Ct_single)));
         else
             % Set weights to zero in the specified range
