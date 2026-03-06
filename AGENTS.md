@@ -4,20 +4,39 @@
 ROCKETSHIP is actively transitioning core workflows from MATLAB to Python.
 
 Canonical planning and status docs:
-- `/Users/samuelbarnes/code/ROCKETSHIP/python/ROADMAP.md`
-- `/Users/samuelbarnes/code/ROCKETSHIP/python/PORTING_STATUS.md`
-- `/Users/samuelbarnes/code/ROCKETSHIP/TODO.md`
+- `~/code/ROCKETSHIP/docs/project-management/ROADMAP.md`
+- `~/code/ROCKETSHIP/docs/project-management/PORTING_STATUS.md`
+- `~/code/ROCKETSHIP/docs/project-management/TODO.md`
+- `~/code/ROCKETSHIP/docs/project-management/COMPLETED.md`
 
 ## Documentation Discipline
-- When implementation or test behavior changes, update the planning/status docs in the same workstream:
-  - `/Users/samuelbarnes/code/ROCKETSHIP/TODO.md`
-  - `/Users/samuelbarnes/code/ROCKETSHIP/python/ROADMAP.md`
-  - `/Users/samuelbarnes/code/ROCKETSHIP/python/PORTING_STATUS.md`
-- Do not leave important caveats only in commit messages or chat; record them in the docs above.
+- Keep planning docs non-overlapping. Do not update all planning docs by default.
+
+Document roles:
+- `ROADMAP.md`: strategy and sequencing only.
+  - Includes merge-readiness criteria, long-horizon workstreams, and delivery order.
+  - Excludes day-to-day checklists and historical changelog entries.
+- `TODO.md`: active actionable tasks only.
+  - Includes open blockers, open follow-ups, and open external handoff items.
+  - Excludes completed history and broad strategic narrative.
+- `PORTING_STATUS.md`: current measurable state only.
+  - Includes latest test/qualification snapshot, current blockers, and active risks.
+  - Excludes long task inventories and archived progress history.
+- `COMPLETED.md`: historical completion log only.
+  - Includes resolved milestones, completed work packages, and retired status notes.
+  - Excludes open tasks.
+
+Update decision rule (apply smallest necessary set):
+- Strategy changed: update `ROADMAP.md`.
+- Open work changed: update `TODO.md`.
+- Current test/qualification state changed: update `PORTING_STATUS.md`.
+- Work finished or historical status archived: update `COMPLETED.md`.
+
+Do not leave important caveats only in commit messages or chat; record them in the single appropriate document above.
 
 OSIPI reference repos available locally for verification work:
-- `/Users/samuelbarnes/code/DCE-DSC-MRI_CodeCollection`
-- `/Users/samuelbarnes/code/DCE-DSC-MRI_TestResults`
+- `~/code/DCE-DSC-MRI_CodeCollection`
+- `~/code/DCE-DSC-MRI_TestResults`
 
 ## Engineering Priorities
 - The Python code path is still in development and has no production users yet.

@@ -55,11 +55,12 @@ Interpretation:
   - MATLAB vs Python on identical `(Ct, Cp_use, timer, prefs)` is numerically identical in sampled single-curve and ROI checks.
 - CPU Patlak backend alignment:
   - On sampled voxels from clean-reference checkpoints, Python CPU matches MATLAB almost exactly.
+- CPU linear Patlak backend alignment:
+  - On sampled voxels from clean-reference checkpoints, Python CPU linear fit matches MATLAB almost exactly.
 
 ### Confirmed not aligned
-- Accelerated Patlak backend (`cpufit_cpu`) is still session-dependent on real data:
-  - acceptable in `ses-01`, large drift in `ses-02`.
 - Stage-B weighted AIF fit update currently regresses one required multi-model parity check (below).
+- Regression on GPU-accelerated backend behavior observed in qualification test; root cause under investigation.
 
 ## Key Diagnostics and Artifacts
 - Stage-D diagnostics runner:
@@ -67,8 +68,7 @@ Interpretation:
 - Diagnostics outputs:
   - `/Users/samuelbarnes/code/ROCKETSHIP/out/batch_stage_d_diagnostics_aifw2_10000_20260303.json`
   - `/Users/samuelbarnes/code/ROCKETSHIP/out/batch_stage_d_diagnostics_aifw2_10000_patlakfix_20260303.json`
-- Patlak cpufit handoff package:
-  - `/Users/samuelbarnes/code/ROCKETSHIP/tests/contracts/handoffs/cpufit_patlak_batch/`
+
 
 ## Outstanding TODOs
 1. Resolve current required parity failure introduced by weighted Stage-B AIF fit.
@@ -87,8 +87,16 @@ Interpretation:
   - calibrate parity thresholds/dataset for this known algorithmic change, or
   - add a compatibility mode for parity fixtures while keeping weighted mode for batch runs.
 
-3. Upstream cpufit Patlak investigation remains open.
-- Continue handoff with reproducible payloads in `tests/contracts/handoffs/cpufit_patlak_batch/`.
+3. Resolve testing failure
+- New qualification failure (backend=auto/GPU path):
+  - failing test: `tests/python/test_python_qualification.py::test_bids_root_qualification_processes_all_sessions`
+  - failing session: `sub-07phantom_ses-01`
+  - failing model/params: `tofts:Ktrans`, `tofts:ve`
+  - blocker message: `finite_nonzero_ratio=0.869` below threshold `0.900`
+  - backend used in failing run: `gpufit_cuda`
+  - direct accelerated fit diagnostics show TOFTS non-convergence state concentration:
+    - `TOFTS {0: 6329, 1: 952}` where state `1 = MAX_ITERATION`
+    - comparison context: `TOFTS_EXTENDED {0: 7203, 1: 78}`, `PATLAK {0: 7280, 1: 1}`
 
 4. Design and implement robust batch-processing regression coverage (new).
 - Goal:
@@ -156,6 +164,3 @@ The CPU-vs-CPUfit divergence and weighted-AIF side effects were not caught early
   3. new CPU-vs-CPUfit checkpoint equivalence test
 - Archive summary JSON artifacts for trend comparison.
 
-## Practical Guidance Until Fixes Land
-- For parity-critical comparisons, prefer `backend=none` (CPU path) when evaluating against MATLAB references.
-- Treat accelerated Patlak (`cpufit_cpu`) outputs as non-authoritative on real-data parity until upstream fix is validated.

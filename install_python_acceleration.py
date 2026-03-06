@@ -51,6 +51,11 @@ def _venv_root_from_python(python_path: Path) -> Path:
     return parent
 
 
+def _require_matlab_gpufit_by_default(host_key: str) -> bool:
+    # macOS release assets currently ship Python acceleration only.
+    return not host_key.startswith("macos-")
+
+
 def _print_post_install_next_steps(repo_root: Path, venv_python: Path) -> None:
     venv_root = _venv_root_from_python(venv_python)
     if os.name == "nt":
@@ -730,20 +735,23 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument(
+        "-R",
         "--repo",
         default=DEFAULT_GPUFIT_REPO,
         help="GitHub repo in owner/name form (default: ironictoo/Gpufit)",
     )
     parser.add_argument(
+        "-t",
         "--release-tag",
         default=None,
         help=(
-            "Release tag to install. Practical choices: omit this flag for latest stable tag, "
-            "or set '--release-tag dev-latest' for the dev channel. "
-            "Syntax is the exact tag string, for example '--release-tag v1.4.1' or '--release-tag dev-latest'."
+            "Release tag to install. (default: latest stable tag) \n"
+            "Use '-t dev-latest' for the dev channel. "
+            "For other releases, syntax is the exact tag string, for example '-t v1.4.1'"
         ),
     )
     parser.add_argument(
+        "-a",
         "--asset-id",
         default=None,
         help=(
@@ -752,45 +760,40 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "-e",
         "--venv-path",
         default=".venv",
         help="Virtual environment path (default: .venv in repo root).",
     )
     parser.add_argument(
+        "-x",
         "--recreate-venv",
         action="store_true",
         help="Delete and recreate virtual environment before installing.",
     )
     parser.add_argument(
+        "-G",
         "--no-gui",
         action="store_true",
         help="Skip requirements_gui.txt (GUI deps are installed by default).",
     )
     parser.add_argument(
-        "--skip-sha256",
+        "-k",
+        "--no-sha256",
         action="store_true",
-        help="Skip SHA256 verification even if SHA256SUMS.txt is present.",
+        help="Disable SHA256 verification even if SHA256SUMS.txt is present.",
     )
     parser.add_argument(
-        "--skip-matlab-mex",
+        "-M",
+        "--no-matlab",
         action="store_true",
-        help="Skip installation of MATLAB files from the release bundle.",
+        help="Skip installation/probe of MATLAB files from the release bundle.",
     )
     parser.add_argument(
+        "-m",
         "--matlab-cmd",
         default="matlab",
         help="MATLAB command used for post-install symbol probing (default: matlab).",
-    )
-    parser.add_argument(
-        "--require-matlab-gpufit",
-        action="store_true",
-        default=True,
-        help="Fail install if MATLAB Gpufit symbols are missing after install/probe (default: on).",
-    )
-    parser.add_argument(
-        "--allow-missing-matlab-gpufit",
-        action="store_true",
-        help="Do not fail when MATLAB Gpufit symbols are missing (temporary escape hatch).",
     )
     return parser.parse_args()
 
@@ -858,7 +861,7 @@ def main() -> int:
             _log(f"Downloading asset to: {archive_path}")
             _download(download_url, archive_path, token=token)
 
-            if not args.skip_sha256:
+            if not args.no_sha256:
                 sha_asset = _pick_sha256_asset(release)
                 if sha_asset is not None:
                     sha_name = str(sha_asset.get("name", "SHA256SUMS.txt"))
@@ -891,18 +894,20 @@ def main() -> int:
             _log(f"Using extracted package root: {package_root}")
 
             _install_acceleration_packages(python_in_venv, package_root)
-            if not args.skip_matlab_mex:
+            if not args.no_matlab:
                 _install_matlab_bundle_files(package_root, repo_root)
 
         _verify_install(python_in_venv)
 
         matlab_symbols: Dict[str, bool] = {}
-        if args.skip_matlab_mex:
+        if args.no_matlab:
             _log("MATLAB MEX install skipped by user")
         else:
             matlab_symbols = _probe_matlab_symbols(repo_root, args.matlab_cmd)
             _log_matlab_symbol_status(matlab_symbols)
-            require_matlab_gpufit = bool(args.require_matlab_gpufit) and (not bool(args.allow_missing_matlab_gpufit))
+            require_matlab_gpufit = _require_matlab_gpufit_by_default(host_key)
+            if not require_matlab_gpufit:
+                _log("MATLAB Gpufit symbol requirement disabled for this install")
             if require_matlab_gpufit:
                 missing = [name for name in MATLAB_GPUFIT_SYMBOLS if not bool(matlab_symbols.get(name, False))]
                 if missing:
@@ -910,12 +915,12 @@ def main() -> int:
                         "Required MATLAB Gpufit symbols were not detected in external_programs: "
                         + ", ".join(missing)
                         + ". Update the release bundle to include MATLAB GPUfit MEX wrappers/binaries, "
-                        "or rerun with --allow-missing-matlab-gpufit for temporary bypass."
+                        "or rerun with --no-matlab to skip MATLAB install/probe."
                     )
 
         python_health = _probe_python_install_health(python_in_venv)
 
-        if args.skip_matlab_mex:
+        if args.no_matlab:
             matlab_symbol_status = {"status": "SKIP", "detail": "MATLAB MEX install skipped"}
             matlab_runtime_status = {"status": "SKIP", "detail": "MATLAB MEX install skipped"}
         elif shutil.which(args.matlab_cmd) is None:
@@ -923,8 +928,13 @@ def main() -> int:
             matlab_runtime_status = {"status": "SKIP", "detail": f"'{args.matlab_cmd}' not found in PATH"}
         else:
             missing_symbols = [name for name in MATLAB_GPUFIT_SYMBOLS if not bool(matlab_symbols.get(name, False))]
-            if missing_symbols:
+            if missing_symbols and _require_matlab_gpufit_by_default(host_key):
                 matlab_symbol_status = {"status": "FAIL", "detail": "missing: " + ", ".join(missing_symbols)}
+            elif missing_symbols:
+                matlab_symbol_status = {
+                    "status": "SKIP",
+                    "detail": "missing on macOS (expected for current release assets): " + ", ".join(missing_symbols),
+                }
             else:
                 matlab_symbol_status = {"status": "PASS", "detail": "all required MATLAB Gpufit symbols found"}
             matlab_runtime_status = _probe_matlab_runtime_gpufit(repo_root, args.matlab_cmd)

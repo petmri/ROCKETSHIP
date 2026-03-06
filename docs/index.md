@@ -12,14 +12,14 @@ Ng, T.S.C., et al. [ROCKETSHIP: a flexible and modular software tool for the pla
 
 ## Start Here
 
-<!-- 
-- [Python Walkthrough](wiki/python-walkthrough.md) -->
+ 
+- [Python Walkthrough](wiki/python-walkthrough.md)
 - [MATLAB, DCE Walkthrough](wiki/dce-walkthrough.md)
 - [MATLAB, DSC Walkthrough](wiki/dsc-walkthrough.md)
 - [MATLAB, Parametric Walkthrough](wiki/parametric-walkthrough.md)
 - [Enable GPU Acceleration](wiki/enable-gpu-acceleration.md)
 - [DCE Options Reference](dce_options.md)
-<!-- 
+
 ## Python (Recommended) Quick Start
 
 ```bash
@@ -33,10 +33,11 @@ python run_parametric_python_cli.py
 
 For advanced Python usage and configuration details, see:
 - [Python README (repository)](https://github.com/petmri/ROCKETSHIP/blob/dev/python/README.md)
-- [Transition TODO (repository)](https://github.com/petmri/ROCKETSHIP/blob/dev/TODO.md)
-- [Python Roadmap (repository)](https://github.com/petmri/ROCKETSHIP/blob/dev/python/ROADMAP.md)
-- [Porting Status (repository)](https://github.com/petmri/ROCKETSHIP/blob/dev/python/PORTING_STATUS.md)
--->
+- [Project Management Docs (repository)](https://github.com/petmri/ROCKETSHIP/blob/dev/docs/project-management/README.md)
+- [Transition TODO (repository)](https://github.com/petmri/ROCKETSHIP/blob/dev/docs/project-management/TODO.md)
+- [Python Roadmap (repository)](https://github.com/petmri/ROCKETSHIP/blob/dev/docs/project-management/ROADMAP.md)
+- [Porting Status (repository)](https://github.com/petmri/ROCKETSHIP/blob/dev/docs/project-management/PORTING_STATUS.md)
+
 ## MATLAB (Legacy) Quick Start
 
 1. Clone ROCKETSHIP: `git clone --recursive https://github.com/petmri/ROCKETSHIP.git`

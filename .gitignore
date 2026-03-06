@@ -194,7 +194,7 @@ tests/data/ci_fixtures/dce/downsample_x2_bids/derivatives/sub-01/ses-01/dce/dce_
 tests/data/ci_fixtures/dce/downsample_x2_bids/derivatives/sub-01/ses-01/dce/dcedynamicCt.nii.gz
 tests/data/ci_fixtures/dce/downsample_x2_bids/derivatives/sub-01/ses-01/dce/dce_patlak_fit*
 out/
-RUNNER_DATA/
+site/
 
 # Installer-generated acceleration artifacts
 external_programs/CpufitMex*

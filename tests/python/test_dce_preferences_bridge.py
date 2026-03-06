@@ -122,9 +122,13 @@ def test_force_cpu_preference_overrides_backend_auto(_probe_mock: object) -> Non
 
 
 @pytest.mark.integration
-@patch("scipy.optimize.curve_fit")
-def test_aif_advanced_preferences_flow_into_fit_kwargs(curve_fit_mock: object) -> None:
-    curve_fit_mock.return_value = (np.array([1.0, 1.0, 1.0, 0.1]), np.eye(4))
+@patch("scipy.optimize.least_squares")
+def test_aif_advanced_preferences_flow_into_fit_kwargs(least_squares_mock: object) -> None:
+    class _DummyResult:
+        x = np.array([1.0, 1.0, 1.0, 0.1], dtype=np.float64)
+        success = True
+
+    least_squares_mock.return_value = _DummyResult()
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp = Path(tmp_dir)
         prefs = _write_prefs(
@@ -149,7 +153,7 @@ def test_aif_advanced_preferences_flow_into_fit_kwargs(curve_fit_mock: object) -
             fitting_au=False,
         )
 
-        kwargs = curve_fit_mock.call_args.kwargs
+        kwargs = least_squares_mock.call_args.kwargs
         assert kwargs["method"] == "trf"
         assert int(kwargs["max_nfev"]) == 123
         assert float(kwargs["ftol"]) == pytest.approx(1e-8)

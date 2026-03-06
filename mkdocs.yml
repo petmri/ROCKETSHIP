@@ -28,3 +28,13 @@ nav:
   - Technical Reference:
       - DCE Options: dce_options.md
       - Script Preferences Option Audit: script_preferences_option_audit.md
+  - Project Management:
+      - Overview: project-management/README.md
+      - TODO: project-management/TODO.md
+      - Completed: project-management/COMPLETED.md
+      - Roadmap: project-management/ROADMAP.md
+      - Porting Status: project-management/PORTING_STATUS.md
+      - Batch Parity: project-management/projects/batch-parity/batch_parity.md
+      - OSIPI Verification: project-management/projects/osipi-verification/osipi_summary.md
+      - Qualification Packet: project-management/projects/qualification/QUALIFICATION_MERGE_PACKET.md
+      - Phantom GT Status: project-management/projects/phantom-gt/PHANTOM_GT_QUALIFICATION_STATUS.md

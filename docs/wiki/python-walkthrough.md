@@ -145,6 +145,6 @@ cd /path/to/ROCKETSHIP
 ## 8. Related Project Docs
 
 - `/Users/samuelbarnes/code/ROCKETSHIP/python/README.md`
-- `/Users/samuelbarnes/code/ROCKETSHIP/TODO.md`
-- `/Users/samuelbarnes/code/ROCKETSHIP/python/ROADMAP.md`
-- `/Users/samuelbarnes/code/ROCKETSHIP/python/PORTING_STATUS.md`
+- `/Users/samuelbarnes/code/ROCKETSHIP/docs/project-management/TODO.md`
+- `/Users/samuelbarnes/code/ROCKETSHIP/docs/project-management/ROADMAP.md`
+- `/Users/samuelbarnes/code/ROCKETSHIP/docs/project-management/PORTING_STATUS.md`
