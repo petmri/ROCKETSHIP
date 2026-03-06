@@ -140,8 +140,8 @@ Notes:
 - GUI v1 provides `Browse...` dialogs for all path/file input widgets currently shown in the form.
 - `imported_aif_path` exists at the config level, but current GUI form does not expose a dedicated field yet; set it via JSON config when using imported AIF mode.
 - Script-level option audit (all keys in `script_preferences.txt` with support status):
-  - `~/code/ROCKETSHIP/docs/script_preferences_option_audit.md`
-  - `~/code/ROCKETSHIP/tests/data/scripts/script_preferences_option_audit.json`
+  - `~/code/ROCKETSHIP/docs/project-management/projects/script-preferences-audit/script_preferences_option_audit.md`
+  - `~/code/ROCKETSHIP/docs/project-management/projects/script-preferences-audit/script_preferences_option_audit.json`
 - Not all MATLAB-era options are fully consumed by current Python runtime yet; see active backlog:
   - `~/code/ROCKETSHIP/docs/project-management/PORTING_STATUS.md`
   - `~/code/ROCKETSHIP/docs/project-management/TODO.md`

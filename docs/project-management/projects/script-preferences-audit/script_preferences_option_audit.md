@@ -1,10 +1,10 @@
 # Script Preferences Option Parity Audit
 
 Canonical machine-readable audit:
-- `/Users/samuelbarnes/code/ROCKETSHIP/tests/data/scripts/script_preferences_option_audit.json`
+- `docs/project-management/projects/script-preferences-audit/script_preferences_option_audit.json`
 
 Source:
-- `/Users/samuelbarnes/code/ROCKETSHIP/script_preferences.txt`
+- `script_preferences.txt`
 
 Status labels:
 - `supported`: key is consumed by Python config/stage overrides.

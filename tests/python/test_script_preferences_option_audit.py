@@ -10,7 +10,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PREFS = REPO_ROOT / "script_preferences.txt"
-AUDIT_PATH = REPO_ROOT / "tests" / "data" / "scripts" / "script_preferences_option_audit.json"
+AUDIT_PATH = REPO_ROOT / "docs" / "project-management" / "projects" / "script-preferences-audit" / "script_preferences_option_audit.json"
 
 
 def _parse_script_pref_keys(path: Path) -> list[str]:

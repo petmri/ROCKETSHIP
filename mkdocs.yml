@@ -27,7 +27,7 @@ nav:
       - Enable GPU Acceleration: wiki/enable-gpu-acceleration.md
   - Technical Reference:
       - DCE Options: dce_options.md
-      - Script Preferences Option Audit: script_preferences_option_audit.md
+      - Script Preferences Option Audit: project-management/projects/script-preferences-audit/script_preferences_option_audit.md
   - Project Management:
       - Overview: project-management/README.md
       - TODO: project-management/TODO.md
