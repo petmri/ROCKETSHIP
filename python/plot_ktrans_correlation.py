@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""
-Compare two Ktrans maps voxel-by-voxel with scatter plot and correlation statistics.
+"""Compare two images voxel-by-voxel with correlation statistics.
 
-Usage:
-    python plot_ktrans_correlation.py map1.nii.gz map2.nii.gz [--mask mask.nii.gz] [--output plot.png]
+Examples:
+    python plot_ktrans_correlation.py map1.nii.gz map2.nii.gz
+    python plot_ktrans_correlation.py t1_ref.nii.gz t1_test.nii.gz --quantity "T1 (ms)"
 """
 
 import argparse
 import sys
-from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy import stats
@@ -58,7 +57,31 @@ def compute_correlation_stats(x, y):
     }
 
 
-def plot_correlation(x, y, stats_dict, label_x='Map 1', label_y='Map 2', output_path=None):
+def _auto_axis_limits(x, y, lower_pct=1.0, upper_pct=99.0):
+    """Choose robust scatter-plot limits from central percentiles."""
+    stacked = np.concatenate([x, y])
+    lo = float(np.percentile(stacked, lower_pct))
+    hi = float(np.percentile(stacked, upper_pct))
+    if not np.isfinite(lo) or not np.isfinite(hi) or lo >= hi:
+        lo = float(np.min(stacked))
+        hi = float(np.max(stacked))
+    if lo >= hi:
+        hi = lo + 1.0
+    margin = 0.03 * (hi - lo)
+    return lo - margin, hi + margin
+
+
+def plot_correlation(
+    x,
+    y,
+    stats_dict,
+    label_x='Map 1',
+    label_y='Map 2',
+    quantity='Value',
+    axis_min=None,
+    axis_max=None,
+    output_path=None,
+):
     """Create scatter plot with unity line and regression line."""
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
     
@@ -75,14 +98,18 @@ def plot_correlation(x, y, stats_dict, label_x='Map 1', label_y='Map 2', output_
     y_line = stats_dict['slope'] * x_line + stats_dict['intercept']
     ax1.plot(x_line, y_line, 'r-', alpha=0.7, linewidth=2, label='Linear fit')
     
-    ax1.set_xlabel(f'{label_x} Ktrans', fontsize=12)
-    ax1.set_ylabel(f'{label_y} Ktrans', fontsize=12)
+    ax1.set_xlabel(f'{label_x} {quantity}', fontsize=12)
+    ax1.set_ylabel(f'{label_y} {quantity}', fontsize=12)
     ax1.set_title('Voxel-by-Voxel Correlation', fontsize=14, fontweight='bold')
-    ax1.set_xlim(0, 0.5)
-    ax1.set_ylim(0, 0.04)
+    if axis_min is None or axis_max is None:
+        lim_min, lim_max = _auto_axis_limits(x, y)
+    else:
+        lim_min, lim_max = float(axis_min), float(axis_max)
+    ax1.set_xlim(lim_min, lim_max)
+    ax1.set_ylim(lim_min, lim_max)
     ax1.legend()
     ax1.grid(True, alpha=0.3)
-    
+
     # Add statistics text
     stats_text = (
         f"N voxels = {len(x):,}\n"
@@ -112,7 +139,7 @@ def plot_correlation(x, y, stats_dict, label_x='Map 1', label_y='Map 2', output_
                 label=f'-1.96 SD = {mean_diff - 1.96 * std_diff:.4e}')
     ax2.axhline(0, color='black', linestyle=':', alpha=0.5)
     
-    ax2.set_xlabel('Mean Ktrans', fontsize=12)
+    ax2.set_xlabel(f'Mean {quantity}', fontsize=12)
     ax2.set_ylabel(f'{label_y} - {label_x}', fontsize=12)
     ax2.set_title('Bland-Altman Plot', fontsize=14, fontweight='bold')
     ax2.legend(fontsize=8)
@@ -131,23 +158,27 @@ def plot_correlation(x, y, stats_dict, label_x='Map 1', label_y='Map 2', output_
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Compare two Ktrans maps with voxel-by-voxel correlation plot',
+                description='Compare two images with voxel-by-voxel correlation plot',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   python plot_ktrans_correlation.py matlab_ktrans.nii.gz python_ktrans.nii.gz
-  python plot_ktrans_correlation.py map1.nii.gz map2.nii.gz --mask roi.nii.gz --output correlation.png
-  python plot_ktrans_correlation.py map1.nii.gz map2.nii.gz --threshold 0.001
+    python plot_ktrans_correlation.py map1.nii.gz map2.nii.gz --mask roi.nii.gz --output correlation.png --quantity "Ktrans"
+    python plot_ktrans_correlation.py t1_ref.nii.gz t1_test.nii.gz --quantity "T1 (ms)" --threshold 1.0 --axis-max 3000
         """
     )
     
-    parser.add_argument('map1', type=str, help='First Ktrans map (NIfTI file)')
-    parser.add_argument('map2', type=str, help='Second Ktrans map (NIfTI file)')
+    parser.add_argument('map1', type=str, help='First map (NIfTI file)')
+    parser.add_argument('map2', type=str, help='Second map (NIfTI file)')
     parser.add_argument('--mask', type=str, default=None, help='Optional mask (NIfTI file)')
     parser.add_argument('--output', '-o', type=str, default=None, help='Output plot filename (default: display interactive plot)')
-    parser.add_argument('--threshold', type=float, default=0.0, help='Minimum Ktrans threshold to include voxels (default: 0.0)')
+    parser.add_argument('--threshold', type=float, default=0.0, help='Minimum map threshold to include voxels (default: 0.0)')
     parser.add_argument('--label1', type=str, default='Map 1', help='Label for first map (default: Map 1)')
     parser.add_argument('--label2', type=str, default='Map 2', help='Label for second map (default: Map 2)')
+    parser.add_argument('--quantity', type=str, default='Value', help='Physical quantity label used in axes (e.g., "T1 (ms)", "Ktrans")')
+    parser.add_argument('--axis-min', type=float, default=None, help='Optional fixed scatter axis lower limit (applies to X and Y).')
+    parser.add_argument('--axis-max', type=float, default=None, help='Optional fixed scatter axis upper limit (applies to X and Y).')
+    parser.add_argument('--exclude-value', type=float, action='append', default=[-1.0], help='Exclude voxels where either map equals this value (repeatable). Default excludes -1.0 sentinel.')
     
     args = parser.parse_args()
     
@@ -176,6 +207,10 @@ Examples:
     
     # Apply threshold (exclude near-zero and negative values)
     valid_mask = mask & np.isfinite(map1_data) & np.isfinite(map2_data)
+
+    for value in args.exclude_value:
+        valid_mask &= ~np.isclose(map1_data, value) & ~np.isclose(map2_data, value)
+
     if args.threshold > 0:
         valid_mask &= (map1_data >= args.threshold) | (map2_data >= args.threshold)
     
@@ -214,7 +249,17 @@ Examples:
     
     # Create plot
     print("\nGenerating plots...")
-    plot_correlation(x, y, stats_dict, label_x=args.label1, label_y=args.label2, output_path=args.output)
+    plot_correlation(
+        x,
+        y,
+        stats_dict,
+        label_x=args.label1,
+        label_y=args.label2,
+        quantity=args.quantity,
+        axis_min=args.axis_min,
+        axis_max=args.axis_max,
+        output_path=args.output,
+    )
     
     print("\nDone!")
 

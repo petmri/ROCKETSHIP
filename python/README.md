@@ -9,6 +9,8 @@ currently in this repository.
   - `/path/to/ROCKETSHIP/run_dce_python_cli.py`
 - Primary Python entrypoint for parametric T1 pipeline:
   - `/path/to/ROCKETSHIP/run_parametric_python_cli.py`
+- Batch Python entrypoint for parametric T1 across BIDS sessions:
+  - `/path/to/ROCKETSHIP/run_parametric_bids_batch.py`
 - Optional GUI entrypoints:
   - `/path/to/ROCKETSHIP/run_dce_python_gui.py`
   - `/path/to/ROCKETSHIP/run_parametric_python_gui.py`
@@ -219,6 +221,44 @@ Example: Process only session 1 with specific models:
   --pipeline-folder dceprep \
   --session ses-01 \
   --dce-models tofts,ex_tofts,patlak
+```
+
+## Batch processing Parametric T1 across BIDS datasets
+
+Process T1 VFA mapping for all (or filtered) sessions in a BIDS dataset:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python run_parametric_bids_batch.py \
+  --bids-root /path/to/bids_root \
+  --pipeline-folder t1prep \
+  --fit-type t1_fa_fit
+```
+
+Batch processor features:
+
+- **BIDS-native session discovery**: Uses `rawdata/` and `derivatives/{pipeline}` pairing via `discover_bids_sessions`
+- **Automatic T1 input discovery**: Finds VFA inputs in `rawdata/.../anat/` and optional B1 maps in `derivatives/.../anat/`
+- **Flexible configuration**: Optional template (`--config-template`) plus repeatable `--set KEY=VALUE` overrides
+- **Session filtering**: Run specific subjects/sessions with `--subject` and `--session`
+- **Aggregate reporting**: Writes per-run summary JSON with per-session status
+
+Output organization:
+
+- `--pipeline-folder t1prep`: writes to `bids_root/derivatives/t1prep/sub-X/ses-Y/anat/` (or `sub-X/anat/` when no session)
+- `--pipeline-folder t1prep --output-pipeline t1maps`: reads from `t1prep`, writes outputs under `t1maps`
+- `--output-root /path`: writes flat outputs to `{output-root}/sub-X_ses-Y/anat/`
+- Neither specified: defaults to `bids_root/derivatives/parametric_batch_output/sub-X_ses-Y/anat/`
+
+Example with config template and overrides:
+
+```bash
+.venv/bin/python run_parametric_bids_batch.py \
+  --bids-root /path/to/data \
+  --pipeline-folder t1prep \
+  --config-template python/parametric_default.json \
+  --set tr_ms=5.0 \
+  --set rsquared_threshold=0.7
 ```
 
 Typical batch output structure (with --pipeline-folder):
