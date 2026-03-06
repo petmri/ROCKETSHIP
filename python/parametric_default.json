@@ -13,6 +13,6 @@
   "xy_smooth_sigma": 0.0,
   "write_r_squared": true,
   "write_rho_map": false,
-  "invalid_fill_value": -1.0,
+  "invalid_fill_value": null,
   "b1_map_file": null
 }

@@ -14,6 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "python"))
 
 from parametric_pipeline import ParametricT1Config, run_parametric_t1_pipeline  # noqa: E402
+import parametric_pipeline as pp  # noqa: E402
 
 
 def _write_tiny_vfa_fixture(
@@ -403,3 +404,114 @@ def test_parametric_t1_pipeline_applies_xy_smoothing(tmp_path: Path) -> None:
     raw_t1 = nib.load(str(summary_raw["outputs"]["t1_map_path"])).get_fdata()
     smoothed_t1 = nib.load(str(summary_smoothed["outputs"]["t1_map_path"])).get_fdata()
     assert not np.allclose(raw_t1, smoothed_t1, rtol=0.0, atol=0.0)
+
+
+@pytest.mark.integration
+def test_parametric_t1_pipeline_nonlinear_cpu_backend_reports_summary(tmp_path: Path) -> None:
+    vfa_path = tmp_path / "tiny_backend_cpu_vfa.nii.gz"
+    flip_angles, tr_ms = _write_tiny_vfa_fixture(vfa_path)
+    payload = {
+        "output_dir": str(tmp_path / "out_backend_cpu"),
+        "vfa_files": [str(vfa_path)],
+        "flip_angles_deg": flip_angles,
+        "tr_ms": tr_ms,
+        "fit_type": "t1_fa_fit",
+        "backend": "cpu",
+        "output_basename": "T1_map",
+        "output_label": "tiny_backend_cpu",
+        "rsquared_threshold": 0.2,
+        "write_r_squared": False,
+        "write_rho_map": False,
+    }
+
+    summary = run_parametric_t1_pipeline(ParametricT1Config.from_dict(payload))
+    backend = summary["resolved_inputs"]["backend"]
+    assert backend["requested"] == "cpu"
+    assert backend["selected"] == "cpu"
+    assert backend["acceleration_backend"] == "none"
+
+
+@pytest.mark.integration
+def test_parametric_t1_pipeline_nonlinear_auto_backend_falls_back_to_cpu(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vfa_path = tmp_path / "tiny_backend_auto_vfa.nii.gz"
+    flip_angles, tr_ms = _write_tiny_vfa_fixture(vfa_path)
+
+    monkeypatch.setattr(
+        pp,
+        "probe_acceleration_backend",
+        lambda: {
+            "available": False,
+            "backend": "none",
+            "reason": "test fallback path",
+            "pygpufit_imported": False,
+            "pycpufit_imported": False,
+            "pygpufit_error": "",
+            "pycpufit_error": "",
+        },
+    )
+
+    payload = {
+        "output_dir": str(tmp_path / "out_backend_auto"),
+        "vfa_files": [str(vfa_path)],
+        "flip_angles_deg": flip_angles,
+        "tr_ms": tr_ms,
+        "fit_type": "t1_fa_fit",
+        "backend": "auto",
+        "output_basename": "T1_map",
+        "output_label": "tiny_backend_auto",
+        "rsquared_threshold": 0.2,
+        "write_r_squared": False,
+        "write_rho_map": False,
+    }
+
+    summary = run_parametric_t1_pipeline(ParametricT1Config.from_dict(payload))
+    backend = summary["resolved_inputs"]["backend"]
+    assert backend["requested"] == "auto"
+    assert backend["selected"] == "cpu"
+    assert backend["acceleration_backend"] == "none"
+
+
+@pytest.mark.integration
+def test_accelerated_t1_fit_marks_nonconverged_states_as_nan(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeConstraintType:
+        LOWER_UPPER = 3
+
+    class _FakeEstimatorID:
+        LSE = 0
+
+    class _FakeModelID:
+        T1_FA_EXPONENTIAL = 1
+
+    class _FakeFitModule:
+        ConstraintType = _FakeConstraintType
+        EstimatorID = _FakeEstimatorID
+        ModelID = _FakeModelID
+
+        @staticmethod
+        def fit_constrained(**_: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+            parameters = np.asarray([[1200.0, 900.0], [1300.0, 1100.0]], dtype=np.float32)
+            states = np.asarray([0, 1], dtype=np.int32)
+            chi = np.asarray([0.1, 0.2], dtype=np.float32)
+            n_iterations = np.asarray([8, 12], dtype=np.int32)
+            exec_time = np.asarray([0.0, 0.0], dtype=np.float32)
+            return parameters, states, chi, n_iterations, exec_time
+
+    monkeypatch.setattr(pp, "_load_fit_module_for_acceleration", lambda _: _FakeFitModule)
+
+    vfa_data = np.asarray([[[100.0, 95.0, 90.0]], [[80.0, 75.0, 70.0]]], dtype=np.float64)
+    out = pp._fit_t1_fa_nonlinear_map_accelerated(
+        vfa_data=vfa_data,
+        flip_angles_deg=np.asarray([2.0, 5.0, 10.0], dtype=np.float64),
+        tr_ms=5.0,
+        rsquared_threshold=0.95,
+        invalid_fill_value=-1.0,
+        mask=None,
+        acceleration_backend="gpufit_cuda",
+    )
+
+    t1_map = np.asarray(out["t1_map"], dtype=np.float64)
+    assert np.isfinite(t1_map.reshape(-1)[0])
+    assert np.isnan(t1_map.reshape(-1)[1])
+    assert out["metrics"]["convergence_failed"] == 1

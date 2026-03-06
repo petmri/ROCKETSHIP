@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from functools import lru_cache
 import json
 import math
 from pathlib import Path
@@ -12,6 +13,9 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import numpy as np
 
 from parametric_models import t1_fa_nonlinear_fit, t1_fa_two_point_fit
+
+
+ALLOWED_BACKENDS = {"auto", "cpu", "gpufit"}
 
 
 def _json_default(value: Any) -> Any:
@@ -50,6 +54,7 @@ class ParametricT1Config:
     fit_type: str = "t1_fa_fit"
     output_basename: str = "T1_map"
     output_label: str = ""
+    backend: str = "auto"
     rsquared_threshold: float = 0.6
     tr_ms: Optional[float] = None
     flip_angles_deg: List[float] = field(default_factory=list)
@@ -82,6 +87,7 @@ class ParametricT1Config:
             fit_type=str(data.get("fit_type", "t1_fa_fit")),
             output_basename=str(data.get("output_basename", "T1_map")),
             output_label=str(data.get("output_label", "")),
+            backend=str(data.get("backend", "auto")),
             rsquared_threshold=float(data.get("rsquared_threshold", 0.6)),
             tr_ms=float(tr_value) if tr_value is not None else None,
             flip_angles_deg=[float(v) for v in flip_values],
@@ -101,6 +107,10 @@ class ParametricT1Config:
                 "Unsupported fit_type. Expected one of: "
                 "'t1_fa_linear_fit', 't1_fa_fit', 't1_fa_two_point_fit'"
             )
+
+        backend = self.backend.strip().lower()
+        if backend not in ALLOWED_BACKENDS:
+            raise ValueError(f"Unsupported backend '{self.backend}'. Allowed: {sorted(ALLOWED_BACKENDS)}")
 
         if not self.vfa_files:
             raise ValueError("vfa_files must be non-empty")
@@ -290,6 +300,134 @@ def _resolve_b1_scale_map(config: ParametricT1Config, spatial_shape: Tuple[int, 
             f"{b1_mode} b1_map_file shape {b1_map.shape} does not match VFA spatial shape {spatial_shape}"
         )
     return b1_map, b1_path
+
+
+@lru_cache(maxsize=1)
+def probe_acceleration_backend() -> Dict[str, Any]:
+    """Detect available acceleration backend in priority order."""
+    pygpufit_module: Any = None
+    pycpufit_module: Any = None
+    pygpufit_error: Optional[str] = None
+    pycpufit_error: Optional[str] = None
+    cuda_available = False
+
+    try:
+        import pygpufit.gpufit as gf  # type: ignore
+
+        pygpufit_module = gf
+    except Exception as exc:
+        pygpufit_error = str(exc)
+
+    if pygpufit_module is not None:
+        try:
+            cuda_available = bool(pygpufit_module.cuda_available())
+        except Exception:
+            cuda_available = False
+
+    try:
+        import pycpufit.cpufit as cf  # type: ignore
+
+        pycpufit_module = cf
+    except Exception as exc:
+        pycpufit_error = str(exc)
+
+    if cuda_available:
+        return {
+            "backend": "gpufit_cuda",
+            "reason": "pygpufit imported and CUDA is available",
+            "cuda_available": True,
+            "pygpufit_imported": pygpufit_module is not None,
+            "pycpufit_imported": pycpufit_module is not None,
+            "pygpufit_error": pygpufit_error,
+            "pycpufit_error": pycpufit_error,
+        }
+
+    if pycpufit_module is not None:
+        return {
+            "backend": "cpufit_cpu",
+            "reason": "using pycpufit CPU backend",
+            "cuda_available": cuda_available,
+            "pygpufit_imported": pygpufit_module is not None,
+            "pycpufit_imported": True,
+            "pygpufit_error": pygpufit_error,
+            "pycpufit_error": pycpufit_error,
+        }
+
+    if pygpufit_module is not None:
+        return {
+            "backend": "gpufit_cpu_fallback",
+            "reason": "pygpufit imported without CUDA and pycpufit unavailable; using pygpufit fallback path",
+            "cuda_available": cuda_available,
+            "pygpufit_imported": True,
+            "pycpufit_imported": False,
+            "pygpufit_error": pygpufit_error,
+            "pycpufit_error": pycpufit_error,
+        }
+
+    return {
+        "backend": "none",
+        "reason": "no pygpufit/pycpufit backend detected",
+        "cuda_available": False,
+        "pygpufit_imported": False,
+        "pycpufit_imported": False,
+        "pygpufit_error": pygpufit_error,
+        "pycpufit_error": pycpufit_error,
+    }
+
+
+def _resolve_backend_selection(requested_backend: str) -> Dict[str, str]:
+    backend = requested_backend.strip().lower()
+    if backend not in ALLOWED_BACKENDS:
+        raise ValueError(f"Unsupported backend '{requested_backend}'. Allowed: {sorted(ALLOWED_BACKENDS)}")
+
+    if backend == "cpu":
+        return {
+            "requested_backend": backend,
+            "selected_backend": "cpu",
+            "acceleration_backend": "none",
+            "reason": "backend=cpu forces pure CPU fitting path",
+        }
+
+    probe = probe_acceleration_backend()
+    probe_backend = str(probe.get("backend", "none"))
+    probe_reason = str(probe.get("reason", ""))
+    pygpufit_imported = bool(probe.get("pygpufit_imported", False))
+
+    if backend == "gpufit":
+        if not pygpufit_imported:
+            raise RuntimeError("GPUfit backend requested but pygpufit could not be imported")
+        acceleration_backend = probe_backend if probe_backend != "none" else "gpufit_cpu_fallback"
+        return {
+            "requested_backend": backend,
+            "selected_backend": "gpufit",
+            "acceleration_backend": acceleration_backend,
+            "reason": f"backend=gpufit selected acceleration backend '{acceleration_backend}' ({probe_reason})",
+        }
+
+    if probe_backend in {"gpufit_cuda", "cpufit_cpu", "gpufit_cpu_fallback"}:
+        return {
+            "requested_backend": backend,
+            "selected_backend": "gpufit",
+            "acceleration_backend": probe_backend,
+            "reason": f"backend=auto selected acceleration backend '{probe_backend}' ({probe_reason})",
+        }
+
+    return {
+        "requested_backend": backend,
+        "selected_backend": "cpu",
+        "acceleration_backend": "none",
+        "reason": "backend=auto fell back to pure CPU fitting path",
+    }
+
+
+def _load_fit_module_for_acceleration(acceleration_backend: str) -> Any:
+    if acceleration_backend == "cpufit_cpu":
+        import pycpufit.cpufit as fit_module  # type: ignore
+
+        return fit_module
+    import pygpufit.gpufit as fit_module  # type: ignore
+
+    return fit_module
 
 
 def _apply_odd_echo_selection(vfa_data: np.ndarray, flip_angles_deg: np.ndarray) -> Tuple[np.ndarray, np.ndarray, List[int]]:
@@ -547,6 +685,153 @@ def _fit_t1_fa_model_map(
     }
 
 
+def _fit_t1_fa_nonlinear_map_accelerated(
+    *,
+    vfa_data: np.ndarray,
+    flip_angles_deg: np.ndarray,
+    tr_ms: float,
+    rsquared_threshold: float,
+    invalid_fill_value: float,
+    mask: Optional[np.ndarray],
+    acceleration_backend: str,
+) -> Dict[str, Any]:
+    if acceleration_backend == "none":
+        raise ValueError("Acceleration backend must not be 'none' for accelerated fitting")
+
+    fit_module = _load_fit_module_for_acceleration(acceleration_backend)
+    spatial_shape = vfa_data.shape[:-1]
+    n_voxels = int(np.prod(spatial_shape))
+    n_flips = int(vfa_data.shape[-1])
+
+    flat_signal = np.reshape(vfa_data, (n_voxels, n_flips)).astype(np.float64, copy=False)
+    finite_signal = np.all(np.isfinite(flat_signal), axis=1)
+    if mask is not None:
+        mask_flat = np.reshape(mask > 0, (n_voxels,))
+    else:
+        mask_flat = np.ones((n_voxels,), dtype=bool)
+
+    valid_input = mask_flat & finite_signal
+    t1_fit = np.full((n_voxels,), float(invalid_fill_value), dtype=np.float64)
+    rho_fit = np.full((n_voxels,), float(invalid_fill_value), dtype=np.float64)
+    r_squared = np.zeros((n_voxels,), dtype=np.float64)
+    sse = np.full((n_voxels,), np.nan, dtype=np.float64)
+    threshold_failed = np.zeros((n_voxels,), dtype=bool)
+    convergence_failed = np.zeros((n_voxels,), dtype=bool)
+
+    fit_indices = np.flatnonzero(valid_input)
+    if fit_indices.size > 0:
+        signal_valid = np.ascontiguousarray(flat_signal[fit_indices, :], dtype=np.float32)
+        scale = np.max(signal_valid, axis=1).astype(np.float32) * np.float32(10.0)
+        scale[~np.isfinite(scale) | (scale <= 0.0)] = np.float32(1.0)
+
+        initial_parameters = np.zeros((fit_indices.size, 2), dtype=np.float32)
+        initial_parameters[:, 0] = scale
+        initial_parameters[:, 1] = np.float32(500.0)
+
+        lower = np.zeros((fit_indices.size, 2), dtype=np.float32)
+        upper = np.full((fit_indices.size, 2), np.float32(np.inf), dtype=np.float32)
+        upper[:, 1] = np.float32(10000.0)
+        constraints = np.empty((fit_indices.size, 4), dtype=np.float32)
+        constraints[:, 0] = lower[:, 0]
+        constraints[:, 1] = upper[:, 0]
+        constraints[:, 2] = lower[:, 1]
+        constraints[:, 3] = upper[:, 1]
+
+        constraint_types = np.ascontiguousarray(
+            np.full((2,), int(fit_module.ConstraintType.LOWER_UPPER), dtype=np.int32)
+        )
+
+        tr_column = np.full((flip_angles_deg.size,), float(tr_ms), dtype=np.float32)
+        user_info = np.ascontiguousarray(
+            np.concatenate([flip_angles_deg.astype(np.float32), tr_column], axis=0),
+            dtype=np.float32,
+        )
+
+        model_id = int(getattr(fit_module.ModelID, "T1_FA_EXPONENTIAL"))
+        parameters, states, chi_squares, _, _ = fit_module.fit_constrained(
+            data=signal_valid,
+            weights=None,
+            model_id=model_id,
+            initial_parameters=np.ascontiguousarray(initial_parameters, dtype=np.float32),
+            constraints=np.ascontiguousarray(constraints, dtype=np.float32),
+            constraint_types=constraint_types,
+            tolerance=1e-12,
+            max_number_iterations=200,
+            parameters_to_fit=None,
+            estimator_id=int(fit_module.EstimatorID.LSE),
+            user_info=user_info,
+        )
+
+        params = np.asarray(parameters, dtype=np.float64)
+        states_arr = np.asarray(states, dtype=np.int32).reshape(-1)
+        failed = states_arr != 0
+        if np.any(failed):
+            params[failed, :] = np.nan
+
+        rho_vals = params[:, 0]
+        t1_vals = params[:, 1]
+        pred = np.empty((fit_indices.size, n_flips), dtype=np.float64)
+        fa_rad = np.deg2rad(np.asarray(flip_angles_deg, dtype=np.float64))[None, :]
+        with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+            e1 = np.exp(-float(tr_ms) / t1_vals[:, None])
+            numer = (1.0 - e1) * np.sin(fa_rad)
+            denom = 1.0 - e1 * np.cos(fa_rad)
+            pred[:, :] = np.abs(rho_vals[:, None] * (numer / denom))
+
+        y_true = np.asarray(signal_valid, dtype=np.float64)
+        residual = y_true - pred
+        sse_vals = np.sum(residual * residual, axis=1)
+        centered = y_true - np.mean(y_true, axis=1, keepdims=True)
+        sst_vals = np.sum(centered * centered, axis=1)
+        r2_vals = np.zeros((fit_indices.size,), dtype=np.float64)
+        valid_sst = sst_vals > 0.0
+        r2_vals[valid_sst] = 1.0 - (sse_vals[valid_sst] / sst_vals[valid_sst])
+        r2_vals[~np.isfinite(r2_vals)] = 0.0
+
+        # MATLAB calculateMap gpufit path keeps convergence failures as NaN and does
+        # not reject by rsquared_threshold in the GPU branch.
+        keep_local = (~failed) & np.isfinite(t1_vals) & np.isfinite(rho_vals)
+
+        t1_fit[fit_indices[keep_local]] = t1_vals[keep_local]
+        rho_fit[fit_indices[keep_local]] = rho_vals[keep_local]
+        t1_fit[fit_indices[failed]] = np.nan
+        rho_fit[fit_indices[failed]] = np.nan
+        r_squared[fit_indices] = r2_vals
+        sse[fit_indices] = sse_vals
+        convergence_failed[fit_indices] = failed
+
+    t1_map = np.reshape(t1_fit, spatial_shape)
+    rho_map = np.reshape(rho_fit, spatial_shape)
+    r_squared_map = np.reshape(r_squared, spatial_shape)
+    sse_map = np.reshape(sse, spatial_shape)
+
+    valid_mask = (
+        np.isfinite(t1_fit)
+        & np.isfinite(rho_fit)
+        & (t1_fit != float(invalid_fill_value))
+        & mask_flat
+    )
+    return {
+        "t1_map": t1_map,
+        "rho_map": rho_map,
+        "r_squared_map": r_squared_map,
+        "sse_map": sse_map,
+        "metrics": {
+            "total_voxels": int(n_voxels),
+            "mask_voxels": int(mask_flat.sum()),
+            "valid_fits": int(valid_mask.sum()),
+            "threshold_failed": int((threshold_failed & mask_flat).sum()),
+            "convergence_failed": int((convergence_failed & mask_flat).sum()),
+            "finite_signal_voxels": int((finite_signal & mask_flat).sum()),
+            "b1_valid_voxels": int(mask_flat.sum()),
+            "t1_mean_ms": float(np.mean(t1_fit[valid_mask])) if np.any(valid_mask) else float("nan"),
+            "t1_median_ms": float(np.median(t1_fit[valid_mask])) if np.any(valid_mask) else float("nan"),
+            "r2_mean": float(np.mean(r_squared[mask_flat])) if np.any(mask_flat) else float("nan"),
+            "r2_median": float(np.median(r_squared[mask_flat])) if np.any(mask_flat) else float("nan"),
+        },
+    }
+
+
 def _default_output_label(config: ParametricT1Config) -> str:
     first_name = config.vfa_files[0].name
     if first_name.endswith(".nii.gz"):
@@ -569,6 +854,7 @@ def run_parametric_t1_pipeline(
         output_dir=str(config.output_dir),
         fit_type=config.fit_type,
         rsquared_threshold=float(config.rsquared_threshold),
+        backend=config.backend,
     )
 
     vfa_data, affine, header = _load_vfa_data(config)
@@ -613,6 +899,7 @@ def run_parametric_t1_pipeline(
     )
 
     fit_type = config.fit_type.strip().lower()
+    backend_info: Optional[Dict[str, str]] = None
     if fit_type == "t1_fa_linear_fit":
         fit_result = _fit_t1_fa_linear_map(
             vfa_data=vfa_data,
@@ -624,15 +911,55 @@ def run_parametric_t1_pipeline(
             b1_scale_map=b1_scale_map,
         )
     elif fit_type == "t1_fa_fit":
-        fit_result = _fit_t1_fa_model_map(
-            vfa_data=vfa_data,
-            flip_angles_deg=flip_angles_deg,
-            tr_ms=tr_ms,
-            rsquared_threshold=float(config.rsquared_threshold),
-            invalid_fill_value=float(config.invalid_fill_value),
-            mask=mask,
-            b1_scale_map=b1_scale_map,
-            fit_fn=t1_fa_nonlinear_fit,
+        backend_info = _resolve_backend_selection(config.backend)
+        acceleration_backend = backend_info["acceleration_backend"]
+        # The accelerated model mirrors MATLAB's gpufit path and currently does not
+        # support B1-corrected FA fitting. Use CPU path when B1 scaling is active.
+        has_b1_scaling = b1_scale_map is not None and (not np.allclose(b1_scale_map, 1.0))
+        if has_b1_scaling and acceleration_backend != "none":
+            if config.backend.strip().lower() == "gpufit":
+                raise ValueError(
+                    "backend='gpufit' is incompatible with B1-corrected fitting for t1_fa_fit. "
+                    "Use backend='cpu' or disable B1 scaling."
+                )
+            acceleration_backend = "none"
+            backend_info = {
+                "requested_backend": backend_info["requested_backend"],
+                "selected_backend": "cpu",
+                "acceleration_backend": "none",
+                "reason": "B1 scaling active; using CPU nonlinear solver",
+            }
+
+        if acceleration_backend == "none":
+            fit_result = _fit_t1_fa_model_map(
+                vfa_data=vfa_data,
+                flip_angles_deg=flip_angles_deg,
+                tr_ms=tr_ms,
+                rsquared_threshold=float(config.rsquared_threshold),
+                invalid_fill_value=float(config.invalid_fill_value),
+                mask=mask,
+                b1_scale_map=b1_scale_map,
+                fit_fn=t1_fa_nonlinear_fit,
+            )
+        else:
+            fit_result = _fit_t1_fa_nonlinear_map_accelerated(
+                vfa_data=vfa_data,
+                flip_angles_deg=flip_angles_deg,
+                tr_ms=tr_ms,
+                rsquared_threshold=float(config.rsquared_threshold),
+                invalid_fill_value=float(config.invalid_fill_value),
+                mask=mask,
+                acceleration_backend=acceleration_backend,
+            )
+
+        _emit_event(
+            event_callback,
+            "backend_resolved",
+            requested=backend_info["requested_backend"],
+            selected=backend_info["selected_backend"],
+            acceleration_backend=backend_info["acceleration_backend"],
+            reason=backend_info["reason"],
+            b1_scaling_active=bool(has_b1_scaling),
         )
     else:
         fit_result = _fit_t1_fa_model_map(
@@ -685,6 +1012,12 @@ def run_parametric_t1_pipeline(
             "xy_smooth_sigma": float(config.xy_smooth_sigma),
             "b1_mode": b1_mode,
             "b1_map_path": str(b1_map_path) if b1_map_path else None,
+            "backend": {
+                "requested": backend_info["requested_backend"] if backend_info else "cpu",
+                "selected": backend_info["selected_backend"] if backend_info else "cpu",
+                "acceleration_backend": backend_info["acceleration_backend"] if backend_info else "none",
+                "reason": backend_info["reason"] if backend_info else "non-accelerated fit type",
+            },
         },
         "outputs": {
             "t1_map_path": str(t1_path),
