@@ -695,14 +695,15 @@ for model_index=1:numel(dce_model_list)
     if number_rois > 0
         D_vars.Ct = roi_series;
         D_vars.Ct_original = roi_series_original;
+        D_vars.title = ['DCE Curve Fit - ' cur_dce_model ' ' roi_data{1}.ID];
     else
         % If no ROIs, use empty arrays
         D_vars.Ct = [];
         D_vars.Ct_original = [];
+        D_vars.title = ['DCE Curve Fit - ' cur_dce_model];
     end
     D_vars.show_original = true;
     D_vars.show_ci = true;
-    D_vars.title = ['DCE Curve Fit - ' cur_dce_model ' ' roi_data{1}.ID];
     D_vars.x_units = 'Time (min)';
     D_vars.y_units = 'Concentration (mM)';
 
