@@ -326,7 +326,7 @@ for model_index=1:numel(dce_model_list)
         roi_name = [];
         roi_ext = [];
         %After sanitizing make sure we have some left
-        if number_rois~=0
+        if number_rois>0
             [~, roi_name, roi_ext] = arrayfun(@(x) fileparts(x{:}), roi_list, 'UniformOutput', false);
             
             %Load ROI, find the selected voxels
@@ -446,7 +446,7 @@ for model_index=1:numel(dce_model_list)
     % return;
     
     % a1) smoothing in image domain
-    if xy_smooth_size~=0 && fit_voxels
+    if xy_smooth_size>0 && fit_voxels
         % original_timepoint = NaN(size(currentimg));
         original_timepoint = zeros(size(currentimg));
         % make size 3*sigma rounded to nearest odd
@@ -685,7 +685,9 @@ for model_index=1:numel(dce_model_list)
         % disp(['File MD5 hash: ' mat_md5])
     end
     D_vars = fit_data;
-    D_vars.fit_parameters = D_vars.roi_results;
+    if number_rois > 0
+        D_vars.fit_parameters = D_vars.roi_results;
+    end
 
     % Add all data needed for plot_dce_curve function
     D_vars.Cp = xdata{1}.Cp;
@@ -815,7 +817,7 @@ for model_index=1:numel(dce_model_list)
     
     
     % Write ROI results
-    if number_rois~=0
+    if number_rois>0
         xls_results = [roi_list roi_name mat2cell(roi_results,ones(1,size(roi_results,1)),ones(1,size(roi_results,2)))];
         xls_results = [headings; xls_results];
         xls_path = [results_base '_rois.xls'];
