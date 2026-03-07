@@ -152,7 +152,7 @@ jobs:
       - name: Run T1 mapping
         uses: matlab-actions/run-command@v2
         with:
-          command: addpath .; addpath dce/; addpath external_programs/; addpath external_programs/niftitools/; addpath parametric_scripts/; addpath parametric_scripts/custom_scripts/; T1mapping_fit('test_data/BIDS_test/rawdata/sub-01/ses-01/anat/', 'test_data/BIDS_test/derivatives/sub-01/ses-01/anat/', 'sub-01_ses-01_space-DCEref_desc-bfczunified_VFA.nii')
+          command: addpath .; addpath dce/; addpath external_programs/; addpath external_programs/niftitools/; addpath parametric_scripts/; addpath parametric_scripts/custom_scripts/; T1mapping_fit('tests/data/BIDS_test/rawdata/sub-01/ses-01/anat/', 'tests/data/BIDS_test/derivatives/sub-01/ses-01/anat/', 'sub-01_ses-01_space-DCEref_desc-bfczunified_VFA.nii')
 
       - name: Run Algorithm Unit Tests
         uses: matlab-actions/run-command@v2
@@ -167,12 +167,12 @@ jobs:
       - name: Run DCE (Full)
         uses: matlab-actions/run-command@v2
         with:
-          command: run_dce_cli('test_data/BIDS_test/rawdata/sub-01/ses-01/', 'test_data/BIDS_test/derivatives/sub-01/ses-01/')
+          command: run_dce_cli('tests/data/BIDS_test/rawdata/sub-01/ses-01/', 'tests/data/BIDS_test/derivatives/sub-01/ses-01/')
 
       - name: Upload Ktrans result
         uses: actions/upload-artifact@v6
         with:
           name: Ktrans_result_${{ matrix.os }}-${{ matrix.release }}
-          path: test_data/BIDS_test/derivatives/sub-01/ses-01/dce/dce_patlak_fit_Ktrans.nii
+          path: tests/data/BIDS_test/derivatives/sub-01/ses-01/dce/dce_patlak_fit_Ktrans.nii
           retention-days: 7
           if-no-files-found: error
