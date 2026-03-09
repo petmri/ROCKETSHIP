@@ -226,7 +226,8 @@ function run_dce_cli(subject_source_path, subject_tp_path)
             disp(L.message)
             if strcmp(L.message, "Index exceeds the number of array elements. Index must not exceed 0.") ...
                     || strcmp(L.identifier,'AIFbiexpcon:No_Baseline') ...
-                    || strcmp(L.identifier, 'curvefit:fittype:invalidExpression')
+                    || strcmp(L.identifier, 'curvefit:fittype:invalidExpression') ...
+                    || contains(L.message, 'Exiting due to infeasibility')
                 if start_t > 2
                     start_t = start_t - 1;
                 else
