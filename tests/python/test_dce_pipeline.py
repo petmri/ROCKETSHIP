@@ -1224,6 +1224,10 @@ class TestDcePipeline:
             assert result["impl"] == "real"
             assert result["aif_name"] == "fitted"
             assert "fit_params_cp" in result
+            assert result["fit_params_cp"].shape == (6,)
+            assert result["fit_params_stlv"].shape == (6,)
+            assert float(result["fit_t0_exp_cp"]) > float(result["fit_t_base_end_cp"])
+            assert float(result["fit_t0_exp_stlv"]) > float(result["fit_t_base_end_stlv"])
             assert result["arrays"]["Cp_use"].shape == result["arrays"]["CpROI"].shape
 
     def test_stage_b_real_prefers_stage_a_auto_injection_minutes(self) -> None:

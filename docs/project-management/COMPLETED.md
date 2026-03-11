@@ -102,6 +102,7 @@ Completed items moved from `TODO.md` on 2026-03-05 to keep the active backlog sh
 Historical snapshot entries moved out of active status view:
 - [x] Python DCE timing metadata resolution update (2026-03-03): JSON frame-spacing branches (`RepetitionTime` with `RepetitionTimeExcitation`, `AcquisitionDuration`, `TriggerDelayTime/n_reps`, and existing `time_resolution_sec` / `TemporalResolution`).
 - [x] Python DCE timing/injection parity update (2026-03-03): MATLAB-style `start_t`/`end_t` clipping and auto injection behavior with legacy Sobel parity.
+- [x] Downsample Tofts parity realignment (2026-03-09): used commit `8ef4988` as the reference change point, added MATLAB-vs-Python Stage-A/B diagnostic exporters, ported six-parameter Stage-B AIF timing to Python, and aligned dataset-backed parity fixtures with post-`8ef4988` auto baseline/injection timing.
 - [x] Removal of Python runtime scan-parameter fallbacks from `script_preferences.txt` (2026-03-03).
 - [x] Batch DCE per-session metadata-preference update with Stage-A metadata provenance fields (2026-03-02).
 

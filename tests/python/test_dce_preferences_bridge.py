@@ -125,7 +125,7 @@ def test_force_cpu_preference_overrides_backend_auto(_probe_mock: object) -> Non
 @patch("scipy.optimize.least_squares")
 def test_aif_advanced_preferences_flow_into_fit_kwargs(least_squares_mock: object) -> None:
     class _DummyResult:
-        x = np.array([1.0, 1.0, 1.0, 0.1], dtype=np.float64)
+        x = np.array([1.0, 1.0, 1.0, 0.1, 0.3, 0.2], dtype=np.float64)
         success = True
 
     least_squares_mock.return_value = _DummyResult()
@@ -159,3 +159,30 @@ def test_aif_advanced_preferences_flow_into_fit_kwargs(least_squares_mock: objec
         assert float(kwargs["ftol"]) == pytest.approx(1e-8)
         assert float(kwargs["xtol"]) == pytest.approx(1e-9)
         assert kwargs["loss"] == "cauchy"
+        assert kwargs["x0"].shape == (6,)
+        assert kwargs["bounds"][0].shape == (6,)
+        assert kwargs["bounds"][1].shape == (6,)
+
+
+@pytest.mark.integration
+def test_aif_fit_returns_transition_times() -> None:
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp = Path(tmp_dir)
+        prefs = _write_prefs(tmp / "dce_preferences.txt", [])
+        config = _make_config(tmp, prefs)
+        timer = np.linspace(0.0, 1.0, num=8, dtype=np.float64)
+        curve = np.array([0.0, 0.0, 0.2, 1.1, 0.9, 0.6, 0.4, 0.25], dtype=np.float64)
+
+        result = _fit_aif_biexp(
+            config=config,
+            timer=timer,
+            curve=curve,
+            start_injection_min=timer[2],
+            end_injection_min=timer[4],
+            fitting_au=False,
+        )
+
+        assert result["params"].shape == (6,)
+        assert float(result["t_base_end"]) == pytest.approx(float(result["params"][4]))
+        assert float(result["t0_exp"]) == pytest.approx(float(result["params"][5]))
+        assert float(result["t0_exp"]) > float(result["t_base_end"])

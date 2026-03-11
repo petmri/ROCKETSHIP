@@ -6,7 +6,7 @@ Capture the current measurable state of the transition.
 Use this file for present-tense status only: latest test/qualification outcomes, open blockers, and active risks.
 Do not maintain long task lists here (use `TODO.md`) and do not archive historical completion logs here (use `COMPLETED.md`).
 
-## Snapshot (2026-03-05)
+## Snapshot (2026-03-09)
 
 ### Automated Baseline
 - Command: `.venv/bin/python -m pytest tests/python -q`
@@ -29,12 +29,16 @@ Do not maintain long task lists here (use `TODO.md`) and do not archive historic
 1. Accelerated backend behavior remains model/session dependent outside the primary passing packet.
 2. CUDA/GPUfit runtime verification coverage is still limited.
 3. T1 and Part E need broader external-cohort qualification evidence before merge confidence is complete.
+4. Real-data parity can still regress when dataset-backed Python checks drift from the MATLAB reference baseline-generation policy.
 
 ## Current Technical State Notes
 - Accelerated DCE tolerance default is `gpu_tolerance=1e-6`; this unblocked prior accelerated `ex_tofts` finiteness failures seen with tighter settings.
 - Stage-D fallback protections remain active for all-nonfinite accelerated outputs.
 - Part E contract input is NPZ (`stage_overrides.write_postfit_arrays=true`), avoiding prior `.mat` compatibility friction.
 - Real-data Stage-A parameter policy remains strict: no silent scan-parameter defaults.
+- The Python Stage-B fitted AIF path now includes MATLAB-style six-parameter timing (`A, B, c, d, t_base_end, t0_exp`).
+- Downsample Tofts parity for `bbb_p19_downsample_x3y3` was restored after aligning the dataset-backed Python parity fixture with post-`8ef4988` MATLAB auto baseline/injection timing (`steady_state_auto_method=find_end_ss`, `auto_find_injection=1`).
+- New MATLAB-vs-Python Stage-A/B diagnostics in `tests/python/run_dce_stage_ab_diagnostics.py` confirm exact Stage-D Tofts fit-preference parity and near-identical Stage-B plasma AIF output once timing policy is aligned.
 
 ## Immediate Next Status Checkpoints
 1. Re-run qualification after phantom matched-model data generation and tolerance tuning.

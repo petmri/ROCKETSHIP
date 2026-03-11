@@ -2159,48 +2159,51 @@ def _resolve_stage_b_injection_window(
 
 def _aif_biexp_con(
     timer: np.ndarray,
-    step: np.ndarray,
     a: float,
     b: float,
     c: float,
     d: float,
+    t_base_end: float,
+    t0_exp: float,
     fitting_au: bool,
     baseline: float,
 ) -> np.ndarray:
     time = np.asarray(timer, dtype=np.float64).reshape(-1)
-    stepv = np.asarray(step, dtype=np.float64).reshape(-1)
-    if time.size != stepv.size:
-        raise ValueError("timer and step must have same length")
-
-    on = np.flatnonzero(stepv > 0)
     out = np.zeros(time.size, dtype=np.float64)
     base = float(baseline) if fitting_au else 0.0
-    if on.size == 0:
-        out.fill(base)
+    if time.size == 0:
         return out
 
-    start_idx = int(on[0])
-    end_idx = int(on[-1])
+    t_base = float(t_base_end)
+    t_exp = max(float(t0_exp), t_base + np.finfo(np.float64).eps)
 
-    idx = np.arange(time.size)
-    pre = idx < start_idx
-    slope = (idx >= start_idx) & (idx < end_idx)
-    post = idx >= end_idx
+    pre = time < t_base
+    slope = (time >= t_base) & (time < t_exp)
+    post = time >= t_exp
 
     out[pre] = base
 
     if np.any(slope):
-        t_start = float(time[start_idx])
-        t_end = float(time[end_idx])
-        duration = max(1e-12, t_end - t_start)
-        frac = (time[slope] - t_start) / duration
+        duration = max(np.finfo(np.float64).eps, t_exp - t_base)
+        frac = (time[slope] - t_base) / duration
         out[slope] = base + ((a - base) + (b - base)) * frac
 
     if np.any(post):
-        dt = np.maximum(0.0, time[post] - float(time[end_idx]))
+        dt = np.maximum(0.0, time[post] - t_exp)
         out[post] = a * np.exp(-c * dt) + b * np.exp(-d * dt)
 
     return out
+
+
+def _timer_epsilon(timer: np.ndarray) -> float:
+    time = np.asarray(timer, dtype=np.float64).reshape(-1)
+    if time.size < 2:
+        return float(np.finfo(np.float64).eps)
+    diffs = np.diff(np.unique(time))
+    positive = diffs[diffs > 0]
+    if positive.size == 0:
+        return float(np.finfo(np.float64).eps)
+    return max(float(np.min(positive)) * 1e-6, float(np.finfo(np.float64).eps))
 
 
 def _parse_4float_override(config: DcePipelineConfig, key: str, default: List[float]) -> np.ndarray:
@@ -2288,14 +2291,58 @@ def _fit_aif_biexp(
     initial[1] = max(1e-12, maxer * 0.5)
     initial = np.minimum(np.maximum(initial, lower + 1e-12), upper - 1e-12)
 
+    time_eps = _timer_epsilon(timer)
+    t_base_end_lower = float(timer[start_idx])
+    t_base_end_upper_idx = min(timer.size - 1, max(start_idx, end_idx - 1))
+    t_base_end_upper = float(timer[t_base_end_upper_idx])
+    if t_base_end_upper <= t_base_end_lower:
+        t_base_end_upper = min(float(timer[-1]), t_base_end_lower + time_eps)
+
+    t_base_end_init_idx = min(timer.size - 1, start_idx + 1)
+    t_base_end_init = float(timer[t_base_end_init_idx])
+    t_base_end_init = min(max(t_base_end_init, t_base_end_lower + time_eps), t_base_end_upper)
+
+    t0_exp_upper_idx = min(timer.size - 1, end_idx + max(1, int(round(0.2 * timer.size))))
+    t0_exp_upper = float(timer[t0_exp_upper_idx])
+    t0_exp_init = float(timer[end_idx])
+
+    delta_lower = time_eps
+    delta_upper = max(delta_lower, t0_exp_upper - t_base_end_lower)
+    delta_init = max(delta_lower, t0_exp_init - t_base_end_init)
+    delta_init = min(delta_init, delta_upper)
+
+    lower6 = np.concatenate([lower, np.array([t_base_end_lower, delta_lower], dtype=np.float64)])
+    upper6 = np.concatenate([upper, np.array([t_base_end_upper, delta_upper], dtype=np.float64)])
+    initial6 = np.concatenate([initial, np.array([t_base_end_init, delta_init], dtype=np.float64)])
+    initial6 = np.minimum(np.maximum(initial6, lower6 + 1e-12), upper6 - 1e-12)
+
     aif_maxiter = int(_safe_float(_stage_override(config, "aif_MaxIter", 1000), 1000))
     max_nfev = int(_safe_float(_stage_override(config, "aif_MaxFunEvals", aif_maxiter), aif_maxiter))
     aif_tol_fun = max(_safe_float(_stage_override(config, "aif_TolFun", 1e-20), 1e-20), np.finfo(np.float64).eps)
     aif_tol_x = max(_safe_float(_stage_override(config, "aif_TolX", 1e-23), 1e-23), np.finfo(np.float64).eps)
     aif_loss = _scipy_loss_from_robust(_stage_override(config, "aif_Robust", "off"))
 
-    def fit_fn(tvals: np.ndarray, a: float, b: float, c: float, d: float) -> np.ndarray:
-        return _aif_biexp_con(tvals, fit_step, a, b, c, d, fitting_au=fitting_au, baseline=baseline)
+    def fit_fn(
+        tvals: np.ndarray,
+        a: float,
+        b: float,
+        c: float,
+        d: float,
+        t_base_end: float,
+        delta_t: float,
+    ) -> np.ndarray:
+        t0_exp = float(t_base_end) + max(float(delta_t), time_eps)
+        return _aif_biexp_con(
+            tvals,
+            a,
+            b,
+            c,
+            d,
+            t_base_end,
+            t0_exp,
+            fitting_au=fitting_au,
+            baseline=baseline,
+        )
 
     # Match MATLAB Stage-B weighting in AIFbiexpfithelp:
     # weights are zero through peak and 10 thereafter.
@@ -2306,14 +2353,22 @@ def _fit_aif_biexp(
     sqrt_weights = np.sqrt(weights)
 
     def weighted_residual(params: np.ndarray) -> np.ndarray:
-        pred = fit_fn(timer, float(params[0]), float(params[1]), float(params[2]), float(params[3]))
+        pred = fit_fn(
+            timer,
+            float(params[0]),
+            float(params[1]),
+            float(params[2]),
+            float(params[3]),
+            float(params[4]),
+            float(params[5]),
+        )
         return (pred - curve) * sqrt_weights
 
     fit_success = True
-    params = initial.copy()
+    params = initial6.copy()
     try:
         lsq_kwargs: Dict[str, Any] = {
-            "bounds": (lower, upper),
+            "bounds": (lower6, upper6),
             "method": "trf",
             "max_nfev": max_nfev,
             "ftol": aif_tol_fun,
@@ -2322,20 +2377,38 @@ def _fit_aif_biexp(
         if aif_loss != "linear":
             lsq_kwargs["loss"] = aif_loss
 
-        result = least_squares(weighted_residual, x0=initial, **lsq_kwargs)
+        result = least_squares(weighted_residual, x0=initial6, **lsq_kwargs)
         params = np.asarray(result.x, dtype=np.float64)
         fit_success = bool(result.success)
     except Exception:
         fit_success = False
 
-    fitted = fit_fn(timer, float(params[0]), float(params[1]), float(params[2]), float(params[3]))
+    fitted = fit_fn(
+        timer,
+        float(params[0]),
+        float(params[1]),
+        float(params[2]),
+        float(params[3]),
+        float(params[4]),
+        float(params[5]),
+    )
+    t_base_end_fit = float(params[4])
+    t0_exp_fit = float(params[4] + max(params[5], time_eps))
+    fit_step_window = np.array([t_base_end_fit, t0_exp_fit], dtype=np.float64)
+    fit_params = np.array(
+        [float(params[0]), float(params[1]), float(params[2]), float(params[3]), t_base_end_fit, t0_exp_fit],
+        dtype=np.float64,
+    )
     return {
         "curve": fitted,
-        "params": np.asarray(params, dtype=np.float64),
-        "step": fit_step,
+        "params": fit_params,
+        "step": fit_step_window,
         "baseline": baseline,
         "max_index": max_idx,
-        "rsquare_adj": _adjusted_rsquare(curve, fitted, n_params=4),
+        "t_base_end": t_base_end_fit,
+        "t0_exp": t0_exp_fit,
+        "fit_seed_window": np.array([float(timer[start_idx]), float(timer[end_idx])], dtype=np.float64),
+        "rsquare_adj": _adjusted_rsquare(curve, fitted, n_params=6),
         "fit_success": fit_success,
     }
 
@@ -2605,6 +2678,10 @@ def _run_stage_b_real(config: DcePipelineConfig, stage_a: Dict[str, Any]) -> Dic
             "fit_rsquared_stlv_adj": float(fit_stlv["rsquare_adj"]),
             "fit_params_cp": fit_cp["params"],
             "fit_params_stlv": fit_stlv["params"],
+            "fit_t_base_end_cp": float(fit_cp["t_base_end"]),
+            "fit_t0_exp_cp": float(fit_cp["t0_exp"]),
+            "fit_t_base_end_stlv": float(fit_stlv["t_base_end"]),
+            "fit_t0_exp_stlv": float(fit_stlv["t0_exp"]),
         }
         aif_name = "fitted"
     elif aif_mode == "raw":

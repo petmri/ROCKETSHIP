@@ -196,6 +196,19 @@ def _make_config(
     )
 
 
+def _make_tofts_post_8ef4988_config(paths: dict, out_dir: Path, *, backend: str) -> DcePipelineConfig:
+    config = _make_config(paths, out_dir, backend=backend, models=["tofts"])
+    overrides = dict(config.stage_overrides)
+    overrides.pop("start_injection_min", None)
+    overrides.pop("end_injection_min", None)
+    overrides.pop("steady_state_start", None)
+    overrides.pop("steady_state_end", None)
+    overrides["steady_state_auto_method"] = "find_end_ss"
+    overrides["auto_find_injection"] = 1
+    config.stage_overrides = overrides
+    return config
+
+
 def _load_nifti(path: Path) -> np.ndarray:
     return np.asarray(np.squeeze(nib.load(str(path)).get_fdata()), dtype=np.float64)
 
@@ -739,7 +752,7 @@ def test_downsample_bbb_p19_tofts_ktrans(
 
     with tempfile.TemporaryDirectory() as tmp:
         out_dir = Path(tmp) / "python_out"
-        result = run_dce_pipeline(_make_config(paths, out_dir, backend="auto", models=["tofts"]))
+        result = run_dce_pipeline(_make_tofts_post_8ef4988_config(paths, out_dir, backend="auto"))
         assert result["meta"]["status"] == "ok"
 
         py_ktrans = _load_nifti(out_dir / "Dyn-1_tofts_fit_Ktrans.nii.gz")
