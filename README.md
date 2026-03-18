@@ -147,6 +147,25 @@ source .venv/bin/activate
 python run_parametric_python_cli.py
 ```
 
+Run a single subject/session with path-first input discovery:
+
+```bash
+source .venv/bin/activate
+python run_parametric_python_case.py \
+  --subject-source /path/to/rawdata/sub-01/ses-01 \
+  --subject-tp /path/to/derivatives/t1prep/sub-01/ses-01 \
+  --output-dir /path/to/output/sub-01/ses-01
+```
+
+Single-case discovery behavior:
+
+- prefers unified DCEref VFA stacks under `derivatives/.../anat/*space-DCEref_desc-bfczunified_VFA.nii*`
+- otherwise uses canonical per-flip DCEref VFA files under `derivatives/.../anat/*_flip-XX_space-DCEref_VFA.nii*`
+- falls back to raw VFA files under `rawdata/.../anat/*flip-*_VFA.nii*`
+- uses raw VFA sidecars for `FlipAngle` and `RepetitionTime` when available
+- auto-detects `B1_scaled_FAreg.nii[.gz]` in derivatives first, then raw anat
+- defaults to `t1_fa_fit`; override with `--fit-type` if needed
+
 Default template location:
 
 - `/path/to/ROCKETSHIP/python/parametric_default.json`

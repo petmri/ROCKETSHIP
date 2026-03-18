@@ -93,6 +93,37 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Enable dataset-level BIDS qualification tests.",
     )
     group.addoption(
+        "--run-runtime-parity",
+        action="store_true",
+        default=False,
+        help="Enable Python-vs-MATLAB runtime parity tests for DCE and T1 workflows.",
+    )
+    group.addoption(
+        "--runtime-parity-matlab-cmd",
+        action="store",
+        default="matlab",
+        help="MATLAB command used by runtime parity tests (default: matlab).",
+    )
+    group.addoption(
+        "--runtime-parity-max-python-over-matlab-ratio",
+        action="store",
+        type=float,
+        default=1.5,
+        help="Maximum allowed Python/Matlab wall-clock runtime ratio for runtime parity tests.",
+    )
+    group.addoption(
+        "--runtime-parity-dce-root",
+        action="store",
+        default="",
+        help="Override DCE BIDS fixture root used by runtime parity tests.",
+    )
+    group.addoption(
+        "--runtime-parity-t1-root",
+        action="store",
+        default="",
+        help="Override T1 BIDS fixture root used by runtime parity tests.",
+    )
+    group.addoption(
         "--qualification-root",
         action="store",
         default="",
@@ -139,9 +170,34 @@ def run_qualification(request: pytest.FixtureRequest) -> bool:
 
 
 @pytest.fixture(scope="session")
+def run_runtime_parity(request: pytest.FixtureRequest) -> bool:
+    return bool(request.config.getoption("--run-runtime-parity"))
+
+
+@pytest.fixture(scope="session")
 def qualification_root(request: pytest.FixtureRequest) -> str:
     option_value = str(request.config.getoption("--qualification-root") or "").strip()
     return option_value
+
+
+@pytest.fixture(scope="session")
+def runtime_parity_matlab_cmd(request: pytest.FixtureRequest) -> str:
+    return str(request.config.getoption("--runtime-parity-matlab-cmd") or "matlab").strip()
+
+
+@pytest.fixture(scope="session")
+def runtime_parity_max_python_over_matlab_ratio(request: pytest.FixtureRequest) -> float:
+    return float(request.config.getoption("--runtime-parity-max-python-over-matlab-ratio"))
+
+
+@pytest.fixture(scope="session")
+def runtime_parity_dce_root(request: pytest.FixtureRequest) -> str:
+    return str(request.config.getoption("--runtime-parity-dce-root") or "").strip()
+
+
+@pytest.fixture(scope="session")
+def runtime_parity_t1_root(request: pytest.FixtureRequest) -> str:
+    return str(request.config.getoption("--runtime-parity-t1-root") or "").strip()
 
 
 @pytest.fixture(scope="session")

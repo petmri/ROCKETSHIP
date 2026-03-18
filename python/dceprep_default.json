@@ -33,7 +33,7 @@
   },
   "stage_overrides": {
     "dce_preferences_path": "",
-    "use_dce_preferences": true,
+    "use_dce_preferences": false,
     "stage_a_mode": "real",
     "stage_b_mode": "real",
     "stage_d_mode": "real",
@@ -45,6 +45,7 @@
     "fa_deg": null,
     "time_resolution_sec": null,
     "time_resolution_min": null,
+    "start_t": 3,
     "steady_state_start": 1,
     "steady_state_end": null,
     "steady_state_auto_method": "legacy_sobel",

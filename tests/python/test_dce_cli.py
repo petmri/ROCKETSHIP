@@ -18,7 +18,7 @@ import dce_cli  # noqa: E402
 
 
 @pytest.mark.unit
-def test_main_applies_dce_preferences_and_set_overrides() -> None:
+def test_main_applies_set_overrides() -> None:
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp = Path(tmp_dir)
         cfg_path = tmp / "config.json"
@@ -35,9 +35,6 @@ def test_main_applies_dce_preferences_and_set_overrides() -> None:
                 }
             )
         )
-        dce_pref = tmp / "dce_preferences.txt"
-        dce_pref.write_text("voxel_MaxFunEvals = 50\n")
-
         with patch("dce_cli.DcePipelineConfig.from_dict", return_value=object()) as from_dict_mock:
             with patch("dce_cli.run_dce_pipeline", return_value={"meta": {"status": "ok"}}):
                 with patch("builtins.print"):
@@ -45,8 +42,6 @@ def test_main_applies_dce_preferences_and_set_overrides() -> None:
                         [
                             "--config",
                             str(cfg_path),
-                            "--dce-preferences",
-                            str(dce_pref),
                             "--set",
                             "voxel_MaxFunEvals=123",
                             "--set",
@@ -60,7 +55,6 @@ def test_main_applies_dce_preferences_and_set_overrides() -> None:
         assert payload["stage_overrides"]["existing_key"] == "existing_value"
         assert payload["stage_overrides"]["voxel_MaxFunEvals"] == "123"
         assert payload["stage_overrides"]["blood_t1_ms"] == "1600"
-        assert payload["stage_overrides"]["dce_preferences_path"] == str(dce_pref.resolve())
 
 
 @pytest.mark.unit

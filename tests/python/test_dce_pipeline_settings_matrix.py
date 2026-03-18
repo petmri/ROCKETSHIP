@@ -181,11 +181,28 @@ def test_blood_t1_override_changes_aif_path(tiny_root: Path) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         config_default = _make_config(tiny_root, Path(tmp) / "default")
         stage_a_default = _run_stage_a_real(config_default)
+        assert stage_a_default["blood_t1_source"] == "aif_t1_map"
+        assert stage_a_default["blood_t1_override_sec"] is None
+        assert int(stage_a_default["blood_t1_voxel_count"]) == int(np.asarray(stage_a_default["arrays"]["T1LV"]).size)
+        assert float(stage_a_default["blood_t1_mean_sec"]) == pytest.approx(
+            float(np.mean(np.asarray(stage_a_default["arrays"]["T1LV"], dtype=np.float64)))
+        )
+        assert float(stage_a_default["blood_t1_median_sec"]) == pytest.approx(
+            float(np.median(np.asarray(stage_a_default["arrays"]["T1LV"], dtype=np.float64)))
+        )
+        assert float(stage_a_default["blood_t1_mean_ms"]) == pytest.approx(float(stage_a_default["blood_t1_mean_sec"]) * 1000.0)
+        assert float(stage_a_default["blood_t1_median_ms"]) == pytest.approx(float(stage_a_default["blood_t1_median_sec"]) * 1000.0)
 
         config_override = _make_config(tiny_root, Path(tmp) / "override", {"blood_t1_ms": 1600.0})
         stage_a_override = _run_stage_a_real(config_override)
 
         assert float(stage_a_override["blood_t1_override_sec"]) == pytest.approx(1.6)
+        assert stage_a_override["blood_t1_source"] == "override"
+        assert int(stage_a_override["blood_t1_voxel_count"]) == int(np.asarray(stage_a_override["arrays"]["T1LV"]).size)
+        assert float(stage_a_override["blood_t1_mean_sec"]) == pytest.approx(1.6)
+        assert float(stage_a_override["blood_t1_median_sec"]) == pytest.approx(1.6)
+        assert float(stage_a_override["blood_t1_mean_ms"]) == pytest.approx(1600.0)
+        assert float(stage_a_override["blood_t1_median_ms"]) == pytest.approx(1600.0)
         assert np.allclose(stage_a_override["arrays"]["T1LV"], 1.6)
 
         cp_default = np.mean(np.asarray(stage_a_default["arrays"]["Cp"], dtype=np.float64), axis=1)
@@ -200,6 +217,8 @@ def test_blood_t1_sec_override_alias(tiny_root: Path) -> None:
         config_override = _make_config(tiny_root, Path(tmp) / "override_sec", {"blood_t1_sec": 1.55})
         stage_a_override = _run_stage_a_real(config_override)
         assert float(stage_a_override["blood_t1_override_sec"]) == pytest.approx(1.55)
+        assert stage_a_override["blood_t1_source"] == "override"
+        assert float(stage_a_override["blood_t1_mean_ms"]) == pytest.approx(1550.0)
         assert np.allclose(stage_a_override["arrays"]["T1LV"], 1.55)
 
 
@@ -237,6 +256,8 @@ def test_script_level_blood_t1_alias(tiny_root: Path) -> None:
         config = _make_config(tiny_root, Path(tmp) / "alias_blood_t1", {"blood_t1": 1.62})
         stage_a = _run_stage_a_real(config)
         assert float(stage_a["blood_t1_override_sec"]) == pytest.approx(1.62)
+        assert stage_a["blood_t1_source"] == "override"
+        assert float(stage_a["blood_t1_mean_ms"]) == pytest.approx(1620.0)
         assert np.allclose(stage_a["arrays"]["T1LV"], 1.62)
 
 

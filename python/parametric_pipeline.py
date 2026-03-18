@@ -80,6 +80,9 @@ class ParametricT1Config:
         xy_smooth_raw = data.get("xy_smooth_sigma")
         if xy_smooth_raw is None:
             xy_smooth_raw = data.get("xy_smooth_size", 0.0)
+        invalid_fill_raw = data.get("invalid_fill_value", np.nan)
+        if invalid_fill_raw is None:
+            invalid_fill_raw = np.nan
 
         return cls(
             output_dir=_resolve_path(data["output_dir"], base_dir),
@@ -93,7 +96,7 @@ class ParametricT1Config:
             flip_angles_deg=[float(v) for v in flip_values],
             write_r_squared=bool(data.get("write_r_squared", True)),
             write_rho_map=bool(data.get("write_rho_map", False)),
-            invalid_fill_value=float(data.get("invalid_fill_value", -1.0)),
+            invalid_fill_value=float(invalid_fill_raw),
             odd_echoes=bool(data.get("odd_echoes", False)),
             xy_smooth_sigma=float(xy_smooth_raw),
             mask_file=_resolve_path(data["mask_file"], base_dir) if data.get("mask_file") else None,
@@ -885,8 +888,11 @@ def run_parametric_t1_pipeline(
     if config.mask_file is not None:
         mask_data, _, _ = _load_nifti(config.mask_file)
         mask = np.squeeze(mask_data)
-        if mask.shape != vfa_data.shape[:-1]:
-            raise ValueError(f"mask shape {mask.shape} does not match VFA spatial shape {vfa_data.shape[:-1]}")
+        expected_shape = vfa_data.shape[:-1]
+        if mask.shape != expected_shape:
+            if mask.size != int(np.prod(expected_shape)):
+                raise ValueError(f"mask shape {mask.shape} does not match VFA spatial shape {expected_shape}")
+            mask = np.reshape(mask, expected_shape)
     b1_scale_map, b1_map_path = _resolve_b1_scale_map(config, vfa_data.shape[:-1])
     b1_mode = "none"
     if b1_map_path is not None:

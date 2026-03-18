@@ -35,7 +35,7 @@
   },
   "stage_overrides": {
     "dce_preferences_path": "",
-    "use_dce_preferences": true,
+    "use_dce_preferences": false,
     "stage_a_mode": "real",
     "stage_b_mode": "real",
     "stage_d_mode": "real",

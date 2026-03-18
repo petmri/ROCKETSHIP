@@ -106,7 +106,6 @@ Optional runtime overrides:
 cd /path/to/ROCKETSHIP
 .venv/bin/python run_dce_python_cli.py \
   --config tests/python/dce_cli_config.example.json \
-  --dce-preferences /path/to/ROCKETSHIP/dce/dce_preferences.txt \
   --set voxel_MaxFunEvals=100 \
   --set blood_t1_ms=1600
 ```
@@ -304,9 +303,8 @@ Config fields are parsed by:
 
 Key expectations:
 
-- **Configuration priority**: Python workflows use `dce_default.json` as the primary config. Optional MATLAB-style `dce_preferences.txt` can override defaults. The precedence chain is:
-  - `dce_default.json` (base defaults)
-  - `dce_preferences.txt` (optional legacy override from `dce/dce_preferences.txt` or `./dce_preferences.txt`)
+- **Configuration priority**: Python workflows use JSON defaults and JSON config only. The precedence chain is:
+  - `dce_default.json` or `dceprep_default.json` (base defaults)
   - `stage_overrides` in JSON config (explicit overrides)
   - CLI arguments (final overrides)
 - Dynamic image + ROI/AIF/T1/noise masks are provided (NIfTI path lists)
@@ -342,9 +340,8 @@ Preference precedence (highest to lowest):
 
 1. CLI arguments (e.g., `--roi-mask-path`)
 2. `stage_overrides` in JSON config
-3. MATLAB-style `dce_preferences.txt` (optional legacy file)
-4. `dce_default.json` base values
-5. Python built-in fallback defaults
+3. `dce_default.json` or `dceprep_default.json` base values
+4. Python built-in fallback defaults
 
 Shared options documentation for CLI + GUI:
 

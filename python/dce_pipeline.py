@@ -308,10 +308,6 @@ def _parse_preference_file(path_str: str, mtime_ns: int) -> Dict[str, str]:
 
 
 def _resolve_dce_preferences_path(config: "DcePipelineConfig") -> Optional[Path]:
-    use_prefs = _to_bool(config.stage_overrides.get("use_dce_preferences", True), True)
-    if not use_prefs:
-        return None
-
     explicit = config.stage_overrides.get("dce_preferences_path")
     if explicit:
         path = Path(str(explicit)).expanduser().resolve()
@@ -319,13 +315,9 @@ def _resolve_dce_preferences_path(config: "DcePipelineConfig") -> Optional[Path]
             raise FileNotFoundError(f"dce_preferences file not found: {path}")
         return path
 
-    repo_default = Path(__file__).resolve().parents[2] / "dce" / "dce_preferences.txt"
-    if repo_default.exists():
-        return repo_default
-
-    cwd_default = Path.cwd() / "dce_preferences.txt"
-    if cwd_default.exists():
-        return cwd_default
+    use_prefs = _to_bool(config.stage_overrides.get("use_dce_preferences", False), False)
+    if not use_prefs:
+        return None
     return None
 
 
@@ -1837,6 +1829,10 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
         scale = (1.0 / t1_tum[j]) - np.mean(r1_toi[baseline_slice, j])
         r1_toi[:, j] = r1_toi[:, j] + scale
 
+    blood_t1_source = "override" if blood_t1_override_sec is not None else "aif_t1_map"
+    blood_t1_mean_sec = float(np.mean(t1_lv)) if t1_lv.size > 0 else None
+    blood_t1_median_sec = float(np.median(t1_lv)) if t1_lv.size > 0 else None
+
     cp = (r1_lv - (1.0 / t1_lv)[np.newaxis, :]) / (relaxivity * (1.0 - hematocrit))
     ct = (r1_toi - (1.0 / t1_tum)[np.newaxis, :]) / relaxivity
 
@@ -1886,6 +1882,12 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
         "metadata_sources": timing.get("metadata_sources"),
         "timepoint_window": time_window_info,
         "blood_t1_override_sec": blood_t1_override_sec,
+        "blood_t1_source": blood_t1_source,
+        "blood_t1_voxel_count": int(t1_lv.size),
+        "blood_t1_mean_sec": blood_t1_mean_sec,
+        "blood_t1_mean_ms": (float(blood_t1_mean_sec) * 1000.0 if blood_t1_mean_sec is not None else None),
+        "blood_t1_median_sec": blood_t1_median_sec,
+        "blood_t1_median_ms": (float(blood_t1_median_sec) * 1000.0 if blood_t1_median_sec is not None else None),
         "steady_state_time": [ss_start + 1, ss_end],
         "steady_state_auto": baseline_info,
         "start_injection": start_injection,
@@ -2612,7 +2614,7 @@ def _save_stage_b_qc_figure(
     ax2.legend(loc="best")
 
     fig.tight_layout()
-    out_path = output_dir / "dce_aif_fitting.png"
+    out_path = output_dir / "dceAIF_fitting.png"
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
     return {"aif_fitting_png": str(out_path)}
@@ -4217,7 +4219,7 @@ def run_dce_pipeline(
     duration_sec = time.perf_counter() - start_time
 
     # Extract backend from stage D
-    backend_used = str(stage_d.get("impl", "cpu"))
+    backend_used = str(stage_d.get("backend_used", stage_d.get("impl", "cpu")))
 
     # Build provenance
     provenance = {

@@ -43,7 +43,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, help="Optional override for output_dir in config")
     parser.add_argument("--checkpoint-dir", type=Path, help="Optional override for checkpoint_dir in config")
     parser.add_argument("--backend", choices=["auto", "cpu", "gpufit"], help="Optional override for backend in config")
-    parser.add_argument("--dce-preferences", type=Path, help="Optional path to MATLAB-style dce_preferences.txt (applied as Python defaults)")
     parser.add_argument("--set", dest="set_overrides", action="append", default=[], metavar="KEY=VALUE", help="Override stage_overrides key/value (repeatable)")
     parser.add_argument("--events", choices=["on", "off"], default="on", help="Emit JSON progress events on stdout (default: on)")
     parser.add_argument("--event-log", type=Path, help="Optional JSONL path for event log (default: <output_dir>/dce_pipeline_events.jsonl)")
@@ -77,8 +76,6 @@ def main(argv: list[str] | None = None) -> int:
         payload["backend"] = args.backend
 
     stage_overrides = dict(payload.get("stage_overrides", {}))
-    if args.dce_preferences:
-        stage_overrides["dce_preferences_path"] = str(args.dce_preferences.expanduser().resolve())
     stage_overrides.update(_parse_set_overrides(args.set_overrides))
     if stage_overrides:
         payload["stage_overrides"] = stage_overrides
