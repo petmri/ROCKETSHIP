@@ -37,6 +37,7 @@ ALLOWED_STAGE_A_MODES = {"real", "scaffold"}
 ALLOWED_STAGE_B_MODES = {"real", "scaffold", "auto"}
 ALLOWED_STAGE_D_MODES = {"real", "scaffold", "auto"}
 ALLOWED_STEADY_STATE_AUTO_METHODS = {"none", "legacy_sobel", "piecewise_constant", "glr", "tv"}
+ALLOWED_AIF_BIEXP_TIMING_METHODS = {"legacy_sobel", "fit_transition_times"}
 PIECEWISE_CONSTANT_BASELINE_FORWARD_DELTA_FRACTION = 0.01
 
 MODEL_SELECTION_ORDER = [
@@ -581,6 +582,14 @@ class DcePipelineConfig:
             )
         if aif_curve_mode == "imported" and self.imported_aif_path is None and not override_import_path:
             raise ValueError("stage_overrides.aif_curve_mode=imported requires imported_aif_path")
+        aif_biexp_timing_method = _normalize_aif_biexp_timing_method(
+            self.stage_overrides.get("aif_biexp_timing_method", None)
+        )
+        if aif_biexp_timing_method not in ALLOWED_AIF_BIEXP_TIMING_METHODS:
+            raise ValueError(
+                "Unsupported stage_overrides.aif_biexp_timing_method "
+                f"'{aif_biexp_timing_method}'. Allowed: {sorted(ALLOWED_AIF_BIEXP_TIMING_METHODS)}"
+            )
 
         # Port scope decision: ImageJ ROI input is intentionally not supported.
         for roi_path in self.roi_files:
@@ -1126,6 +1135,28 @@ def _normalize_steady_state_auto_method(value: Any) -> str:
     raise ValueError(
         f"Unsupported stage_overrides.steady_state_auto_method '{value}'. "
         f"Allowed: {sorted(ALLOWED_STEADY_STATE_AUTO_METHODS)}"
+    )
+
+
+def _normalize_aif_biexp_timing_method(value: Any) -> str:
+    if value is None:
+        return "legacy_sobel"
+    text = str(value).strip().lower()
+    if text in {"", "legacy", "legacy_sobel", "sobel", "matlab_legacy", "fixed", "fixed_timing"}:
+        return "legacy_sobel"
+    aliases = {
+        "fit": "fit_transition_times",
+        "fitted": "fit_transition_times",
+        "fit_transition_times": "fit_transition_times",
+        "fit-transition-times": "fit_transition_times",
+        "optimize_transition_times": "fit_transition_times",
+        "optimize-transition-times": "fit_transition_times",
+    }
+    if text in aliases:
+        return aliases[text]
+    raise ValueError(
+        f"Unsupported stage_overrides.aif_biexp_timing_method '{value}'. "
+        f"Allowed: {sorted(ALLOWED_AIF_BIEXP_TIMING_METHODS)}"
     )
 
 
@@ -2286,6 +2317,7 @@ def _fit_aif_biexp(
     lower = _parse_4float_override(config, "aif_lower_limits", [0.0, 0.0, 0.0, 0.0])
     upper = _parse_4float_override(config, "aif_upper_limits", [5.0, 5.0, 50.0, 50.0])
     initial = _parse_4float_override(config, "aif_initial_values", [1.0, 1.0, 1.0, 0.01])
+    timing_method = _normalize_aif_biexp_timing_method(_stage_override(config, "aif_biexp_timing_method", None))
 
     upper[0] = max(1e-12, maxer * 2.0)
     upper[1] = max(1e-12, maxer * 2.0)
@@ -2324,28 +2356,6 @@ def _fit_aif_biexp(
     aif_tol_x = max(_safe_float(_stage_override(config, "aif_TolX", 1e-23), 1e-23), np.finfo(np.float64).eps)
     aif_loss = _scipy_loss_from_robust(_stage_override(config, "aif_Robust", "off"))
 
-    def fit_fn(
-        tvals: np.ndarray,
-        a: float,
-        b: float,
-        c: float,
-        d: float,
-        t_base_end: float,
-        delta_t: float,
-    ) -> np.ndarray:
-        t0_exp = float(t_base_end) + max(float(delta_t), time_eps)
-        return _aif_biexp_con(
-            tvals,
-            a,
-            b,
-            c,
-            d,
-            t_base_end,
-            t0_exp,
-            fitting_au=fitting_au,
-            baseline=baseline,
-        )
-
     # Match MATLAB Stage-B weighting in AIFbiexpfithelp:
     # weights are zero through peak and 10 thereafter.
     weights = np.ones(curve.size, dtype=np.float64) * 10.0
@@ -2354,23 +2364,88 @@ def _fit_aif_biexp(
         weights[:] = 1.0
     sqrt_weights = np.sqrt(weights)
 
-    def weighted_residual(params: np.ndarray) -> np.ndarray:
-        pred = fit_fn(
-            timer,
-            float(params[0]),
-            float(params[1]),
-            float(params[2]),
-            float(params[3]),
-            float(params[4]),
-            float(params[5]),
-        )
-        return (pred - curve) * sqrt_weights
+    legacy_t_base_end = float(timer[start_idx])
+    legacy_t0_exp = float(timer[end_idx])
+    if legacy_t0_exp <= legacy_t_base_end:
+        legacy_t0_exp = min(float(timer[-1]), legacy_t_base_end + time_eps)
 
+    if timing_method == "fit_transition_times":
+
+        def fit_fn(
+            tvals: np.ndarray,
+            a: float,
+            b: float,
+            c: float,
+            d: float,
+            t_base_end: float,
+            delta_t: float,
+        ) -> np.ndarray:
+            t0_exp = float(t_base_end) + max(float(delta_t), time_eps)
+            return _aif_biexp_con(
+                tvals,
+                a,
+                b,
+                c,
+                d,
+                t_base_end,
+                t0_exp,
+                fitting_au=fitting_au,
+                baseline=baseline,
+            )
+
+        param_lower = np.concatenate([lower, np.array([t_base_end_lower, delta_lower], dtype=np.float64)])
+        param_upper = np.concatenate([upper, np.array([t_base_end_upper, delta_upper], dtype=np.float64)])
+        param_initial = np.concatenate([initial, np.array([t_base_end_init, delta_init], dtype=np.float64)])
+        param_initial = np.minimum(np.maximum(param_initial, param_lower + 1e-12), param_upper - 1e-12)
+
+        def weighted_residual(params: np.ndarray) -> np.ndarray:
+            pred = fit_fn(
+                timer,
+                float(params[0]),
+                float(params[1]),
+                float(params[2]),
+                float(params[3]),
+                float(params[4]),
+                float(params[5]),
+            )
+            return (pred - curve) * sqrt_weights
+
+        fit_param_count = 6
+    else:
+
+        def fit_fn(tvals: np.ndarray, a: float, b: float, c: float, d: float) -> np.ndarray:
+            return _aif_biexp_con(
+                tvals,
+                a,
+                b,
+                c,
+                d,
+                legacy_t_base_end,
+                legacy_t0_exp,
+                fitting_au=fitting_au,
+                baseline=baseline,
+            )
+
+        param_lower = lower
+        param_upper = upper
+        param_initial = initial
+
+        def weighted_residual(params: np.ndarray) -> np.ndarray:
+            pred = fit_fn(
+                timer,
+                float(params[0]),
+                float(params[1]),
+                float(params[2]),
+                float(params[3]),
+            )
+            return (pred - curve) * sqrt_weights
+
+        fit_param_count = 4
     fit_success = True
-    params = initial6.copy()
+    params = param_initial.copy()
     try:
         lsq_kwargs: Dict[str, Any] = {
-            "bounds": (lower6, upper6),
+            "bounds": (param_lower, param_upper),
             "method": "trf",
             "max_nfev": max_nfev,
             "ftol": aif_tol_fun,
@@ -2379,38 +2454,52 @@ def _fit_aif_biexp(
         if aif_loss != "linear":
             lsq_kwargs["loss"] = aif_loss
 
-        result = least_squares(weighted_residual, x0=initial6, **lsq_kwargs)
+        result = least_squares(weighted_residual, x0=param_initial, **lsq_kwargs)
         params = np.asarray(result.x, dtype=np.float64)
         fit_success = bool(result.success)
     except Exception:
         fit_success = False
 
-    fitted = fit_fn(
-        timer,
-        float(params[0]),
-        float(params[1]),
-        float(params[2]),
-        float(params[3]),
-        float(params[4]),
-        float(params[5]),
-    )
-    t_base_end_fit = float(params[4])
-    t0_exp_fit = float(params[4] + max(params[5], time_eps))
+    if timing_method == "fit_transition_times":
+        fitted = fit_fn(
+            timer,
+            float(params[0]),
+            float(params[1]),
+            float(params[2]),
+            float(params[3]),
+            float(params[4]),
+            float(params[5]),
+        )
+        t_base_end_fit = float(params[4])
+        t0_exp_fit = float(params[4] + max(params[5], time_eps))
+        fit_params = np.array(
+            [float(params[0]), float(params[1]), float(params[2]), float(params[3]), t_base_end_fit, t0_exp_fit],
+            dtype=np.float64,
+        )
+    else:
+        fitted = fit_fn(
+            timer,
+            float(params[0]),
+            float(params[1]),
+            float(params[2]),
+            float(params[3]),
+        )
+        t_base_end_fit = legacy_t_base_end
+        t0_exp_fit = legacy_t0_exp
+        fit_params = np.array([float(params[0]), float(params[1]), float(params[2]), float(params[3])], dtype=np.float64)
+
     fit_step_window = np.array([t_base_end_fit, t0_exp_fit], dtype=np.float64)
-    fit_params = np.array(
-        [float(params[0]), float(params[1]), float(params[2]), float(params[3]), t_base_end_fit, t0_exp_fit],
-        dtype=np.float64,
-    )
     return {
         "curve": fitted,
         "params": fit_params,
         "step": fit_step_window,
         "baseline": baseline,
         "max_index": max_idx,
+        "timing_method": timing_method,
         "t_base_end": t_base_end_fit,
         "t0_exp": t0_exp_fit,
         "fit_seed_window": np.array([float(timer[start_idx]), float(timer[end_idx])], dtype=np.float64),
-        "rsquare_adj": _adjusted_rsquare(curve, fitted, n_params=6),
+        "rsquare_adj": _adjusted_rsquare(curve, fitted, n_params=fit_param_count),
         "fit_success": fit_success,
     }
 
@@ -2674,6 +2763,8 @@ def _run_stage_b_real(config: DcePipelineConfig, stage_a: Dict[str, Any]) -> Dic
         cp_use = fit_cp["curve"]
         stlv_use = fit_stlv["curve"]
         fit_info = {
+            "fit_timing_method_cp": str(fit_cp["timing_method"]),
+            "fit_timing_method_stlv": str(fit_stlv["timing_method"]),
             "fit_success_cp": bool(fit_cp["fit_success"]),
             "fit_success_stlv": bool(fit_stlv["fit_success"]),
             "fit_rsquared_cp_adj": float(fit_cp["rsquare_adj"]),

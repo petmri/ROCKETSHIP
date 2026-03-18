@@ -1214,6 +1214,7 @@ class TestDcePipeline:
             config.stage_overrides = {
                 "stage_b_mode": "real",
                 "aif_curve_mode": "fitted",
+                "aif_biexp_timing_method": "fit_transition_times",
                 "start_time_min": 0.0,
                 "end_time_min": 0.0,
                 "aif_MaxFunEvals": 4000,
@@ -1224,6 +1225,8 @@ class TestDcePipeline:
             assert result["impl"] == "real"
             assert result["aif_name"] == "fitted"
             assert "fit_params_cp" in result
+            assert result["fit_timing_method_cp"] == "fit_transition_times"
+            assert result["fit_timing_method_stlv"] == "fit_transition_times"
             assert result["fit_params_cp"].shape == (6,)
             assert result["fit_params_stlv"].shape == (6,)
             assert float(result["fit_t0_exp_cp"]) > float(result["fit_t_base_end_cp"])

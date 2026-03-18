@@ -199,6 +199,7 @@ def _make_config(
 def _make_tofts_post_8ef4988_config(paths: dict, out_dir: Path, *, backend: str) -> DcePipelineConfig:
     config = _make_config(paths, out_dir, backend=backend, models=["tofts"])
     overrides = dict(config.stage_overrides)
+    overrides["aif_biexp_timing_method"] = "fit_transition_times"
     overrides.pop("start_injection_min", None)
     overrides.pop("end_injection_min", None)
     overrides.pop("steady_state_start", None)

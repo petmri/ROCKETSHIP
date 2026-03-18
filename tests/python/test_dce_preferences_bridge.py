@@ -140,7 +140,7 @@ def test_aif_advanced_preferences_flow_into_fit_kwargs(least_squares_mock: objec
                 "aif_Robust = Bisquare",
             ],
         )
-        config = _make_config(tmp, prefs)
+        config = _make_config(tmp, prefs, {"aif_biexp_timing_method": "fit_transition_times"})
         timer = np.linspace(0.0, 1.0, num=8, dtype=np.float64)
         curve = np.array([0.0, 0.0, 0.4, 1.2, 0.8, 0.6, 0.4, 0.3], dtype=np.float64)
 
@@ -165,7 +165,7 @@ def test_aif_advanced_preferences_flow_into_fit_kwargs(least_squares_mock: objec
 
 
 @pytest.mark.integration
-def test_aif_fit_returns_transition_times() -> None:
+def test_aif_fit_defaults_to_legacy_transition_window() -> None:
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp = Path(tmp_dir)
         prefs = _write_prefs(tmp / "dce_preferences.txt", [])
@@ -182,6 +182,31 @@ def test_aif_fit_returns_transition_times() -> None:
             fitting_au=False,
         )
 
+        assert result["timing_method"] == "legacy_sobel"
+        assert result["params"].shape == (4,)
+        assert float(result["t_base_end"]) == pytest.approx(float(timer[2]))
+        assert float(result["t0_exp"]) == pytest.approx(float(timer[4]))
+
+
+@pytest.mark.integration
+def test_aif_fit_returns_transition_times() -> None:
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp = Path(tmp_dir)
+        prefs = _write_prefs(tmp / "dce_preferences.txt", [])
+        config = _make_config(tmp, prefs, {"aif_biexp_timing_method": "fit_transition_times"})
+        timer = np.linspace(0.0, 1.0, num=8, dtype=np.float64)
+        curve = np.array([0.0, 0.0, 0.2, 1.1, 0.9, 0.6, 0.4, 0.25], dtype=np.float64)
+
+        result = _fit_aif_biexp(
+            config=config,
+            timer=timer,
+            curve=curve,
+            start_injection_min=timer[2],
+            end_injection_min=timer[4],
+            fitting_au=False,
+        )
+
+        assert result["timing_method"] == "fit_transition_times"
         assert result["params"].shape == (6,)
         assert float(result["t_base_end"]) == pytest.approx(float(result["params"][4]))
         assert float(result["t0_exp"]) == pytest.approx(float(result["params"][5]))
