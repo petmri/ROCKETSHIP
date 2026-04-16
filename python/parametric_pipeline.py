@@ -45,6 +45,13 @@ def _to_path_list(values: Any, base_dir: Optional[Path]) -> List[Path]:
     return [_resolve_path(item, base_dir) for item in values]
 
 
+def _finalize_t1_output_map(t1_map: np.ndarray, invalid_fill_value: float) -> np.ndarray:
+    out = np.asarray(t1_map, dtype=np.float64).copy()
+    if math.isfinite(float(invalid_fill_value)):
+        out[np.isclose(out, float(invalid_fill_value), rtol=0.0, atol=0.0)] = np.nan
+    return out
+
+
 @dataclass
 class ParametricT1Config:
     """Configuration for a single parametric T1 VFA run."""
@@ -80,9 +87,9 @@ class ParametricT1Config:
         xy_smooth_raw = data.get("xy_smooth_sigma")
         if xy_smooth_raw is None:
             xy_smooth_raw = data.get("xy_smooth_size", 0.0)
-        invalid_fill_raw = data.get("invalid_fill_value", np.nan)
+        invalid_fill_raw = data.get("invalid_fill_value", -1.0)
         if invalid_fill_raw is None:
-            invalid_fill_raw = np.nan
+            invalid_fill_raw = -1.0
 
         return cls(
             output_dir=_resolve_path(data["output_dir"], base_dir),
@@ -566,7 +573,7 @@ def _fit_t1_fa_linear_map(
     t1_fit[bad_fit] = invalid_fill_value
     intercept[bad_fit] = invalid_fill_value
 
-    t1_map = np.reshape(t1_fit, spatial_shape)
+    t1_map = _finalize_t1_output_map(np.reshape(t1_fit, spatial_shape), invalid_fill_value)
     rho_map = np.reshape(intercept, spatial_shape)
     r_squared_map = np.reshape(r_squared, spatial_shape)
     sse_map = np.reshape(sse, spatial_shape)
@@ -661,7 +668,7 @@ def _fit_t1_fa_model_map(
         t1_fit[idx] = t1_value
         rho_fit[idx] = rho_value
 
-    t1_map = np.reshape(t1_fit, spatial_shape)
+    t1_map = _finalize_t1_output_map(np.reshape(t1_fit, spatial_shape), invalid_fill_value)
     rho_map = np.reshape(rho_fit, spatial_shape)
     r_squared_map = np.reshape(r_squared, spatial_shape)
     sse_map = np.reshape(sse, spatial_shape)
@@ -803,7 +810,7 @@ def _fit_t1_fa_nonlinear_map_accelerated(
         sse[fit_indices] = sse_vals
         convergence_failed[fit_indices] = failed
 
-    t1_map = np.reshape(t1_fit, spatial_shape)
+    t1_map = _finalize_t1_output_map(np.reshape(t1_fit, spatial_shape), invalid_fill_value)
     rho_map = np.reshape(rho_fit, spatial_shape)
     r_squared_map = np.reshape(r_squared, spatial_shape)
     sse_map = np.reshape(sse, spatial_shape)

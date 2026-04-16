@@ -515,3 +515,21 @@ def test_accelerated_t1_fit_marks_nonconverged_states_as_nan(monkeypatch: pytest
     assert np.isfinite(t1_map.reshape(-1)[0])
     assert np.isnan(t1_map.reshape(-1)[1])
     assert out["metrics"]["convergence_failed"] == 1
+
+
+def test_linear_t1_map_converts_invalid_placeholder_to_nan() -> None:
+    vfa_data = np.asarray([[[10.0, 10.0, 10.0]]], dtype=np.float64)
+    mask = np.zeros((1, 1), dtype=bool)
+
+    out = pp._fit_t1_fa_linear_map(
+        vfa_data=vfa_data,
+        flip_angles_deg=np.asarray([2.0, 5.0, 10.0], dtype=np.float64),
+        tr_ms=5.0,
+        rsquared_threshold=0.95,
+        invalid_fill_value=-1.0,
+        mask=mask,
+        b1_scale_map=None,
+    )
+
+    t1_map = np.asarray(out["t1_map"], dtype=np.float64)
+    assert np.isnan(t1_map.reshape(-1)[0])
