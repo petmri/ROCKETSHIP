@@ -60,8 +60,11 @@ def test_tofts_matches_matlab_baseline_profile() -> None:
     cp = baseline["dce"]["forward"]["Cp"]
     expected = baseline["dce"]["forward"]["tofts"]
 
-    ktrans = float(baseline["dce"]["inverse"]["tofts_fit"][0])
-    ve = float(baseline["dce"]["inverse"]["tofts_fit"][1])
+    # Forward parity uses the known fixture parameters (what MATLAB synthesized the
+    # baseline from), not MATLAB's recovered fit, so this isolates forward-model
+    # parity from fit-recovery behavior.
+    ktrans = float(baseline["dce"]["params"]["ktrans"])
+    ve = float(baseline["dce"]["params"]["ve"])
 
     actual = model_tofts_cfit(ktrans, ve, cp, timer)
 
@@ -91,8 +94,9 @@ def test_patlak_matches_matlab_baseline_profile() -> None:
     cp = baseline["dce"]["forward"]["Cp"]
     expected = baseline["dce"]["forward"]["patlak"]
 
-    ktrans = float(baseline["dce"]["inverse"]["patlak_linear"][0])
-    vp = float(baseline["dce"]["inverse"]["patlak_linear"][1])
+    # Forward parity uses the known fixture parameters, not MATLAB's recovered fit.
+    ktrans = float(baseline["dce"]["params"]["ktrans"])
+    vp = float(baseline["dce"]["params"]["vp"])
 
     actual = model_patlak_cfit(ktrans, vp, cp, timer)
 
@@ -113,10 +117,10 @@ def test_extended_tofts_matches_matlab_baseline_profile() -> None:
     cp = baseline["dce"]["forward"]["Cp"]
     expected = baseline["dce"]["forward"]["extended_tofts"]
 
-    fit_vals = baseline["dce"]["inverse"]["extended_tofts_fit"]
-    ktrans = float(fit_vals[0])
-    ve = float(fit_vals[1])
-    vp = float(fit_vals[2])
+    # Forward parity uses the known fixture parameters, not MATLAB's recovered fit.
+    ktrans = float(baseline["dce"]["params"]["ktrans"])
+    ve = float(baseline["dce"]["params"]["ve"])
+    vp = float(baseline["dce"]["params"]["vp"])
 
     actual = model_extended_tofts_cfit(ktrans, ve, vp, cp, timer)
 
@@ -224,7 +228,7 @@ def test_fxr_forward_matches_matlab_baseline_profile() -> None:
 def test_patlak_linear_matches_matlab_baseline_profile() -> None:
     baseline = json.loads((REPO_ROOT / "tests/contracts/baselines/matlab_reference_v1.json").read_text())
     tolerances = json.loads((REPO_ROOT / "tests/contracts/tolerance_profiles.json").read_text())
-    tol = tolerances["fit_recovery"]
+    tol = tolerances["fit_recovery_strict"]
 
     timer = baseline["dce"]["forward"]["timer"]
     cp = baseline["dce"]["forward"]["Cp"]
@@ -263,7 +267,7 @@ def test_patlak_fit_recovers_forward_params_and_improves_sse() -> None:
 def test_tofts_fit_inverse_matches_matlab_baseline_profile() -> None:
     baseline = json.loads((REPO_ROOT / "tests/contracts/baselines/matlab_reference_v1.json").read_text())
     tolerances = json.loads((REPO_ROOT / "tests/contracts/tolerance_profiles.json").read_text())
-    tol = tolerances["fit_recovery"]
+    tol = tolerances["fit_recovery_strict"]
 
     timer = baseline["dce"]["forward"]["timer"]
     cp = baseline["dce"]["forward"]["Cp"]
@@ -283,7 +287,7 @@ def test_tofts_fit_inverse_matches_matlab_baseline_profile() -> None:
 def test_vp_fit_inverse_matches_matlab_baseline_profile() -> None:
     baseline = json.loads((REPO_ROOT / "tests/contracts/baselines/matlab_reference_v1.json").read_text())
     tolerances = json.loads((REPO_ROOT / "tests/contracts/tolerance_profiles.json").read_text())
-    tol = tolerances["fit_recovery"]
+    tol = tolerances["fit_recovery_strict"]
 
     timer = baseline["dce"]["forward"]["timer"]
     cp = baseline["dce"]["forward"]["Cp"]
@@ -303,7 +307,7 @@ def test_vp_fit_inverse_matches_matlab_baseline_profile() -> None:
 def test_tissue_uptake_fit_inverse_matches_matlab_baseline_profile() -> None:
     baseline = json.loads((REPO_ROOT / "tests/contracts/baselines/matlab_reference_v1.json").read_text())
     tolerances = json.loads((REPO_ROOT / "tests/contracts/tolerance_profiles.json").read_text())
-    tol = tolerances["fit_recovery"]
+    tol = tolerances["fit_recovery_strict"]
 
     timer = baseline["dce"]["forward"]["timer"]
     cp = baseline["dce"]["forward"]["Cp"]
@@ -323,6 +327,9 @@ def test_tissue_uptake_fit_inverse_matches_matlab_baseline_profile() -> None:
 def test_twocxm_fit_inverse_matches_matlab_baseline_profile() -> None:
     baseline = json.loads((REPO_ROOT / "tests/contracts/baselines/matlab_reference_v1.json").read_text())
     tolerances = json.loads((REPO_ROOT / "tests/contracts/tolerance_profiles.json").read_text())
+    # 2CXM parameters (ve/vp/Fp) trade off even on noise-free data, so its inverse
+    # is intrinsically ill-conditioned; keep the loose profile here (see
+    # tolerance_profiles.json "fit_recovery").
     tol = tolerances["fit_recovery"]
 
     timer = baseline["dce"]["forward"]["timer"]
@@ -343,7 +350,7 @@ def test_twocxm_fit_inverse_matches_matlab_baseline_profile() -> None:
 def test_fxr_fit_inverse_matches_matlab_baseline_profile() -> None:
     baseline = json.loads((REPO_ROOT / "tests/contracts/baselines/matlab_reference_v1.json").read_text())
     tolerances = json.loads((REPO_ROOT / "tests/contracts/tolerance_profiles.json").read_text())
-    tol = tolerances["fit_recovery"]
+    tol = tolerances["fit_recovery_strict"]
 
     timer = baseline["dce"]["forward"]["timer"]
     cp = baseline["dce"]["forward"]["Cp"]

@@ -218,6 +218,64 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
   --parity
 ```
 
+Run the fast CI primary-model (tofts+patlak) Ktrans parity on a strided ROI:
+
+```bash
+cd /Users/samuelbarnes/code/ROCKETSHIP
+.venv/bin/python -m pytest \
+  tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_primary_models_ktrans_cpu \
+  --parity --roi-stride 12
+```
+
+Note: required parity checks whose masks collapse to `<2` valid voxels now **fail**
+(mask collapse is a silent hole, not a pass), and the multi-model suites assert at
+least one required check compared real data.
+
+## Noisy-data parity (function level)
+Real data is noisy, so the strongest function-level parity check compares the Python
+fit of a stored noisy curve against MATLAB's fit of the same curve. Runs by default
+(fast, uses the committed baseline):
+
+```bash
+.venv/bin/python -m pytest tests/python/test_dce_noisy_parity.py -v
+```
+
+Parity is gated per parameter on whether it is identifiable at that noise level
+(MATLAB recovered it near ground truth); unstable parameters (2CXM, high noise) are
+reported as diagnostics, never asserted.
+
+## End-to-end T1 map parity
+Generate the MATLAB T1 reference map for the small committed VFA fixture, then run the
+Python parametric T1 pipeline and compare maps (identifiable voxels only):
+
+```bash
+matlab -batch "addpath('tests/matlab'); addpath('tests/matlab/helpers'); \
+  generate_t1_parity_map('vfaFiles', \
+  {'tests/data/ci_fixtures/t1/vfa_small/flip-02deg_VFA.nii.gz', \
+   'tests/data/ci_fixtures/t1/vfa_small/flip-05deg_VFA.nii.gz', \
+   'tests/data/ci_fixtures/t1/vfa_small/flip-10deg_VFA.nii.gz'}, \
+  'flipAngles', [2 5 10], 'trMs', 8.012, 'fitType', 't1_fa_fit', \
+  'outputPath', 'tests/data/ci_fixtures/t1/vfa_small/results_matlab/T1_map_t1_fa_fit.nii', \
+  'rsquaredThreshold', 0);"
+
+.venv/bin/python -m pytest tests/python/test_t1_map_parity.py --parity
+```
+
+## Runtime parity (Python vs MATLAB, live)
+Runs both stacks on a shared fixture, asserts numerical parity, and reports the
+wall-clock ratio (gated only when the MATLAB run is long enough to be meaningful).
+Requires MATLAB:
+
+```bash
+.venv/bin/python -m pytest tests/python/test_runtime_parity.py \
+  --run-runtime-parity \
+  --runtime-parity-matlab-cmd matlab \
+  --runtime-parity-max-python-over-matlab-ratio 1.5
+```
+
+Point `--runtime-parity-t1-root` / `--runtime-parity-dce-root` at a larger dataset for
+a meaningful runtime-ratio gate.
+
 ## BIDS discovery and qualification
 Create a discoverable-session manifest from any BIDS root:
 

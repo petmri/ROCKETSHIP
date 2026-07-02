@@ -110,10 +110,24 @@ jobs:
           products: Curve_Fitting_Toolbox Image_Processing_Toolbox Optimization_Toolbox Parallel_Computing_Toolbox Statistics_and_Machine_Learning_Toolbox
           release: R2022a
 
+      - name: Regenerate MATLAB parity baseline (for drift guard)
+        uses: matlab-actions/run-command@v2
+        with:
+          command: addpath('tests/matlab'); addpath('tests/matlab/helpers'); export_parity_baseline('_ci_baseline_candidate');
+
+      - name: Check MATLAB baseline drift
+        # Fails if committed matlab_reference_v1.json no longer matches current MATLAB
+        # output, i.e. MATLAB algorithm code changed without regenerating the baseline.
+        # Together with the contract parity step below (Python vs committed baseline),
+        # this transitively verifies Python matches *current* MATLAB, not a stale snapshot.
+        run: |
+          python tests/contracts/check_baseline_drift.py \
+            --candidate _ci_baseline_candidate/matlab_reference_v1.json
+
       - name: Generate MATLAB parity baseline maps (downsample fixture)
         uses: matlab-actions/run-command@v2
         with:
-          command: addpath .; addpath tests/matlab/; generate_dce_tofts_parity_map('subjectRoot', 'tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3', 'models', {'tofts'});
+          command: addpath .; addpath tests/matlab/; generate_dce_tofts_parity_map('subjectRoot', 'tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3', 'models', {'tofts', 'patlak'});
 
       - name: Run Python contract parity checks
         run: |
@@ -125,6 +139,33 @@ jobs:
           python -m pytest tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_tofts_ktrans \
             --run-parity \
             --dataset-root tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3 \
+            -q
+
+      - name: Run Python DCE primary-model (tofts+patlak) parity (downsample fixture)
+        run: |
+          python -m pytest tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_primary_models_ktrans_cpu \
+            --run-parity \
+            --dataset-root tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3 \
+            --roi-stride 12 \
+            -q
+
+      - name: Generate MATLAB T1 parity map (small VFA fixture)
+        uses: matlab-actions/run-command@v2
+        with:
+          command: >-
+            addpath('tests/matlab'); addpath('tests/matlab/helpers');
+            generate_t1_parity_map(
+            'vfaFiles', {'tests/data/ci_fixtures/t1/vfa_small/flip-02deg_VFA.nii.gz',
+            'tests/data/ci_fixtures/t1/vfa_small/flip-05deg_VFA.nii.gz',
+            'tests/data/ci_fixtures/t1/vfa_small/flip-10deg_VFA.nii.gz'},
+            'flipAngles', [2 5 10], 'trMs', 8.012, 'fitType', 't1_fa_fit',
+            'outputPath', 'tests/data/ci_fixtures/t1/vfa_small/results_matlab/T1_map_t1_fa_fit.nii',
+            'rsquaredThreshold', 0);
+
+      - name: Run Python T1 map parity (small VFA fixture)
+        run: |
+          python -m pytest tests/python/test_t1_map_parity.py::test_bids_t1_map_parity_nonlinear \
+            --run-parity \
             -q
 
   matlab_checks:

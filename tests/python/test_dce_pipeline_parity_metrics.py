@@ -541,9 +541,20 @@ def test_downsample_bbb_p19_models_cpu_and_auto(
                 "valid_voxels": int(n_valid),
             }
             if n_valid < 2:
-                check_rec["status"] = "skipped"
-                checks.append(check_rec)
-                _parity_log(f"{label}: skipped (valid_voxels={n_valid})")
+                # Mask collapse: a required check with nothing to compare is a silent
+                # hole, not a pass. Fail it if required; only truly optional checks
+                # (e.g. secondary models) may skip quietly.
+                if required:
+                    check_rec["status"] = "collapsed"
+                    msg = f"required parity check has only {n_valid} valid voxels (mask collapse); parity not verified"
+                    check_rec["error"] = msg
+                    checks.append(check_rec)
+                    failures.append(f"{label}: {msg}")
+                    _parity_log(f"{label}: FAILED (required, mask collapse valid_voxels={n_valid})")
+                else:
+                    check_rec["status"] = "skipped"
+                    checks.append(check_rec)
+                    _parity_log(f"{label}: skipped (valid_voxels={n_valid})")
                 return
             try:
                 metrics = _assert_map_parity_if_enough(
@@ -718,6 +729,15 @@ def test_downsample_bbb_p19_models_cpu_and_auto(
             _parity_log(
                 f"diagnostic parity failures (non-gating): {len(diagnostic_failures)}"
             )
+        # Anti-vacuous guard: at least one required check must have actually compared
+        # data. With mask-collapse now failing required checks, this catches the
+        # degenerate case where required models produced no comparable voxels at all.
+        required_pass = sum(1 for c in checks if c.get("required") and c.get("status") == "pass")
+        if required_pass == 0:
+            failures.append(
+                "no required parity checks passed with data; suite verified nothing "
+                "(check pipeline outputs / masks / required_models configuration)"
+            )
         if failures:
             failure_text = "\n\n".join(failures)
             pytest.fail(
@@ -878,9 +898,18 @@ def test_downsample_bbb_p19_model_maps_and_roi_xls_cpu(
                 "valid_voxels": int(n_valid),
             }
             if n_valid < 2:
-                check_rec["status"] = "skipped"
-                map_checks.append(check_rec)
-                _parity_log(f"{label}: skipped (valid_voxels={n_valid})")
+                # Mask collapse on a required check is a silent hole, not a pass.
+                if required:
+                    check_rec["status"] = "collapsed"
+                    msg = f"required parity check has only {n_valid} valid voxels (mask collapse); parity not verified"
+                    check_rec["error"] = msg
+                    map_checks.append(check_rec)
+                    failures.append(f"{label}: {msg}")
+                    _parity_log(f"{label}: FAILED (required, mask collapse valid_voxels={n_valid})")
+                else:
+                    check_rec["status"] = "skipped"
+                    map_checks.append(check_rec)
+                    _parity_log(f"{label}: skipped (valid_voxels={n_valid})")
                 return
             try:
                 metrics = _assert_map_parity_if_enough(
@@ -1017,6 +1046,14 @@ def test_downsample_bbb_p19_model_maps_and_roi_xls_cpu(
         )
         if diagnostic_failures:
             _parity_log(f"diagnostic parity failures (non-gating): {len(diagnostic_failures)}")
+        # Anti-vacuous guard: at least one required map check and one ROI check must
+        # have actually compared data, so masking/collapse cannot yield a silent pass.
+        required_map_pass = sum(1 for c in map_checks if c.get("required") and c.get("status") == "pass")
+        required_roi_pass = sum(1 for c in roi_checks if c.get("required") and c.get("status") == "pass")
+        if required_map_pass == 0:
+            failures.append("no required map parity checks passed with data; suite verified nothing")
+        if required_roi_pass == 0:
+            failures.append("no required ROI-table parity checks passed with data; suite verified nothing")
         if failures:
             failure_text = "\n\n".join(failures)
             pytest.fail(
@@ -1095,5 +1132,89 @@ def test_full_bbb_p19_tofts_ktrans(
             "ktrans": ktrans_metrics,
             "ve": ve_metrics,
             "ve_ktrans_min": float(ve_ktrans_min),
+        },
+    )
+
+
+@pytest.mark.parity
+@pytest.mark.integration
+def test_downsample_bbb_p19_primary_models_ktrans_cpu(
+    run_parity: bool,
+    parity_dataset_root: str,
+    parity_roi_stride: int,
+    parity_summary_dir: Path | None,
+    parity_thresholds: dict,
+) -> None:
+    """CI-friendly primary-model (tofts/ex_tofts/patlak) Ktrans parity.
+
+    Extends single-model tofts coverage to the other two primary DCE models in a
+    single fast run: pure-CPU backend on a strided ROI so the nonlinear ex_tofts
+    fit stays within CI time budget (full-ROI 3-model fits take minutes)."""
+    if not run_parity:
+        pytest.skip("Use --run-parity to run dataset-backed parity checks.")
+
+    root = Path(parity_dataset_root) if parity_dataset_root else _default_downsample_root()
+    paths = _dataset_paths(root)
+    # tofts and patlak are well-conditioned and correlate cleanly at CI scale. Ex-Tofts
+    # Ktrans is intentionally left to the opt-in multi-model suite: its Ktrans map has
+    # low spatial variance in the stable range, so correlation is an unreliable gate
+    # even though absolute agreement is good (a metric limitation, not a parity failure).
+    models = ["tofts", "patlak"]
+    expected_maps = [_matlab_map_path(paths, m, "Ktrans") for m in models]
+    for map_path in expected_maps:
+        assert map_path.exists(), _parity_error_hint(paths, models=models, expected_maps=expected_maps)
+
+    ktrans_corr_min = float(parity_thresholds["model_ktrans_corr_min"])
+    ktrans_mse_max = float(parity_thresholds["model_ktrans_mse_max"])
+    ex_tofts_ktrans_corr_min = float(parity_thresholds["ex_tofts_ktrans_corr_min"])
+    ktrans_upper_exclude = float(parity_thresholds["ktrans_upper_exclude"])
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        sparse_roi_path = tmp_path / "roi_sparse.nii.gz"
+        _write_sparse_roi_mask(paths["roi"], sparse_roi_path, parity_roi_stride)
+        out_dir = tmp_path / "python_out_cpu"
+        result = run_dce_pipeline(
+            _make_config(paths, out_dir, backend="cpu", models=models, roi_path=sparse_roi_path)
+        )
+        assert result["meta"]["status"] == "ok"
+
+        roi_mask = _load_nifti(sparse_roi_path)
+        metrics_by_model: dict[str, dict] = {}
+        for model_name in models:
+            py_ktrans = _load_nifti(out_dir / f"Dyn-1_{model_name}_fit_Ktrans.nii.gz")
+            matlab_ktrans = _load_nifti(_matlab_map_path(paths, model_name, "Ktrans"))
+            # Ex-Tofts Ktrans is dominated by high-end outliers; exclude them and use a
+            # lower correlation floor (same policy as the multi-model suites).
+            if model_name == "ex_tofts":
+                extra_mask = (
+                    np.isfinite(py_ktrans)
+                    & np.isfinite(matlab_ktrans)
+                    & (py_ktrans < ktrans_upper_exclude)
+                    & (matlab_ktrans < ktrans_upper_exclude)
+                )
+                corr_floor = ex_tofts_ktrans_corr_min
+            else:
+                extra_mask = None
+                corr_floor = ktrans_corr_min
+            metrics_by_model[model_name] = _assert_map_parity(
+                py_ktrans,
+                matlab_ktrans,
+                roi_mask,
+                label=f"{model_name}_ktrans_cpu_sparse",
+                corr_min=corr_floor,
+                mse_max=ktrans_mse_max,
+                extra_mask=extra_mask,
+            )
+
+    _write_parity_summary(
+        parity_summary_dir,
+        "parity_primary_models_ktrans_cpu_summary.json",
+        {
+            "suite": "primary-models-ktrans-cpu",
+            "dataset_root": str(paths["root"]),
+            "roi_stride": int(parity_roi_stride),
+            "models": models,
+            "metrics": metrics_by_model,
         },
     )

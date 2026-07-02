@@ -209,3 +209,6 @@ external_programs/ModelID.m
 external_programs/libCpufit.*
 external_programs/libGpufit.*
 
+
+# CI drift-guard: freshly regenerated baseline candidate (never committed)
+_ci_baseline_candidate/

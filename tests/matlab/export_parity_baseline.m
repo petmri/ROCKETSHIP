@@ -52,6 +52,68 @@ baseline.dce.inverse.twocxm_fit = model_2cxm(fixture.Ct_2cxm, fixture.Cp', fixtu
 baseline.dce.inverse.fxr_fit = model_fxr(fixture.R1t_fxr, fixture.Cp', fixture.timer, ...
     fixture.R1o, fixture.R1i, fixture.r1, fixture.fw, prefs);
 
+% ---- Noisy-data parity fixtures ----
+% Parity on noisy data is the gold standard: real data is noisy, and a Python
+% port must reproduce MATLAB's fit of the SAME noisy curve, not just recover
+% ground truth on noise-free data (which any converging optimizer does).
+%
+% We store, per model and noise level, several deterministic noisy realizations
+% together with MATLAB's fit of each, so the Python side fits byte-identical
+% input. Only well-conditioned primary models are included (tofts/ex_tofts/patlak);
+% 2CXM and FXR are omitted here because their parameters are frequently
+% non-identifiable under noise, so per-realization parity would be comparing
+% optimizer wandering rather than a real numerical contract. The Python side
+% additionally gates each parameter on whether MATLAB itself recovered it near
+% ground truth, so unstable parameters never force a spurious parity failure.
+rng(12345, 'twister');
+noisyModels = {'tofts', 'ex_tofts', 'patlak'};
+noisyLevels = [0.01, 0.03];
+noisyReal = 6;
+noisyEntries = {};
+for mi = 1:numel(noisyModels)
+    modelName = noisyModels{mi};
+    switch modelName
+        case 'tofts'
+            cleanCt = fixture.Ct_tofts;
+            groundTruth = [fixture.ktrans, fixture.ve];
+            paramNames = {'ktrans', 've'};
+        case 'ex_tofts'
+            cleanCt = fixture.Ct_extended_tofts;
+            groundTruth = [fixture.ktrans, fixture.ve, fixture.vp];
+            paramNames = {'ktrans', 've', 'vp'};
+        case 'patlak'
+            cleanCt = fixture.Ct_patlak;
+            groundTruth = [fixture.ktrans, fixture.vp];
+            paramNames = {'ktrans', 'vp'};
+    end
+    cleanCt = cleanCt(:);
+    noiseAmp = noisyLevels * max(cleanCt);
+    for li = 1:numel(noisyLevels)
+        for r = 1:noisyReal
+            noisyCt = cleanCt + noiseAmp(li) * randn(size(cleanCt));
+            switch modelName
+                case 'tofts'
+                    fitVec = model_tofts(noisyCt, fixture.Cp', fixture.timer, prefs);
+                case 'ex_tofts'
+                    fitVec = model_extended_tofts(noisyCt, fixture.Cp', fixture.timer, prefs);
+                case 'patlak'
+                    fitVec = model_patlak_linear(noisyCt, fixture.Cp', fixture.timer);
+            end
+            entry = struct();
+            entry.model = modelName;
+            entry.sigma_frac = noisyLevels(li);
+            entry.realization = r;
+            entry.seed = 12345;
+            entry.param_names = paramNames;
+            entry.ground_truth = groundTruth;
+            entry.Ct = noisyCt(:)';
+            entry.fit = fitVec(:)';
+            noisyEntries{end + 1} = entry; %#ok<AGROW>
+        end
+    end
+end
+baseline.dce.noisy = noisyEntries;
+
 meanAIF = linspace(0, 1.1, 14)';
 bolusTime = 3;
 timeVect = (0:0.1:1.8)';
