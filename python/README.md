@@ -442,13 +442,12 @@ cd /path/to/ROCKETSHIP
 .venv/bin/python -m pytest tests/python -m parity --parity-suite=allmodels -s   # + reported extras
 ```
 
-ROI-summary `.xls` table parity is a separate opt-in check (full-brain CPU fit; slower):
+ROI-summary `.xls` table parity is a separate default-on check (ROI-only mode; a few seconds):
 
 ```bash
 cd /path/to/ROCKETSHIP
 .venv/bin/python -m pytest \
-  tests/python/test_dce_pipeline_parity_metrics.py::test_bbb_p19_roi_xls_parity \
-  --run-parity
+  tests/python/test_dce_pipeline_parity_metrics.py::test_bbb_p19_roi_xls_parity
 ```
 
 See `tests/README.md` for the full parity docs (regions, gated/reported split, thresholds).

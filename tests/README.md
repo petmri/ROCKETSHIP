@@ -49,10 +49,10 @@ logs CI-aware diagnostics — **`ci_norm_absdiff_p95`** (p95 of `|py−matlab| /
 voxels **fail** (a collapse is a silent hole, not a pass), and the suite asserts at least one gated
 check compared real data.
 
-**ROI-summary `.xls` parity** is a separate opt-in check, `test_bbb_p19_roi_xls_parity`:
+**ROI-summary `.xls` parity** is a separate check, `test_bbb_p19_roi_xls_parity` (default-on):
 
 ```bash
-pytest tests/python/test_dce_pipeline_parity_metrics.py::test_bbb_p19_roi_xls_parity --run-parity
+pytest tests/python/test_dce_pipeline_parity_metrics.py::test_bbb_p19_roi_xls_parity
 ```
 
 MATLAB averages each parameter's concentration curve over the whole-brain ROI and fits once
@@ -88,7 +88,8 @@ MATLAB's fit of the same curve, gated per-parameter on identifiability.
 pytest tests/python/test_dce_noisy_parity.py -v
 ```
 
-**End-to-end T1 map parity:** generate the MATLAB reference then compare (identifiable voxels only).
+**End-to-end T1 map parity** (default-on; compares against the committed MATLAB reference over
+identifiable voxels). Regenerate the reference only when the MATLAB T1 algorithm changes:
 
 ```bash
 matlab -batch "addpath('tests/matlab'); addpath('tests/matlab/helpers'); \
@@ -97,7 +98,7 @@ matlab -batch "addpath('tests/matlab'); addpath('tests/matlab/helpers'); \
    'tests/data/ci_fixtures/t1/vfa_small/flip-10deg_VFA.nii.gz'}, 'flipAngles', [2 5 10], \
   'trMs', 8.012, 'fitType', 't1_fa_fit', \
   'outputPath', 'tests/data/ci_fixtures/t1/vfa_small/results_matlab/T1_map_t1_fa_fit.nii', 'rsquaredThreshold', 0);"
-pytest tests/python/test_t1_map_parity.py --run-parity
+pytest tests/python/test_t1_map_parity.py
 ```
 
 **OSIPI reliability** (ground-truth correctness against published peer tolerances):

@@ -9,20 +9,6 @@ import pytest
 def pytest_addoption(parser: pytest.Parser) -> None:
     group = parser.getgroup("rocketship parity")
     group.addoption(
-        "--run-parity",
-        "--parity",
-        action="store_true",
-        default=False,
-        help="Enable dataset-backed parity tests. Alias: --parity",
-    )
-    group.addoption(
-        "--run-full-parity",
-        "--full-parity",
-        action="store_true",
-        default=False,
-        help="Enable full-volume parity tests (slow). Alias: --full-parity",
-    )
-    group.addoption(
         "--run-multi-model-backend-parity",
         "--mm-parity",
         action="store_true",
@@ -161,16 +147,6 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     for item in items:
         if "parity" not in item.keywords:
             item.add_marker(pytest.mark.portability)
-
-
-@pytest.fixture(scope="session")
-def run_parity(request: pytest.FixtureRequest) -> bool:
-    return bool(request.config.getoption("--run-parity"))
-
-
-@pytest.fixture(scope="session")
-def run_full_parity(request: pytest.FixtureRequest) -> bool:
-    return bool(request.config.getoption("--run-full-parity"))
 
 
 @pytest.fixture(scope="session")

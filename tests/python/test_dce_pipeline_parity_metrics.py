@@ -732,14 +732,9 @@ def test_bbb_p19_region_parity(
 @pytest.mark.parity
 @pytest.mark.integration
 def test_bbb_p19_roi_xls_parity(
-    run_parity: bool,
     parity_dataset_root: str,
     parity_summary_dir: Path | None,
-    parity_thresholds: dict,
 ) -> None:
-    if not run_parity:
-        pytest.skip("Use --run-parity to run dataset-backed ROI-xls parity checks.")
-
     root = Path(parity_dataset_root) if parity_dataset_root else _default_downsample_root()
     paths = _dataset_paths(root)
     models = ["tofts", "ex_tofts", "patlak", "tissue_uptake"]

@@ -30,7 +30,7 @@ Do not maintain long task lists here (use `TODO.md`) and do not archive historic
 2. CUDA/GPUfit runtime verification coverage is still limited.
 3. T1 and Part E need broader external-cohort qualification evidence before merge confidence is complete.
 4. Real-data parity can still regress when dataset-backed Python checks drift from the MATLAB reference baseline-generation policy.
-5. CI still invokes parity via the deprecated flag surface (`--run-parity`, `--mm-parity`, etc.) instead of the new `--parity-suite` selector; the deprecated aliases are kept working for now but must be migrated before removal.
+5. CI still invokes parity via some deprecated flag aliases (`--mm-parity`, `--parity-required-models`, `--all-models`) instead of the `--parity-suite` selector; kept working for now but must be migrated before removal. (`--run-parity` has been removed — all its tests are now default-on.)
 
 ## Current Technical State Notes
 - Accelerated DCE tolerance default is `gpu_tolerance=1e-6`; this unblocked prior accelerated `ex_tofts` finiteness failures seen with tighter settings.
@@ -45,4 +45,4 @@ Do not maintain long task lists here (use `TODO.md`) and do not archive historic
 1. Re-run qualification after phantom matched-model data generation and tolerance tuning.
 2. Capture CUDA-capable backend verification results for accelerated paths.
 3. Confirm whether current xfail/XPASS accelerated secondary-model tests should be promoted, retained, or split by backend.
-4. Migrate CI (`.github/workflows/run_DCE.yml`) and the parity runner (`tests/python/run_dce_parity.py`) from the deprecated parity flags (`--run-parity`, `--run-multi-model-backend-parity`/`--mm-parity`, `--parity-required-models`, `--all-models`) to the new `--parity-suite` selector, then remove the deprecated aliases.
+4. Migrate CI (`.github/workflows/run_DCE.yml`) and the parity runner (`tests/python/run_dce_parity.py`) from the remaining deprecated parity flags (`--run-multi-model-backend-parity`/`--mm-parity`, `--parity-required-models`, `--all-models`) to the `--parity-suite` selector, then remove the deprecated aliases. (`--run-parity` already removed.)

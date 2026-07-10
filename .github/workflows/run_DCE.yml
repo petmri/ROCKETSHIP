@@ -156,7 +156,6 @@ jobs:
       - name: Run Python T1 map parity (small VFA fixture)
         run: |
           python -m pytest tests/python/test_t1_map_parity.py::test_bids_t1_map_parity_nonlinear \
-            --run-parity \
             -q
 
   matlab_checks:
