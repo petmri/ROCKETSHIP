@@ -431,53 +431,28 @@ cd /path/to/ROCKETSHIP
 .venv/bin/python tests/contracts/compare_with_matlab_baseline.py --python-results /tmp/python_results.json --require-all
 ```
 
-### Dataset-backed DCE pipeline parity (Tofts `Ktrans` + `ve`)
+### Dataset-backed DCE pipeline parity
 
-Fast downsample parity:
+The gated parity suite (`test_bbb_p19_region_parity`) runs by default — Tofts & Patlak `Ktrans`
+Python-vs-MATLAB over brain/GM/WM, gated on Corr + RMSE, with ve/vp and the other models reported:
+
+```bash
+cd /path/to/ROCKETSHIP
+.venv/bin/python -m pytest tests/python -m parity                      # gated standard suite
+.venv/bin/python -m pytest tests/python -m parity --parity-suite=allmodels -s   # + reported extras
+```
+
+ROI-summary `.xls` table parity is a separate opt-in check (full-brain CPU fit; slower):
 
 ```bash
 cd /path/to/ROCKETSHIP
 .venv/bin/python -m pytest \
-  tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_tofts_ktrans \
-  --parity
+  tests/python/test_dce_pipeline_parity_metrics.py::test_bbb_p19_roi_xls_parity \
+  --run-parity
 ```
 
-Optional VE parity mask threshold (measurable-Ktrans voxels only):
-
-```bash
-cd /path/to/ROCKETSHIP
-.venv/bin/python -m pytest \
-  tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_tofts_ktrans \
-  --parity \
-  --parity-ve-ktrans-min 1e-6
-```
-
-Notes:
-
-- `--parity-ve-ktrans-min` default is `1e-6`
-- VE parity is evaluated only where both MATLAB and Python Ktrans exceed that threshold
-
-Optional full-volume parity (slower; reserve for occasional thorough checks):
-
-```bash
-cd /path/to/ROCKETSHIP
-.venv/bin/python -m pytest \
-  tests/python/test_dce_pipeline_parity_metrics.py::test_full_bbb_p19_tofts_ktrans \
-  --parity --full-parity
-```
-
-Optional CPU model-map + ROI table parity (`tofts`, `ex_tofts`, `patlak`, `tissue_uptake`):
-
-```bash
-cd /path/to/ROCKETSHIP
-.venv/bin/python -m pytest \
-  tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_model_maps_and_roi_xls_cpu \
-  --parity
-```
-
-Default downsample fixture used for parity:
-
-- `/path/to/ROCKETSHIP/tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3`
+See `tests/README.md` for the full parity docs (regions, gated/reported split, thresholds).
+Default downsample fixture: `tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3`.
 
 ### Tiny settings matrix (fast)
 

@@ -79,14 +79,12 @@ def _matlab_hint() -> str:
 @pytest.mark.parity
 @pytest.mark.integration
 def test_bids_t1_map_parity_nonlinear(
-    run_parity: bool,
     parity_summary_dir: Path | None,
 ) -> None:
-    if not run_parity:
-        pytest.skip("Use --run-parity to run dataset-backed T1 map parity checks.")
-    for vfa in VFA_FILES:
-        assert vfa.exists(), f"Missing VFA fixture file: {vfa}"
-    assert MATLAB_MAP.exists(), _matlab_hint()
+    # Default-on: skip gracefully (not fail) if this environment lacks the fixture assets.
+    missing = [str(p) for p in list(VFA_FILES) + [MATLAB_MAP] if not p.exists()]
+    if missing:
+        pytest.skip(f"T1 map parity fixture assets missing ({len(missing)}); first: {missing[0]}")
 
     with tempfile.TemporaryDirectory() as tmp:
         config = ParametricT1Config(

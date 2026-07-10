@@ -134,19 +134,10 @@ jobs:
           python tests/contracts/generate_python_results.py --output /tmp/python_results.json
           python tests/contracts/compare_with_matlab_baseline.py --python-results /tmp/python_results.json --require-all
 
-      - name: Run Python DCE pipeline parity (downsample fixture)
+      - name: Run Python DCE region parity (downsample fixture, gated tofts/patlak Ktrans + ROI xls)
         run: |
-          python -m pytest tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_tofts_ktrans \
-            --run-parity \
+          python -m pytest tests/python/test_dce_pipeline_parity_metrics.py::test_bbb_p19_region_parity \
             --dataset-root tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3 \
-            -q
-
-      - name: Run Python DCE primary-model (tofts+patlak) parity (downsample fixture)
-        run: |
-          python -m pytest tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_primary_models_ktrans_cpu \
-            --run-parity \
-            --dataset-root tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3 \
-            --roi-stride 12 \
             -q
 
       - name: Generate MATLAB T1 parity map (small VFA fixture)

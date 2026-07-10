@@ -99,6 +99,12 @@ For options in `stage_overrides`:
 ### Stage D fit controls
 - `time_smoothing`, `time_smoothing_window`
 - `fxr_fw`
+- `write_param_maps`: bool (default `true`) — write per-voxel parameter map NIfTIs.
+- `fit_voxels`: bool (default `true`). Set `false` for **ROI-only mode**: skip the per-voxel fit and
+  fit only each ROI's averaged concentration curve (average-then-fit, matching MATLAB). Much faster,
+  and for nonlinear models the pre-fit averaging reduces noise. Requires `roi_files`; parameter maps
+  are not written. Each ROI is averaged over its intersection with the primary fit region
+  (`roi_files[0]`), so make `roi_files[0]` the encompassing ROI (e.g. the whole-brain mask).
 - `time_unit` / `timer_unit` (optional direct-fit hint): `minutes|seconds`
   - No implicit or runtime-selectable algorithm switching.
   - `model_2cxm_fit` uses the OSIPI LEK-style resampled fit path.

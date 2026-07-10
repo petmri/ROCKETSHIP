@@ -3835,6 +3835,10 @@ def _run_stage_d_real(
 
     roi_paths, roi_names, roi_columns = _load_roi_columns(config, tumind, spatial_shape)
     selected_models, skipped_models = _stage_d_selected_models(config)
+    # ROI-only mode (`fit_voxels=0`): skip the per-voxel Stage-D fit and only fit each ROI's
+    # averaged concentration curve (average-then-fit, matching MATLAB). Much faster, and for
+    # nonlinear models the pre-fit averaging reduces noise. Parameter maps are not written.
+    fit_voxels = _to_bool(_stage_override(config, "fit_voxels", True), True)
 
     rootname = str(stage_a.get("rootname", _stage_override(config, "rootname", "python_dce")))
     start_injection_min = float(stage_b.get("start_injection_min", timer[0]))
@@ -3869,24 +3873,29 @@ def _run_stage_d_real(
                 raise ValueError("T1TUM size mismatch for FXR")
             r1o = 1.0 / t1tum
 
-        voxel_results = _fit_stage_d_model(
-            model_name=model_name,
-            ct=ct_source,
-            cp_use=cp_use,
-            timer=timer,
-            prefs=prefs,
-            r1o=r1o,
-            relaxivity=relaxivity,
-            fw=fw,
-            stlv_use=stlv_use,
-            sttum=sttum,
-            start_injection_min=start_injection_min,
-            sss=sss,
-            ssstum=ssstum,
-            acceleration_backend=acceleration_backend,
-        )
+        n_params = len(param_names)
+        if fit_voxels:
+            voxel_results = _fit_stage_d_model(
+                model_name=model_name,
+                ct=ct_source,
+                cp_use=cp_use,
+                timer=timer,
+                prefs=prefs,
+                r1o=r1o,
+                relaxivity=relaxivity,
+                fw=fw,
+                stlv_use=stlv_use,
+                sttum=sttum,
+                start_injection_min=start_injection_min,
+                sss=sss,
+                ssstum=ssstum,
+                acceleration_backend=acceleration_backend,
+            )
+        else:
+            # Placeholder so shapes stay consistent; no maps are written in ROI-only mode.
+            voxel_results = np.full((ct_source.shape[1], n_params), np.nan, dtype=np.float64)
 
-        roi_results = np.empty((0, voxel_results.shape[1]), dtype=np.float64)
+        roi_results = np.empty((0, n_params), dtype=np.float64)
         roi_curve: Optional[np.ndarray] = None
         roi_r1o: Optional[np.ndarray] = None
         if roi_columns:
@@ -3915,14 +3924,18 @@ def _run_stage_d_real(
                 acceleration_backend=acceleration_backend,
             )
 
-        map_paths = _write_param_maps(
-            config=config,
-            rootname=rootname,
-            model_name=model_name,
-            param_names=param_names,
-            fit_values=voxel_results,
-            tumind=tumind,
-            spatial_shape=spatial_shape,
+        map_paths = (
+            _write_param_maps(
+                config=config,
+                rootname=rootname,
+                model_name=model_name,
+                param_names=param_names,
+                fit_values=voxel_results,
+                tumind=tumind,
+                spatial_shape=spatial_shape,
+            )
+            if fit_voxels
+            else {}
         )
 
         xls_path: Optional[str] = None
