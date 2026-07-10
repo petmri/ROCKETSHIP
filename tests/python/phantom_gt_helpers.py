@@ -221,6 +221,64 @@ def _region_mae_stats(pred: np.ndarray, truth: np.ndarray, mask: np.ndarray) -> 
     return out
 
 
+def _region_ci_coverage_stats(
+    pred: np.ndarray,
+    ci_low: np.ndarray,
+    ci_high: np.ndarray,
+    truth: np.ndarray,
+    mask: np.ndarray,
+) -> Optional[Dict[str, float]]:
+    """Ground-truth coverage of the fit's 95% CI, per region.
+
+    On noisy synthetic data the CI belongs to the fit estimate, not the truth, so
+    the right accuracy question is how often ground truth falls inside the fit's CI.
+    For a well-calibrated fit this coverage should be ~0.95; coverage far below
+    nominal indicates systematic bias (model mismatch or over-tight CIs) rather than
+    noise. Also returns a standardized error z = |GT - fit| / CI_halfwidth (values
+    > ~1 are outside the 95% CI). CI bounds are ordered per voxel so derived-parameter
+    intervals that come out reversed are handled; voxels with non-finite or zero-width
+    CIs are excluded from the coverage denominator and counted in ci_n_invalid.
+    """
+    mask_use = (
+        np.asarray(mask, dtype=bool)
+        & np.isfinite(pred)
+        & np.isfinite(truth)
+        & np.isfinite(ci_low)
+        & np.isfinite(ci_high)
+    )
+    n = int(np.count_nonzero(mask_use))
+    if n <= 0:
+        return None
+    pred_vals = pred[mask_use]
+    truth_vals = truth[mask_use]
+    lo = np.minimum(ci_low[mask_use], ci_high[mask_use])
+    hi = np.maximum(ci_low[mask_use], ci_high[mask_use])
+    width = hi - lo
+    valid = width > 0.0
+    n_valid = int(np.count_nonzero(valid))
+    out: Dict[str, float] = {
+        "ci_n": float(n),
+        "ci_n_invalid": float(n - n_valid),
+    }
+    if n_valid <= 0:
+        out["ci_coverage_frac"] = float("nan")
+        return out
+    lo_v = lo[valid]
+    hi_v = hi[valid]
+    gt_v = truth_vals[valid]
+    pred_v = pred_vals[valid]
+    inside = (gt_v >= lo_v) & (gt_v <= hi_v)
+    halfwidth = 0.5 * (hi_v - lo_v)
+    z = np.abs(gt_v - pred_v) / halfwidth
+    out["ci_coverage_frac"] = float(np.mean(inside))
+    out["ci_frac_gt_below"] = float(np.mean(gt_v < lo_v))
+    out["ci_frac_gt_above"] = float(np.mean(gt_v > hi_v))
+    out["ci_halfwidth_median"] = float(np.median(halfwidth))
+    out["ci_z_abs_median"] = float(np.median(z))
+    out["ci_z_abs_p95"] = float(np.percentile(z, 95.0))
+    return out
+
+
 def _parse_gt_aif_timeseries(path: Path) -> Dict[str, Any]:
     text = path.read_text(encoding="utf-8")
     baseline_images: Optional[int] = None
@@ -657,12 +715,33 @@ def run_phantom_gt_session_compare(
                 continue
             pred_map = np.asarray(_load_array(Path(str(map_path_str))), dtype=np.float64)
             truth_map = gt_maps[param_name]
+            ci_base = str(param_name).lower()
+            ci_low_path = map_paths.get(f"{ci_base}_ci_low")
+            ci_high_path = map_paths.get(f"{ci_base}_ci_high")
+            ci_low_map = (
+                np.asarray(_load_array(Path(str(ci_low_path))), dtype=np.float64)
+                if ci_low_path
+                else None
+            )
+            ci_high_map = (
+                np.asarray(_load_array(Path(str(ci_high_path))), dtype=np.float64)
+                if ci_high_path
+                else None
+            )
             region_metrics: Dict[str, Any] = {}
             for label_value, region_name in PHANTOM_LABELS.items():
                 region_mask = (gt_seg == float(label_value)) & (pred_map != 0.0)
                 stats = _region_mae_stats(pred_map, truth_map, region_mask)
-                if stats is not None:
-                    region_metrics[region_name] = _numeric_copy(stats)
+                if stats is None:
+                    continue
+                region_stats = _numeric_copy(stats)
+                if ci_low_map is not None and ci_high_map is not None:
+                    coverage = _region_ci_coverage_stats(
+                        pred_map, ci_low_map, ci_high_map, truth_map, region_mask
+                    )
+                    if coverage is not None:
+                        region_stats.update(coverage)
+                region_metrics[region_name] = region_stats
             if region_metrics:
                 model_metrics[param_name] = region_metrics
         if model_metrics:

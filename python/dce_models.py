@@ -8,6 +8,7 @@ from typing import Dict, Iterable, List, Optional
 import numpy as np
 from scipy.interpolate import interp1d
 from scipy.optimize import curve_fit, least_squares
+from scipy.stats import t as _student_t
 
 
 def _safe_float_setting(settings: Dict[str, object], key: str, default: float) -> float:
@@ -147,6 +148,70 @@ def _least_squares_kwargs(settings: Dict[str, object], default_max_nfev: int) ->
     if loss != "linear":
         kwargs["loss"] = loss
     return kwargs
+
+
+def _ci_stderrs_from_covariance(cov: np.ndarray) -> np.ndarray:
+    """Standard errors from a parameter covariance matrix (NaN where undefined)."""
+    var = np.asarray(np.diag(cov), dtype=float)
+    return np.sqrt(np.where(np.isfinite(var) & (var >= 0.0), var, np.nan))
+
+
+def _ci_from_stderrs(
+    estimates: np.ndarray,
+    stderrs: np.ndarray,
+    dof: int,
+    *,
+    level: float = 0.95,
+) -> tuple[List[float], List[float]]:
+    """Two-sided CI bounds: estimate +/- t(1-alpha/2, dof) * stderr.
+
+    Returns (lows, highs) in the estimates' own units. NaN entries where the
+    standard error is undefined, mirroring MATLAB confint on a degenerate fit.
+    """
+    est = np.asarray(estimates, dtype=float)
+    se = np.asarray(stderrs, dtype=float)
+    if dof <= 0:
+        nan = [float("nan")] * est.size
+        return nan, nan
+    tval = float(_student_t.ppf(1.0 - (1.0 - level) / 2.0, dof))
+    lows: List[float] = []
+    highs: List[float] = []
+    for i in range(est.size):
+        s = float(se[i])
+        if not math.isfinite(s):
+            lows.append(float("nan"))
+            highs.append(float("nan"))
+        else:
+            lows.append(float(est[i] - tval * s))
+            highs.append(float(est[i] + tval * s))
+    return lows, highs
+
+
+def _ci_bounds_from_fit(fit, *, level: float = 0.95) -> tuple[List[float], List[float]]:
+    """95% CIs for a scipy ``least_squares`` result, matching MATLAB confint/nlparci.
+
+    Covariance = MSE * inv(J^T J) with MSE = SSE / (n_obs - n_params); the CI half
+    width is t(1-alpha/2, dof) * sqrt(diag(cov)). Returns (lows, highs) in the fit's
+    own parameter units, or all-NaN where the covariance is undefined (dof <= 0,
+    singular normal matrix, or non-finite variance).
+    """
+    x = np.asarray(fit.x, dtype=float)
+    p = int(x.size)
+    res = np.asarray(fit.fun, dtype=float).reshape(-1)
+    n_obs = int(res.size)
+    nan = [float("nan")] * p
+    dof = n_obs - p
+    if dof <= 0:
+        return nan, nan
+    jac = np.asarray(fit.jac, dtype=float)
+    if jac.ndim != 2 or jac.shape[0] != n_obs or jac.shape[1] != p:
+        return nan, nan
+    mse = float(np.dot(res, res)) / dof
+    try:
+        cov = mse * np.linalg.inv(jac.T @ jac)
+    except np.linalg.LinAlgError:
+        return nan, nan
+    return _ci_from_stderrs(x, _ci_stderrs_from_covariance(cov), dof, level=level)
 
 
 def _cumulative_trapz_values(y: List[float], t: List[float]) -> List[float]:
@@ -303,7 +368,7 @@ def _fit_2cxm_osipi_canonical(
     maxfev = int(_safe_float_setting(settings, "max_nfev", 4000.0))
 
     try:
-        fit, _ = curve_fit(
+        fit, pcov = curve_fit(
             lambda _t, vp, ve, fp, e: _two_cxm_curve_osipi(vp, ve, fp, e, cp_interp, t_interp),
             t_interp,
             ct_interp,
@@ -323,20 +388,45 @@ def _fit_2cxm_osipi_canonical(
     pred = _two_cxm_curve_osipi(vp, ve, fp_per_min_ml_per_ml, e, cp_interp, t_interp)
     sse = float(np.sum((pred - ct_interp) ** 2))
 
+    # CIs from curve_fit's covariance (fit coefficients are [vp, ve, fp, e]).
+    # Ktrans = E * Fp is derived, so its variance comes from the delta method.
+    cov = np.asarray(pcov, dtype=float)
+    dof = int(len(ct_interp)) - 4
+
+    def _safe_se(value: float) -> float:
+        return math.sqrt(value) if (math.isfinite(value) and value >= 0.0) else float("nan")
+
+    var_ktrans = (
+        (e * e) * float(cov[2, 2])
+        + (fp_per_min_ml_per_ml ** 2) * float(cov[3, 3])
+        + 2.0 * e * fp_per_min_ml_per_ml * float(cov[2, 3])
+    )
+    estimates = np.array([ktrans_per_min, ve, vp, fp_per_min_ml_per_ml], dtype=float)
+    stderrs = np.array(
+        [
+            _safe_se(var_ktrans),
+            _safe_se(float(cov[1, 1])),
+            _safe_se(float(cov[0, 0])),
+            _safe_se(float(cov[2, 2])),
+        ],
+        dtype=float,
+    )
+    ci_lo, ci_hi = _ci_from_stderrs(estimates, stderrs, dof)
+
     return [
         ktrans_per_min,
         ve,
         vp,
         fp_per_min_ml_per_ml,
         sse,
-        ktrans_per_min,
-        ktrans_per_min,
-        ve,
-        ve,
-        vp,
-        vp,
-        fp_per_min_ml_per_ml,
-        fp_per_min_ml_per_ml,
+        ci_lo[0],
+        ci_hi[0],
+        ci_lo[1],
+        ci_hi[1],
+        ci_lo[2],
+        ci_hi[2],
+        ci_lo[3],
+        ci_hi[3],
     ]
 
 
@@ -716,7 +806,8 @@ def model_patlak_fit(
     ktrans = float(fit.x[0])
     vp = float(fit.x[1])
 
-    return [ktrans, vp, sse, ktrans, ktrans, vp, vp]
+    ci_lo, ci_hi = _ci_bounds_from_fit(fit)
+    return [ktrans, vp, sse, ci_lo[0], ci_hi[0], ci_lo[1], ci_hi[1]]
 
 
 def model_tofts_fit(
@@ -781,8 +872,8 @@ def model_tofts_fit(
     ve = float(fit.x[1])
     sse = float(sum(v * v for v in fit.fun))
 
-    # Placeholder CI values: match output shape expected by parity contracts.
-    return [ktrans, ve, sse, ktrans, ktrans, ve, ve]
+    ci_lo, ci_hi = _ci_bounds_from_fit(fit)
+    return [ktrans, ve, sse, ci_lo[0], ci_hi[0], ci_lo[1], ci_hi[1]]
 
 
 def model_extended_tofts_fit(
@@ -860,8 +951,19 @@ def model_extended_tofts_fit(
     ve = float(fit.x[1])
     vp = float(fit.x[2])
 
-    # Placeholder CI values: match MATLAB output shape.
-    return [ktrans, ve, vp, sse, ktrans, ktrans, ve, ve, vp, vp]
+    ci_lo, ci_hi = _ci_bounds_from_fit(fit)
+    return [
+        ktrans,
+        ve,
+        vp,
+        sse,
+        ci_lo[0],
+        ci_hi[0],
+        ci_lo[1],
+        ci_hi[1],
+        ci_lo[2],
+        ci_hi[2],
+    ]
 
 
 def _clip_start_to_bounds(start: List[float], lb: List[float], ub: List[float]) -> List[float]:
@@ -940,8 +1042,8 @@ def model_vp_fit(
     fit, sse = _best_fit_over_starts(residual, starts, lb, ub, lsq_kwargs)
     vp = float(fit.x[0])
 
-    # Placeholder CI values: match MATLAB output shape.
-    return [vp, sse, vp, vp]
+    ci_lo, ci_hi = _ci_bounds_from_fit(fit)
+    return [vp, sse, ci_lo[0], ci_hi[0]]
 
 
 def model_tissue_uptake_fit(
@@ -1080,18 +1182,24 @@ def model_tissue_uptake_fit(
     ktrans_out = ktrans * rate_min_to_output
     fp_out = fp * rate_min_to_output
 
-    # Placeholder CI values: match MATLAB output shape.
+    # CIs on the fit coefficients [Ktrans, Fp, Tp] (canonical per-min / min).
+    # Ktrans/Fp bounds scale to output rate units; vp CI propagates the Tp CI
+    # through vp = (Fp + PS) * Tp, matching dce/model_tissue_uptake.m.
+    ci_lo, ci_hi = _ci_bounds_from_fit(fit)
+    ktrans_ci = (ci_lo[0] * rate_min_to_output, ci_hi[0] * rate_min_to_output)
+    fp_ci = (ci_lo[1] * rate_min_to_output, ci_hi[1] * rate_min_to_output)
+    vp_ci = ((fp + ps) * ci_lo[2], (fp + ps) * ci_hi[2])
     return [
         ktrans_out,
         fp_out,
         vp,
         sse,
-        ktrans_out,
-        ktrans_out,
-        fp_out,
-        fp_out,
-        vp,
-        vp,
+        ktrans_ci[0],
+        ktrans_ci[1],
+        fp_ci[0],
+        fp_ci[1],
+        vp_ci[0],
+        vp_ci[1],
     ]
 
 
@@ -1243,5 +1351,16 @@ def model_fxr_fit(
     tau = float(fit.x[2])
     sse = float(sum(v * v for v in fit.fun))
 
-    # Placeholder CI values: match output shape expected by parity contracts.
-    return [ktrans, ve, tau, sse, ktrans, ktrans, ve, ve, tau, tau]
+    ci_lo, ci_hi = _ci_bounds_from_fit(fit)
+    return [
+        ktrans,
+        ve,
+        tau,
+        sse,
+        ci_lo[0],
+        ci_hi[0],
+        ci_lo[1],
+        ci_hi[1],
+        ci_lo[2],
+        ci_hi[2],
+    ]

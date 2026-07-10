@@ -1,0 +1,44 @@
+{
+    "participant_id": {
+        "Description": "BIDS participant label. The descriptive suffix (original, downsample, noisyhigh, noisylow, phantom) encodes the dataset's role."
+    },
+    "group": {
+        "Description": "High-level category of the dataset.",
+        "Levels": {
+            "real_reference": "Real-style example acquisition (BIDS_example sub-01), used as the reference and as the source for the derived variants.",
+            "real_variant": "A deterministic modification of the real reference (added noise or spatial downsampling); no ground truth.",
+            "synthetic_phantom": "Fully synthetic DCE data generated from known parameter maps, shipping voxelwise ground truth."
+        }
+    },
+    "source": {
+        "Description": "Provenance of the underlying signal: BIDS_example/sub-01 for real-derived subjects, or synthetic_dce for the generated phantoms."
+    },
+    "dce_matrix": {
+        "Description": "DCE image matrix as X x Y x Z x T. For sub-01..sub-04 the DCE image is the preprocessed derivative (derivatives/.../dce/*desc-bfcz_DCE); for the phantoms it is the rawdata DCE.",
+        "Units": "voxels"
+    },
+    "dce_frames": {
+        "Description": "Number of DCE temporal frames (the T dimension)."
+    },
+    "temporal_resolution_s": {
+        "Description": "DCE frame spacing, from the TemporalResolution field of the DCE JSON sidecar.",
+        "Units": "s"
+    },
+    "baseline_frames": {
+        "Description": "Number of pre-contrast baseline frames as recorded by the phantom generator (SyntheticPhantom.BaselineImages). 'n/a' for real-derived subjects, which carry no generator baseline metadata."
+    },
+    "vfa_flip_angles_deg": {
+        "Description": "Flip angles of the variable-flip-angle T1-mapping series, in degrees.",
+        "Units": "degrees"
+    },
+    "ground_truth": {
+        "Description": "Availability of voxelwise ground-truth maps under ses-01/gt/.",
+        "Levels": {
+            "none": "No ground truth (real-derived data).",
+            "full": "T1, Ktrans, ve, vp, and fp maps plus a tissue-class mask (1=muscle/fat, 2=brain, 3=vessel), an AIF mask, and an AIF time series."
+        }
+    },
+    "description": {
+        "Description": "Free-text summary of the dataset's intent and distinguishing properties."
+    }
+}

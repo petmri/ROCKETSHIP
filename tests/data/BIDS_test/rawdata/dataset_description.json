@@ -1,0 +1,16 @@
+{
+    "Name": "ROCKETSHIP DCE/T1 parity and phantom-qualification test dataset",
+    "BIDSVersion": "1.9.0",
+    "DatasetType": "raw",
+    "Description": "Small synthetic BIDS dataset used by the ROCKETSHIP test suite for MATLAB<->Python parity and synthetic-phantom ground-truth qualification. Subjects sub-01..sub-04 are a real-style reference example (BIDS_example sub-01) plus derived variants; subjects sub-05..sub-09 are fully synthetic DCE phantoms that ship voxelwise ground-truth maps. Not intended for scientific reuse.",
+    "GeneratedBy": [
+        {
+            "Name": "generate_synthetic_datasets.m",
+            "Description": "Builds the real-style reference (sub-01original) and its noise/downsample variants (sub-02..sub-04) from tests/data/BIDS_example sub-01."
+        },
+        {
+            "Name": "synthetic_dce.generate_synthetic_data_gpu",
+            "Description": "Generates the synthetic ground-truth DCE phantoms (sub-05..sub-09) with known Ktrans/ve/vp/fp/T1 maps and a Parker AIF."
+        }
+    ]
+}
