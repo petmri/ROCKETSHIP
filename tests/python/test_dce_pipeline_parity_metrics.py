@@ -31,27 +31,39 @@ def _parity_log(message: str) -> None:
     print(f"[PARITY] {message}", flush=True)
 
 
+DOWNSAMPLE_SUBJECT = "sub-10bbbdownsample"
+DOWNSAMPLE_SESSION = "ses-01"
+
+
 def _dataset_paths(root: Path) -> dict:
-    processed = root / "processed"
-    matlab_ktrans = processed / "results_matlab" / "Dyn-1_tofts_fit_Ktrans.nii"
-    matlab_ve = processed / "results_matlab" / "Dyn-1_tofts_fit_ve.nii"
+    """Resolve DCE parity inputs within the BIDS_test sub-10bbbdownsample subject.
+
+    ``root`` is the BIDS dataset root (``tests/data/BIDS_test``). MATLAB reference
+    maps live under the ``derivatives/matlabref`` pipeline tree, keeping their
+    original ``Dyn-1_*`` filenames.
+    """
+    raw = root / "rawdata" / DOWNSAMPLE_SUBJECT / DOWNSAMPLE_SESSION
+    der = root / "derivatives" / DOWNSAMPLE_SUBJECT / DOWNSAMPLE_SESSION
+    matlabref = root / "derivatives" / "matlabref" / DOWNSAMPLE_SUBJECT / DOWNSAMPLE_SESSION / "dce"
+    stem = f"{DOWNSAMPLE_SUBJECT}_{DOWNSAMPLE_SESSION}"
     return {
         "root": root,
-        "processed": processed,
-        "dynamic": root / "Dynamic_t1w.nii",
-        "aif": processed / "T1_AIF_roi.nii",
-        "roi": processed / "T1_brain_roi.nii",
-        "roi_gm": processed / "T1_gm_roi.nii",
-        "roi_wm": processed / "T1_wm_roi.nii",
-        "t1map": processed / "T1_map_t1_fa_fit_fa10.nii",
-        "noise": processed / "T1_noise_roi.nii",
-        "matlab_tofts_ktrans": matlab_ktrans,
-        "matlab_tofts_ve": matlab_ve,
+        "processed": der,
+        "matlabref": matlabref,
+        "dynamic": raw / "dce" / f"{stem}_DCE.nii",
+        "aif": der / "dce" / f"{stem}_desc-AIFroi_mask.nii",
+        "roi": der / "anat" / f"{stem}_desc-brain_mask.nii",
+        "roi_gm": der / "anat" / f"{stem}_desc-GMroi_mask.nii",
+        "roi_wm": der / "anat" / f"{stem}_desc-WMroi_mask.nii",
+        "t1map": der / "anat" / f"{stem}_space-DCEref_T1map.nii",
+        "noise": der / "anat" / f"{stem}_desc-noise_mask.nii",
+        "matlab_tofts_ktrans": matlabref / "Dyn-1_tofts_fit_Ktrans.nii",
+        "matlab_tofts_ve": matlabref / "Dyn-1_tofts_fit_ve.nii",
     }
 
 
 def _matlab_map_path(paths: dict, model_name: str, param: str) -> Path:
-    return Path(paths["processed"]) / "results_matlab" / f"Dyn-1_{model_name}_fit_{param}.nii"
+    return Path(paths["matlabref"]) / f"Dyn-1_{model_name}_fit_{param}.nii"
 
 
 def _model_flags(models: list[str]) -> dict[str, int]:
@@ -75,10 +87,7 @@ def _model_flags(models: list[str]) -> dict[str, int]:
 
 
 def _default_downsample_root() -> Path:
-    ci_fixture = REPO_ROOT / "tests/data" / "ci_fixtures" / "dce" / "bbb_p19_downsample_x3y3"
-    if ci_fixture.exists():
-        return ci_fixture
-    return REPO_ROOT / "tests/data" / "synthetic" / "generated" / "bbb_p19_downsample_x3y3"
+    return REPO_ROOT / "tests/data" / "BIDS_test"
 
 
 def _make_config(
@@ -415,6 +424,16 @@ def _normalized_roi_header(header: list[str]) -> list[str]:
     return out
 
 
+def _canonical_roi_token(name: str) -> str:
+    """Reduce an ROI label to its tissue token so BIDS-style mask filenames align with
+    the MATLAB reference's ``T1_*_roi`` names (e.g. ``...desc-brain_mask`` -> ``brain``)."""
+    text = str(name).strip().lower()
+    for token in ("brain", "gm", "wm", "aif", "noise"):
+        if token in text:
+            return token
+    return text
+
+
 def _compare_roi_table_against_reference(
     *,
     model_name: str,
@@ -446,8 +465,8 @@ def _compare_roi_table_against_reference(
 
         py_roi_name = str(py_row[1]).strip()
         ref_roi_name = str(ref_row[1]).strip()
-        assert py_roi_name == ref_roi_name, (
-            f"{model_name}: ROI name mismatch at row {row_idx + 1}: "
+        assert _canonical_roi_token(py_roi_name) == _canonical_roi_token(ref_roi_name), (
+            f"{model_name}: ROI tissue mismatch at row {row_idx + 1}: "
             f"python={py_roi_name!r} ref={ref_roi_name!r}"
         )
 
@@ -741,7 +760,7 @@ def test_bbb_p19_roi_xls_parity(
     roi_abs_err_limits = {"tofts": 0.03, "ex_tofts": 0.01, "patlak": 0.01, "tissue_uptake": 0.05}
 
     ref_xls_paths = {
-        m: Path(paths["processed"]) / "results_matlab" / f"Dyn-1_{m}_fit_rois.xls" for m in models
+        m: Path(paths["matlabref"]) / f"Dyn-1_{m}_fit_rois.xls" for m in models
     }
     missing = [str(p) for p in ref_xls_paths.values() if not p.exists()]
     if missing:

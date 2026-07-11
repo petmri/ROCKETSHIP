@@ -90,7 +90,7 @@ Key metadata now available in phantom DCE/GT sidecars (and used by ROCKETSHIP St
 - Canonical GT filenames now used (`desc-gt*`).
 
 ### 2. Phantom GT reliability helper and runner
-- Added summary runner with region-wise voxelwise error metrics:
+- Added summary runner with region-wise metrics:
   - `tests/python/run_phantom_gt_reliability.py`
 - Added helper for:
   - T1 reconstruction in-test
@@ -98,6 +98,18 @@ Key metadata now available in phantom DCE/GT sidecars (and used by ROCKETSHIP St
   - GT loading
   - AIF diagnostics
   - tolerance profile generation
+
+Metrics reported per model/parameter/region (see the runner's table columns):
+- `MAE`, `bias`, and `%GT` (= MAE / median|GT|) — absolute-error metrics; kept for continuity,
+  but `%GT` is unreliable where median|GT| ≈ 0.
+- `cov` (`cov(GT in CI)`) — **primary accuracy signal.** Fraction of voxels where ground truth
+  falls inside the fit's 95% confidence interval. Well-calibrated ≈ 0.95; much lower means
+  systematic bias (model mismatch or over-tight CIs), not noise. Scale-free, so it stays
+  meaningful where `%GT` blows up.
+- `z95` — 95th percentile of the standardized error `|GT − fit| / CI_halfwidth`. Values > ~1 are
+  outside the 95% CI; a companion to `cov` that shows how far outside.
+
+These depend on the fit emitting real confidence intervals (added 2026-07-10; see update above).
 
 ### 3. T1 quality improvements for phantom qualification
 - Phantom T1 reconstruction switched to nonlinear VFA fitting (`t1_fa_fit`) instead of linear VFA.

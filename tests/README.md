@@ -20,7 +20,7 @@ shown here as `pytest` for brevity.
 - `tests/matlab/{unit,integration,helpers}/`: MATLAB algorithm tests, fixtures, shared helpers.
 - `tests/contracts/`, `tests/contracts/baselines/`: cross-language parity contracts and generated MATLAB baselines.
 - `tests/python/`: Python pytest suite (pipeline, parity, OSIPI, qualification).
-- `tests/data/`: fixtures. `ci_fixtures/` are committed lightweight fixtures used by CI (no per-run generation).
+- `tests/data/`: fixtures. `BIDS_test/` holds the committed lightweight fixtures used by CI (no per-run generation), including the `sub-10bbbdownsample` / `sub-11tiny` fit-parity subjects.
 - `tests/data/osipi/`: imported OSIPI datasets + provenance + peer-result tolerances (see that dir's `README.md`).
 
 ## DCE Python↔MATLAB parity
@@ -93,11 +93,11 @@ identifiable voxels). Regenerate the reference only when the MATLAB T1 algorithm
 
 ```bash
 matlab -batch "addpath('tests/matlab'); addpath('tests/matlab/helpers'); \
-  generate_t1_parity_map('vfaFiles', {'tests/data/ci_fixtures/t1/vfa_small/flip-02deg_VFA.nii.gz', \
-   'tests/data/ci_fixtures/t1/vfa_small/flip-05deg_VFA.nii.gz', \
-   'tests/data/ci_fixtures/t1/vfa_small/flip-10deg_VFA.nii.gz'}, 'flipAngles', [2 5 10], \
+  generate_t1_parity_map('vfaFiles', {'tests/data/BIDS_test/rawdata/sub-11tiny/ses-01/anat/sub-11tiny_ses-01_flip-01_VFA.nii.gz', \
+   'tests/data/BIDS_test/rawdata/sub-11tiny/ses-01/anat/sub-11tiny_ses-01_flip-02_VFA.nii.gz', \
+   'tests/data/BIDS_test/rawdata/sub-11tiny/ses-01/anat/sub-11tiny_ses-01_flip-03_VFA.nii.gz'}, 'flipAngles', [2 5 10], \
   'trMs', 8.012, 'fitType', 't1_fa_fit', \
-  'outputPath', 'tests/data/ci_fixtures/t1/vfa_small/results_matlab/T1_map_t1_fa_fit.nii', 'rsquaredThreshold', 0);"
+  'outputPath', 'tests/data/BIDS_test/derivatives/matlabref/sub-11tiny/ses-01/anat/sub-11tiny_ses-01_desc-t1fafit_T1map.nii', 'rsquaredThreshold', 0);"
 pytest tests/python/test_t1_map_parity.py
 ```
 
@@ -153,6 +153,12 @@ Regenerate the downsampled BBB p19 DCE parity fixture and its MATLAB baseline ma
 
 ```bash
 python tests/data/scripts/generate_bbb_p19_downsample.py --clean --factor-x 3 --factor-y 3
-matlab -batch "addpath('tests/matlab'); generate_dce_tofts_parity_map('subjectRoot', \
-  'tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3', 'models', {'tofts', 'patlak'});"
+S=tests/data/BIDS_test; sub=sub-10bbbdownsample; ses=ses-01
+matlab -batch "addpath('tests/matlab'); generate_dce_tofts_parity_map( \
+  'dynamicPath', '$S/rawdata/$sub/$ses/dce/${sub}_${ses}_DCE.nii', \
+  'aifRoiPath', '$S/derivatives/$sub/$ses/dce/${sub}_${ses}_desc-AIFroi_mask.nii', \
+  'brainRoiPath', '$S/derivatives/$sub/$ses/anat/${sub}_${ses}_desc-brain_mask.nii', \
+  't1MapPath', '$S/derivatives/$sub/$ses/anat/${sub}_${ses}_space-DCEref_T1map.nii', \
+  'noiseRoiPath', '$S/derivatives/$sub/$ses/anat/${sub}_${ses}_desc-noise_mask.nii', \
+  'outputRoot', '$S/derivatives/matlabref/$sub/$ses/dce', 'models', {'tofts', 'patlak'});"
 ```

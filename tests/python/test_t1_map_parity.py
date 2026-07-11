@@ -32,12 +32,20 @@ sys.path.insert(0, str(REPO_ROOT / "python"))
 
 from parametric_pipeline import ParametricT1Config, run_parametric_t1_pipeline  # noqa: E402
 
-FIXTURE = REPO_ROOT / "tests/data/ci_fixtures/t1/vfa_small"
-MATLAB_MAP = FIXTURE / "results_matlab" / "T1_map_t1_fa_fit.nii"
+# Small VFA T1 fixture, hosted as the anat series of the BIDS_test sub-11tiny subject.
+# flip-01/02/03 correspond to the 2/5/10 deg flip angles.
+BIDS_ROOT = REPO_ROOT / "tests/data/BIDS_test"
+T1_SUBJECT = "sub-11tiny"
+T1_SESSION = "ses-01"
+_T1_STEM = f"{T1_SUBJECT}_{T1_SESSION}"
+FIXTURE = BIDS_ROOT / "rawdata" / T1_SUBJECT / T1_SESSION / "anat"
+MATLAB_MAP = (
+    BIDS_ROOT / "derivatives" / "matlabref" / T1_SUBJECT / T1_SESSION / "anat" / f"{_T1_STEM}_desc-t1fafit_T1map.nii"
+)
 VFA_FILES = [
-    FIXTURE / "flip-02deg_VFA.nii.gz",
-    FIXTURE / "flip-05deg_VFA.nii.gz",
-    FIXTURE / "flip-10deg_VFA.nii.gz",
+    FIXTURE / f"{_T1_STEM}_flip-01_VFA.nii.gz",
+    FIXTURE / f"{_T1_STEM}_flip-02_VFA.nii.gz",
+    FIXTURE / f"{_T1_STEM}_flip-03_VFA.nii.gz",
 ]
 FLIP_ANGLES_DEG = [2.0, 5.0, 10.0]
 TR_MS = 8.012
@@ -67,11 +75,12 @@ def _matlab_hint() -> str:
         f"Missing MATLAB T1 reference map: {MATLAB_MAP}\nGenerate it with:\n"
         "  matlab -batch \"addpath('tests/matlab'); addpath('tests/matlab/helpers'); "
         "generate_t1_parity_map('vfaFiles', "
-        "{'tests/data/ci_fixtures/t1/vfa_small/flip-02deg_VFA.nii.gz',"
-        "'tests/data/ci_fixtures/t1/vfa_small/flip-05deg_VFA.nii.gz',"
-        "'tests/data/ci_fixtures/t1/vfa_small/flip-10deg_VFA.nii.gz'}, "
+        "{'tests/data/BIDS_test/rawdata/sub-11tiny/ses-01/anat/sub-11tiny_ses-01_flip-01_VFA.nii.gz',"
+        "'tests/data/BIDS_test/rawdata/sub-11tiny/ses-01/anat/sub-11tiny_ses-01_flip-02_VFA.nii.gz',"
+        "'tests/data/BIDS_test/rawdata/sub-11tiny/ses-01/anat/sub-11tiny_ses-01_flip-03_VFA.nii.gz'}, "
         "'flipAngles', [2 5 10], 'trMs', 8.012, 'fitType', 't1_fa_fit', "
-        "'outputPath', 'tests/data/ci_fixtures/t1/vfa_small/results_matlab/T1_map_t1_fa_fit.nii', "
+        "'outputPath', 'tests/data/BIDS_test/derivatives/matlabref/sub-11tiny/ses-01/anat/"
+        "sub-11tiny_ses-01_desc-t1fafit_T1map.nii', "
         "'rsquaredThreshold', 0);\""
     )
 

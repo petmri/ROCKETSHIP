@@ -6,7 +6,7 @@ import argparse
 import json
 import shutil
 from pathlib import Path
-from typing import Iterable, List
+from typing import List
 
 import nibabel as nib
 import numpy as np
@@ -14,13 +14,13 @@ import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_SOURCE = REPO_ROOT / "tests" / "data" / "BBB data p19"
-DEFAULT_OUTPUT = REPO_ROOT / "tests" / "data" / "synthetic" / "generated" / "bbb_p19_downsample_x3y3"
-
-
-def _iter_result_maps(results_dir: Path) -> Iterable[Path]:
-    if not results_dir.exists():
-        return []
-    return sorted(results_dir.glob("*.nii")) + sorted(results_dir.glob("*.nii.gz"))
+# The downsampled BBB fixture is the DCE fit-parity subject sub-10bbbdownsample in BIDS_test.
+# --output-root points at the BIDS dataset root; files land under sub-10bbbdownsample/ses-01.
+# This script produces the pipeline INPUTS (DCE + preprocessed derivative maps/masks); the MATLAB
+# fit baselines under derivatives/matlabref are produced separately by the MATLAB parity generator.
+DEFAULT_OUTPUT = REPO_ROOT / "tests" / "data" / "BIDS_test"
+SUBJECT = "sub-10bbbdownsample"
+SESSION = "ses-01"
 
 
 def _scale_affine_xy(affine: np.ndarray, factor_x: int, factor_y: int) -> np.ndarray:
@@ -61,21 +61,22 @@ def _copy_or_downsample(src: Path, dst: Path, factor_x: int, factor_y: int) -> N
         shutil.copy2(src, dst)
 
 
-def _build_file_list(source_root: Path) -> List[Path]:
+def _build_file_map(source_root: Path) -> List[tuple[Path, Path]]:
+    """Map source BBB p19 files to their BIDS destinations under sub-10bbbdownsample/ses-01."""
+    stem = f"{SUBJECT}_{SESSION}"
+    raw_dce = Path("rawdata") / SUBJECT / SESSION / "dce"
+    der_anat = Path("derivatives") / SUBJECT / SESSION / "anat"
+    der_dce = Path("derivatives") / SUBJECT / SESSION / "dce"
     wanted = [
-        source_root / "Dynamic_t1w.nii",
-        source_root / "fa2.nii",
-        source_root / "fa5.nii",
-        source_root / "fa10.nii",
-        source_root / "processed" / "T1_AIF_roi.nii",
-        source_root / "processed" / "T1_brain_roi.nii",
-        source_root / "processed" / "T1_map_t1_fa_fit_fa10.nii",
-        source_root / "processed" / "T1_noise_roi.nii",
-        source_root / "processed" / "Rsquared_t1_fa_fit_fa10.nii",
-        source_root / "processed" / "User Inputs Log.txt",
+        (source_root / "Dynamic_t1w.nii", raw_dce / f"{stem}_DCE.nii"),
+        (source_root / "processed" / "T1_map_t1_fa_fit_fa10.nii", der_anat / f"{stem}_space-DCEref_T1map.nii"),
+        (source_root / "processed" / "T1_brain_roi.nii", der_anat / f"{stem}_desc-brain_mask.nii"),
+        (source_root / "processed" / "T1_gm_roi.nii", der_anat / f"{stem}_desc-GMroi_mask.nii"),
+        (source_root / "processed" / "T1_wm_roi.nii", der_anat / f"{stem}_desc-WMroi_mask.nii"),
+        (source_root / "processed" / "T1_noise_roi.nii", der_anat / f"{stem}_desc-noise_mask.nii"),
+        (source_root / "processed" / "T1_AIF_roi.nii", der_dce / f"{stem}_desc-AIFroi_mask.nii"),
     ]
-    wanted.extend(_iter_result_maps(source_root / "processed" / "results"))
-    return [p for p in wanted if p.exists()]
+    return [(src, dst) for src, dst in wanted if src.exists()]
 
 
 def parse_args() -> argparse.Namespace:
@@ -100,28 +101,41 @@ def main() -> int:
     if not source_root.exists():
         raise FileNotFoundError(f"Source root does not exist: {source_root}")
 
-    if args.clean and output_root.exists():
-        shutil.rmtree(output_root)
+    file_map = _build_file_map(source_root)
 
-    file_list = _build_file_list(source_root)
+    if args.clean:
+        # Remove only the exact files this script owns. The GM/WM ROI masks (added for GM/WM
+        # parity and not derivable from the base BBB source) and the MATLAB baselines under
+        # derivatives/matlabref are committed assets that must survive a regeneration.
+        stem = f"{SUBJECT}_{SESSION}"
+        owned_files = [output_root / rel for _, rel in file_map]
+        owned_files.append(output_root / "rawdata" / SUBJECT / SESSION / "dce" / f"{stem}_DCE.json")
+        for f in owned_files:
+            if f.exists():
+                f.unlink()
     generated: List[str] = []
-    for src in file_list:
-        rel = src.relative_to(source_root)
-        dst = output_root / rel
+    for src, rel_dst in file_map:
+        dst = output_root / rel_dst
         _copy_or_downsample(src, dst, factor_x, factor_y)
-        generated.append(str(rel))
+        generated.append(str(rel_dst))
 
-    manifest = {
-        "source_root": str(source_root),
-        "output_root": str(output_root),
-        "factor_x": factor_x,
-        "factor_y": factor_y,
-        "generated_files": generated,
-    }
-    output_root.mkdir(parents=True, exist_ok=True)
-    (output_root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    stem = f"{SUBJECT}_{SESSION}"
+    dce_json = output_root / "rawdata" / SUBJECT / SESSION / "dce" / f"{stem}_DCE.json"
+    dce_json.write_text(
+        json.dumps(
+            {
+                "RepetitionTime": 0.00829,
+                "TemporalResolution": 15.84,
+                "FlipAngle": 15,
+                "AcquisitionDateTime": "2000-01-01T00:00:00.000000",
+            },
+            indent=2,
+        )
+        + "\n"
+    )
 
-    print(str(output_root))
+    subject_root = output_root / "rawdata" / SUBJECT / SESSION
+    print(str(subject_root))
     return 0
 
 

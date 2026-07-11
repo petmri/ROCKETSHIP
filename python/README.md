@@ -97,7 +97,7 @@ Default template location:
 
 - `/path/to/ROCKETSHIP/python/dce_default.json`
 - This default is prewired to the tiny fixture:
-  - `/path/to/ROCKETSHIP/tests/data/ci_fixtures/dce/tiny_settings_case`
+  - `/path/to/ROCKETSHIP/tests/data/BIDS_test` (subject `sub-11tiny`, session `ses-01`)
   - outputs to `/path/to/ROCKETSHIP/out/dce_gui_tiny`
 
 Optional runtime overrides:
@@ -451,7 +451,7 @@ cd /path/to/ROCKETSHIP
 ```
 
 See `tests/README.md` for the full parity docs (regions, gated/reported split, thresholds).
-Default downsample fixture: `tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3`.
+Default downsample fixture: `tests/data/BIDS_test` (subject `sub-10bbbdownsample`).
 
 ### Tiny settings matrix (fast)
 

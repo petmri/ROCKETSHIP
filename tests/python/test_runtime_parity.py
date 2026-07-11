@@ -40,8 +40,13 @@ from test_dce_pipeline_parity_metrics import (  # noqa: E402
 from dce_pipeline import run_dce_pipeline  # noqa: E402
 from parametric_pipeline import ParametricT1Config, run_parametric_t1_pipeline  # noqa: E402
 
-T1_FIXTURE = REPO_ROOT / "tests/data/ci_fixtures/t1/vfa_small"
-T1_FLIP_FILES = ["flip-02deg_VFA.nii.gz", "flip-05deg_VFA.nii.gz", "flip-10deg_VFA.nii.gz"]
+# Small VFA T1 fixture: anat series of BIDS_test sub-11tiny (flip-01/02/03 = 2/5/10 deg).
+T1_FIXTURE = REPO_ROOT / "tests/data/BIDS_test/rawdata/sub-11tiny/ses-01/anat"
+T1_FLIP_FILES = [
+    "sub-11tiny_ses-01_flip-01_VFA.nii.gz",
+    "sub-11tiny_ses-01_flip-02_VFA.nii.gz",
+    "sub-11tiny_ses-01_flip-03_VFA.nii.gz",
+]
 T1_FLIP_ANGLES = [2.0, 5.0, 10.0]
 T1_TR_MS = 8.012
 

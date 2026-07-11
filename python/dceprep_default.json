@@ -1,6 +1,6 @@
 {
-  "subject_source_path": "./tests/data/ci_fixtures/dce/tiny_settings_case",
-  "subject_tp_path": "./tests/data/ci_fixtures/dce/tiny_settings_case/processed",
+  "subject_source_path": "./tests/data/BIDS_test/rawdata/sub-02downsample/ses-01",
+  "subject_tp_path": "./tests/data/BIDS_test/derivatives/sub-02downsample/ses-01",
   "output_dir": "./out/dce_gui_tiny",
   "checkpoint_dir": "./out/dce_gui_tiny/checkpoints",
   "backend": "cpu",
@@ -39,7 +39,7 @@
     "stage_d_mode": "real",
     "aif_curve_mode": "fitted",
     "rootname": "Dyn-1",
-    "dce_metadata_path": "./tests/data/ci_fixtures/dce/tiny_settings_case/manifest.json",
+    "dce_metadata_path": "./tests/data/BIDS_test/rawdata/sub-02downsample/ses-01/dce/sub-02downsample_ses-01_DCE.json",
     "tr_sec": null,
     "tr_ms": null,
     "fa_deg": null,
