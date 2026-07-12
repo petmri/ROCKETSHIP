@@ -212,3 +212,6 @@ external_programs/libGpufit.*
 
 # CI drift-guard: freshly regenerated baseline candidate (never committed)
 _ci_baseline_candidate/
+
+# Local runner scratch output (never committed)
+RUNNER_DATA/

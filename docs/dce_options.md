@@ -49,7 +49,7 @@ For options in `stage_overrides`:
 - `write_postfit_arrays`: bool for optional Part E array export (`*_postfit_arrays.npz`)
 
 ### Preferences bridging
-- `use_dce_preferences`: bool to enable `dce_preferences.txt` defaults
+- `use_dce_preferences`: bool to enable `dce_preferences.txt` defaults (default: `false` — Python workflows use JSON defaults/config only; enable this to opt into the legacy MATLAB-style preference bridge). There is no CLI flag for the preference file; set `use_dce_preferences`/`dce_preferences_path` via `stage_overrides` (or `--set`).
 - `dce_preferences_path`: explicit path override
 - `force_cpu`: when backend is `auto`, force CPU path if non-zero
 

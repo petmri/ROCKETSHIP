@@ -124,7 +124,6 @@ Optional runtime overrides:
 ```bash
 python run_dce_python_cli.py \
   --config tests/python/dce_cli_config.example.json \
-  --dce-preferences /path/to/ROCKETSHIP/dce/dce_preferences.txt \
   --set voxel_MaxFunEvals=100 \
   --set blood_t1_ms=1600
 ```
