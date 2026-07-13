@@ -3396,6 +3396,81 @@ def _accelerated_output_has_usable_primary_params(model_name: str, output: np.nd
     return bool(np.any(finite_rows))
 
 
+# Accelerated models prone to the vp<->Fp degenerate minimum (single fixed start can
+# pin vp to its bound while Fp inflates). A small multi-start rescues those voxels.
+_ACCEL_MULTISTART_MODELS = {"2cxm", "tissue_uptake"}
+# Index of (vp, Fp) within each model's accelerated parameter row.
+_ACCEL_VP_FP_INDEX = {"2cxm": (2, 3), "tissue_uptake": (1, 2)}
+# (Fp_scale, vp_scale) perturbations of the fixed start tried for suspect voxels.
+_ACCEL_MULTISTART_SCALES = (
+    (0.3, 1.0),
+    (3.0, 1.0),
+    (1.0, 5.0),
+    (0.3, 5.0),
+    (6.0, 1.0),
+    (1.0, 15.0),
+)
+
+
+def _accel_multistart_refine(
+    run_fit,
+    data: np.ndarray,
+    params: np.ndarray,
+    states_arr: np.ndarray,
+    chi: np.ndarray,
+    initial_row: np.ndarray,
+    bounds_row: np.ndarray,
+    model_name: str,
+):
+    """Re-fit degenerate voxels from perturbed starts; keep the lowest chi-square.
+
+    ``run_fit(init_params, data_subset) -> (params, states, chi)`` runs one batched
+    constrained fit on a voxel subset. Only voxels whose base fit failed or pinned
+    vp/Fp to a bound are re-fit, so the extra cost scales with the number of suspect
+    voxels rather than the whole volume. A candidate is adopted only when it converged
+    and strictly lowers chi-square, so multi-start can never degrade a good base fit.
+    This is backend-agnostic: it varies only the initial values and so applies
+    identically to every accelerated backend (cpufit/gpufit).
+    """
+    vp_idx, fp_idx = _ACCEL_VP_FP_INDEX[model_name]
+    vp_lo, vp_hi = float(bounds_row[2 * vp_idx]), float(bounds_row[2 * vp_idx + 1])
+    fp_lo, fp_hi = float(bounds_row[2 * fp_idx]), float(bounds_row[2 * fp_idx + 1])
+
+    with np.errstate(invalid="ignore"):
+        pinned = (
+            (states_arr != 0)
+            | ~np.isfinite(chi)
+            | (params[:, vp_idx] <= vp_lo * 1.05)
+            | (params[:, fp_idx] >= fp_hi * 0.95)
+        )
+    suspects = np.nonzero(pinned)[0]
+    if suspects.size == 0:
+        return params, states_arr, chi
+
+    best_params = params.copy()
+    best_states = states_arr.copy()
+    best_chi = chi.copy()
+    sub_data = np.ascontiguousarray(data[suspects])
+    for fp_scale, vp_scale in _ACCEL_MULTISTART_SCALES:
+        alt = initial_row.copy()
+        alt[fp_idx] = min(max(float(initial_row[fp_idx]) * fp_scale, fp_lo), fp_hi)
+        alt[vp_idx] = min(max(float(initial_row[vp_idx]) * vp_scale, vp_lo), vp_hi)
+        init = np.ascontiguousarray(np.tile(alt[None, :], (suspects.size, 1)), dtype=np.float32)
+        cand_p, cand_s, cand_c = run_fit(init, sub_data)
+        for j, vox in enumerate(suspects):
+            if cand_s[j] != 0 or not np.isfinite(cand_c[j]):
+                continue
+            if (
+                best_states[vox] != 0
+                or not np.isfinite(best_chi[vox])
+                or cand_c[j] < best_chi[vox]
+            ):
+                best_params[vox] = cand_p[j]
+                best_states[vox] = cand_s[j]
+                best_chi[vox] = cand_c[j]
+    return best_params, best_states, best_chi
+
+
 def _fit_stage_d_model_accelerated(
     model_name: str,
     ct: np.ndarray,
@@ -3530,30 +3605,42 @@ def _fit_stage_d_model_accelerated(
 
     n_params = int(initial_row.size)
     initial_parameters = np.ascontiguousarray(np.tile(initial_row[None, :], (n_fits, 1)), dtype=np.float32)
-    constraints = np.ascontiguousarray(np.tile(bounds_row[None, :], (n_fits, 1)), dtype=np.float32)
     constraint_types = np.ascontiguousarray(
         np.full((n_params,), int(fit_module.ConstraintType.LOWER_UPPER), dtype=np.int32)
     )
     tolerance = float(prefs.get("gpu_tolerance", 1e-6))
     max_iterations = int(prefs.get("gpu_max_n_iterations", 200))
 
-    parameters, states, chi_squares, _, _ = fit_module.fit_constrained(
-        data=data,
-        weights=None,
-        model_id=model_id,
-        initial_parameters=initial_parameters,
-        constraints=constraints,
-        constraint_types=constraint_types,
-        tolerance=tolerance,
-        max_number_iterations=max_iterations,
-        parameters_to_fit=None,
-        estimator_id=int(fit_module.EstimatorID.LSE),
-        user_info=user_info,
-    )
+    def _run_fit(init_params: np.ndarray, data_arr: np.ndarray):
+        n = int(data_arr.shape[0])
+        parameters, states, chi_squares, _, _ = fit_module.fit_constrained(
+            data=data_arr,
+            weights=None,
+            model_id=model_id,
+            initial_parameters=np.ascontiguousarray(init_params, dtype=np.float32),
+            constraints=np.ascontiguousarray(np.tile(bounds_row[None, :], (n, 1)), dtype=np.float32),
+            constraint_types=constraint_types,
+            tolerance=tolerance,
+            max_number_iterations=max_iterations,
+            parameters_to_fit=None,
+            estimator_id=int(fit_module.EstimatorID.LSE),
+            user_info=user_info,
+        )
+        return (
+            np.asarray(parameters, dtype=np.float64).reshape(n, -1),
+            np.asarray(states, dtype=np.int32).reshape(-1),
+            np.asarray(chi_squares, dtype=np.float64).reshape(-1),
+        )
 
-    params = np.asarray(parameters, dtype=np.float64)
-    states_arr = np.asarray(states, dtype=np.int32).reshape(-1)
-    chi = np.asarray(chi_squares, dtype=np.float64).reshape(-1)
+    # Backend-agnostic multi-start: fit once from the fixed start, then re-fit only the
+    # voxels that hit the vp<->Fp degenerate minimum from perturbed starts (keep the
+    # lowest chi-square). Applies identically to cpufit and gpufit.
+    params, states_arr, chi = _run_fit(initial_parameters, data)
+    if model_name in _ACCEL_MULTISTART_MODELS and bool(prefs.get("accel_multistart", True)):
+        params, states_arr, chi = _accel_multistart_refine(
+            _run_fit, data, params, states_arr, chi, initial_row, bounds_row, model_name
+        )
+
     failed = states_arr != 0
     if np.any(failed):
         params[failed, :] = np.nan

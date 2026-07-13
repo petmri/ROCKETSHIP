@@ -50,6 +50,9 @@ class _FakeAccelModule:
         LSE = 0
 
     last_call = None
+    # first_call captures the base (fixed-start) fit; multi-start may issue further
+    # refine calls with perturbed initials, which land in last_call.
+    first_call = None
 
     @classmethod
     def fit_constrained(
@@ -74,6 +77,8 @@ class _FakeAccelModule:
             "constraints": np.asarray(constraints, dtype=np.float32),
             "constraint_types": np.asarray(constraint_types, dtype=np.int32),
         }
+        if cls.first_call is None:
+            cls.first_call = cls.last_call
         n_fits = int(np.asarray(data).shape[0])
         n_params = int(np.asarray(initial_parameters).shape[1])
         params = np.tile(np.arange(1, n_params + 1, dtype=np.float32), (n_fits, 1))
@@ -965,6 +970,7 @@ class TestDcePipeline:
         }
 
         _FakeAccelModule.last_call = None
+        _FakeAccelModule.first_call = None
         with patch("dce_pipeline._load_fit_module_for_acceleration", return_value=_FakeAccelModule):
             out = _fit_stage_d_model_accelerated(
                 model_name=model_name,
@@ -982,10 +988,12 @@ class TestDcePipeline:
         assert np.allclose(np.asarray(out)[0, :], np.asarray(expected_row0, dtype=np.float64)), (
             f"{model_name}: unexpected output row"
         )
-        assert _FakeAccelModule.last_call is not None, f"{model_name}: accelerator call missing"
-        assert _FakeAccelModule.last_call["model_id"] == model_id
-        assert np.allclose(_FakeAccelModule.last_call["initial_parameters"][0, :], np.asarray(expected_init))
-        assert np.allclose(_FakeAccelModule.last_call["constraints"][0, :], np.asarray(expected_bounds))
+        assert _FakeAccelModule.first_call is not None, f"{model_name}: accelerator call missing"
+        assert _FakeAccelModule.first_call["model_id"] == model_id
+        # The base (fixed-start) call carries the configured initials/bounds; multi-start
+        # refine calls (2cxm/2cum) perturb the initials and are not asserted here.
+        assert np.allclose(_FakeAccelModule.first_call["initial_parameters"][0, :], np.asarray(expected_init))
+        assert np.allclose(_FakeAccelModule.first_call["constraints"][0, :], np.asarray(expected_bounds))
 
     @pytest.mark.parametrize("model_name", ["ex_tofts", "tissue_uptake", "2cxm"])
     def test_stage_d_uses_acceleration_for_new_models(self, model_name: str) -> None:

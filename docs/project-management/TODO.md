@@ -26,11 +26,10 @@ Keep strategic sequencing in `docs/project-management/ROADMAP.md` and current me
 ## External Accelerator Handoff (Open Items Only)
 
 ### GPUfit / CPUfit Backend
-- [ ] Improve constrained-fit robustness for multi-parameter DCE models (`2cxm`, `tissue_uptake`).
-- [ ] Ensure deterministic handling/reporting for failed fits (no silent NaN propagation).
+- [ ] **`2cxm` accelerated fit is precision/parameterization-limited.** After the upstream false-CONVERGED fix (Gpufit `dev` `3db5b4d`) and the backend-agnostic multi-start (which resolved `tissue_uptake`/2CUM), the float32 cpufit/gpufit `2cxm` fit still misses ~6/24 OSIPI cases (`vp`↔`Fp` degeneracy). Initialization does not fix it (warm-start from linear Patlak makes it worse); the float64 python backend, which fits `E=Ktrans/Fp`, passes and is the reference. Options: double-precision cpufit/gpufit build, or reparameterize the compiled `2cxm` model to `E=Ktrans/Fp`. See `docs/project-management/projects/osipi-verification/gpufit_2cxm_2cum_divergence.md`.
+- [ ] Verify CUDA/GPUfit runtime behavior on CUDA-capable hardware for the false-CONVERGED fix, the backend-agnostic multi-start (2CUM), and the `TOFTS_EXTENDED`/`2CXM` backend fixes (multi-start is verified on cpufit only locally).
 - [ ] Verify bound handling and initialization consistency across GPUfit/CPUfit implementations.
 - [ ] Provide backend diagnostics that can be surfaced directly in Python test failure messages.
-- [ ] Verify CUDA/GPUfit runtime behavior for recent `TOFTS_EXTENDED` and `2CXM` backend fixes on CUDA-capable machines.
 
 ### Synthetic_DCE Generator
 - [ ] Import segmentation image with tissue classes.

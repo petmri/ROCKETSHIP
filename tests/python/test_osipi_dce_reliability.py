@@ -1,4 +1,8 @@
-"""OSIPI-labeled DCE reliability tests using imported OSIPI reference datasets."""
+"""OSIPI DCE reliability tests — python backend (``model_*_fit``).
+
+Full sweep of every OSIPI DRO case, gated on OSIPI's official acceptance tolerances.
+The cpufit/gpufit backends are covered by test_osipi_pycpufit.py / test_osipi_pygpufit.py.
+"""
 
 from __future__ import annotations
 
