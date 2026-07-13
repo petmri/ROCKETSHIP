@@ -3396,79 +3396,79 @@ def _accelerated_output_has_usable_primary_params(model_name: str, output: np.nd
     return bool(np.any(finite_rows))
 
 
-# Accelerated models prone to the vp<->Fp degenerate minimum (single fixed start can
-# pin vp to its bound while Fp inflates). A small multi-start rescues those voxels.
+# Accelerated models prone to the vp<->Fp degenerate minimum: the fixed start's Fp is
+# far above the true internal Fp, dropping the LM solver into a wrong basin (vp pinned to
+# its bound, Fp inflated). A random multi-start escapes it. See the OSIPI verification doc.
 _ACCEL_MULTISTART_MODELS = {"2cxm", "tissue_uptake"}
-# Index of (vp, Fp) within each model's accelerated parameter row.
-_ACCEL_VP_FP_INDEX = {"2cxm": (2, 3), "tissue_uptake": (1, 2)}
-# (Fp_scale, vp_scale) perturbations of the fixed start tried for suspect voxels.
-_ACCEL_MULTISTART_SCALES = (
-    (0.3, 1.0),
-    (3.0, 1.0),
-    (1.0, 5.0),
-    (0.3, 5.0),
-    (6.0, 1.0),
-    (1.0, 15.0),
-)
+_ACCEL_MULTISTART_STARTS = 8         # random log-uniform starts beyond the fixed caller start
+_ACCEL_MULTISTART_COARSE_ITERS = 30  # cheap coarse fit to pick the basin before refining
 
 
 def _accel_multistart_refine(
+    *,
     run_fit,
     data: np.ndarray,
-    params: np.ndarray,
-    states_arr: np.ndarray,
-    chi: np.ndarray,
+    base_params: np.ndarray,
+    base_states: np.ndarray,
+    base_chi: np.ndarray,
     initial_row: np.ndarray,
     bounds_row: np.ndarray,
-    model_name: str,
+    n_starts: int,
+    coarse_iters: int,
+    refine_iters: int,
+    seed: int = 0,
 ):
-    """Re-fit degenerate voxels from perturbed starts; keep the lowest chi-square.
+    """Random log-uniform multi-start (per voxel): coarse-explore, then refine.
 
-    ``run_fit(init_params, data_subset) -> (params, states, chi)`` runs one batched
-    constrained fit on a voxel subset. Only voxels whose base fit failed or pinned
-    vp/Fp to a bound are re-fit, so the extra cost scales with the number of suspect
-    voxels rather than the whole volume. A candidate is adopted only when it converged
-    and strictly lowers chi-square, so multi-start can never degrade a good base fit.
-    This is backend-agnostic: it varies only the initial values and so applies
-    identically to every accelerated backend (cpufit/gpufit).
+    Adopted from the Gpufit bug harness (``bug/experiments.py``). For every voxel the
+    caller's fixed start plus ``n_starts`` log-uniform draws within the parameter bounds
+    are each run through a cheap coarse fit (``coarse_iters``); the lowest coarse
+    chi-square picks the basin, and a single full refine (``refine_iters``) runs from it.
+    The refined fit replaces the base fit only where it converged and strictly lowers
+    chi-square, so multi-start can never degrade a good base fit. Backend-agnostic: it
+    varies only the initial values, so it applies identically to cpufit and gpufit.
+
+    ``run_fit(init_params, data, max_iter) -> (params, states, chi)``.
     """
-    vp_idx, fp_idx = _ACCEL_VP_FP_INDEX[model_name]
-    vp_lo, vp_hi = float(bounds_row[2 * vp_idx]), float(bounds_row[2 * vp_idx + 1])
-    fp_lo, fp_hi = float(bounds_row[2 * fp_idx]), float(bounds_row[2 * fp_idx + 1])
+    n_fits, n_params = int(base_params.shape[0]), int(base_params.shape[1])
+    if n_fits == 0 or n_starts <= 0:
+        return base_params, base_states, base_chi
 
+    lower = np.asarray(bounds_row[0::2], dtype=np.float64)
+    upper = np.asarray(bounds_row[1::2], dtype=np.float64)
+    log_lo = np.log(np.maximum(lower, 1e-30))
+    log_hi = np.log(np.maximum(upper, lower + 1e-30))
+    rng = np.random.default_rng(seed)
+
+    # Coarse exploration: caller's fixed start (candidate 0) + N log-uniform draws.
+    best_init = np.tile(np.asarray(initial_row, dtype=np.float64)[None, :], (n_fits, 1))
+    best_coarse = np.full(n_fits, np.inf, dtype=np.float64)
+    candidates = [np.tile(np.asarray(initial_row, dtype=np.float32)[None, :], (n_fits, 1))]
+    for _ in range(int(n_starts)):
+        draws = np.exp(log_lo[None, :] + rng.random((n_fits, n_params)) * (log_hi - log_lo)[None, :])
+        candidates.append(np.clip(draws, lower[None, :], upper[None, :]).astype(np.float32))
+    for cand in candidates:
+        _, s, c = run_fit(np.ascontiguousarray(cand), data, coarse_iters)
+        with np.errstate(invalid="ignore"):
+            improved = (s == 0) & np.isfinite(c) & (c < best_coarse)
+        best_coarse = np.where(improved, c, best_coarse)
+        best_init = np.where(improved[:, None], cand.astype(np.float64), best_init)
+
+    # Full refine from each voxel's best coarse basin, then keep-best vs the base fit.
+    ref_params, ref_states, ref_chi = run_fit(
+        np.ascontiguousarray(best_init.astype(np.float32)), data, refine_iters
+    )
+    out_params = base_params.copy()
+    out_states = base_states.copy()
+    out_chi = base_chi.copy()
     with np.errstate(invalid="ignore"):
-        pinned = (
-            (states_arr != 0)
-            | ~np.isfinite(chi)
-            | (params[:, vp_idx] <= vp_lo * 1.05)
-            | (params[:, fp_idx] >= fp_hi * 0.95)
+        take = (ref_states == 0) & np.isfinite(ref_chi) & (
+            (base_states != 0) | ~np.isfinite(base_chi) | (ref_chi < base_chi)
         )
-    suspects = np.nonzero(pinned)[0]
-    if suspects.size == 0:
-        return params, states_arr, chi
-
-    best_params = params.copy()
-    best_states = states_arr.copy()
-    best_chi = chi.copy()
-    sub_data = np.ascontiguousarray(data[suspects])
-    for fp_scale, vp_scale in _ACCEL_MULTISTART_SCALES:
-        alt = initial_row.copy()
-        alt[fp_idx] = min(max(float(initial_row[fp_idx]) * fp_scale, fp_lo), fp_hi)
-        alt[vp_idx] = min(max(float(initial_row[vp_idx]) * vp_scale, vp_lo), vp_hi)
-        init = np.ascontiguousarray(np.tile(alt[None, :], (suspects.size, 1)), dtype=np.float32)
-        cand_p, cand_s, cand_c = run_fit(init, sub_data)
-        for j, vox in enumerate(suspects):
-            if cand_s[j] != 0 or not np.isfinite(cand_c[j]):
-                continue
-            if (
-                best_states[vox] != 0
-                or not np.isfinite(best_chi[vox])
-                or cand_c[j] < best_chi[vox]
-            ):
-                best_params[vox] = cand_p[j]
-                best_states[vox] = cand_s[j]
-                best_chi[vox] = cand_c[j]
-    return best_params, best_states, best_chi
+    out_params[take] = ref_params[take]
+    out_states[take] = ref_states[take]
+    out_chi[take] = ref_chi[take]
+    return out_params, out_states, out_chi
 
 
 def _fit_stage_d_model_accelerated(
@@ -3611,7 +3611,7 @@ def _fit_stage_d_model_accelerated(
     tolerance = float(prefs.get("gpu_tolerance", 1e-6))
     max_iterations = int(prefs.get("gpu_max_n_iterations", 200))
 
-    def _run_fit(init_params: np.ndarray, data_arr: np.ndarray):
+    def _run_fit(init_params: np.ndarray, data_arr: np.ndarray, max_iter: int):
         n = int(data_arr.shape[0])
         parameters, states, chi_squares, _, _ = fit_module.fit_constrained(
             data=data_arr,
@@ -3621,7 +3621,7 @@ def _fit_stage_d_model_accelerated(
             constraints=np.ascontiguousarray(np.tile(bounds_row[None, :], (n, 1)), dtype=np.float32),
             constraint_types=constraint_types,
             tolerance=tolerance,
-            max_number_iterations=max_iterations,
+            max_number_iterations=int(max_iter),
             parameters_to_fit=None,
             estimator_id=int(fit_module.EstimatorID.LSE),
             user_info=user_info,
@@ -3632,13 +3632,23 @@ def _fit_stage_d_model_accelerated(
             np.asarray(chi_squares, dtype=np.float64).reshape(-1),
         )
 
-    # Backend-agnostic multi-start: fit once from the fixed start, then re-fit only the
-    # voxels that hit the vp<->Fp degenerate minimum from perturbed starts (keep the
-    # lowest chi-square). Applies identically to cpufit and gpufit.
-    params, states_arr, chi = _run_fit(initial_parameters, data)
+    # Backend-agnostic multi-start: fit once from the fixed start, then for the
+    # degeneracy-prone models explore random log-uniform starts (coarse fit -> refine
+    # from the best basin, keep the lowest chi-square). Applies identically to cpufit/gpufit.
+    params, states_arr, chi = _run_fit(initial_parameters, data, max_iterations)
     if model_name in _ACCEL_MULTISTART_MODELS and bool(prefs.get("accel_multistart", True)):
         params, states_arr, chi = _accel_multistart_refine(
-            _run_fit, data, params, states_arr, chi, initial_row, bounds_row, model_name
+            run_fit=_run_fit,
+            data=data,
+            base_params=params,
+            base_states=states_arr,
+            base_chi=chi,
+            initial_row=initial_row,
+            bounds_row=bounds_row,
+            n_starts=int(prefs.get("accel_multistart_starts", _ACCEL_MULTISTART_STARTS)),
+            coarse_iters=int(prefs.get("accel_multistart_coarse_iters", _ACCEL_MULTISTART_COARSE_ITERS)),
+            refine_iters=max_iterations,
+            seed=int(prefs.get("accel_multistart_seed", 0)),
         )
 
     failed = states_arr != 0

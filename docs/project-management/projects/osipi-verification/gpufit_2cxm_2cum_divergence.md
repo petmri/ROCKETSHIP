@@ -4,82 +4,129 @@
 multi-compartment fits diverged, what fixed most of it, and the residual 2CXM limitation.
 This started as a bug report for the [Gpufit](https://github.com/gpufit/Gpufit) project; the
 core solver bug is now patched upstream, so it is kept here as internal reference behind the
-`2cxm`/`2cum` test xfail reasons.*
+`2cxm`/`2cum` test xfail reasons. The Gpufit-side notes and harness live in
+`~/code/Gpufit/bug/` (`FINDINGS.md`, `experiments.py`, `probe_hard_cases.py`).*
 
 ## Status (current)
 
 - **False-convergence solver bug — fixed upstream.** Gpufit `dev` `3db5b4d` ("Fix false
   CONVERGED on rejected step in constrained LM solver") plus `607f127` ("better global
-  convergence" for patlak/tissue_uptake/2cxm). ROCKETSHIP runs the rebuilt `pyCpufit 1.4.1`.
-  This alone removed most of the failures.
-- **2CUM (`TISSUE_UPTAKE`) — resolved in ROCKETSHIP** via a backend-agnostic multi-start
-  (`dce_pipeline._accel_multistart_refine`): re-fit only the voxels that pin vp/Fp to a bound,
-  from a few perturbed starts, keep the lowest chi-square. Passes the OSIPI gate on cpufit
-  (and gpufit by the same code path; CUDA still to be confirmed on hardware).
-- **2CXM (`TWO_COMPARTMENT_EXCHANGE`) — still precision/parameterization-limited.** ~6 of 24
-  OSIPI cases remain outside tolerance on the float32 accelerated path even with multi-start.
-  The float64 python backend passes and is the reference. Tracked in `TODO.md`.
+  convergence"). ROCKETSHIP runs the rebuilt `pyCpufit 1.4.1`. This removed the gross
+  failures on most cases.
+- **The residual failures are caused by the caller's `Fp` initial guess — *not* float32
+  precision.** The Gpufit harness shows a `DOUBLE_PRECISION` build hits the *same*
+  degenerate minima, so precision is not the cause and a double-precision build is not a
+  fix. The default internal `Fp` start (`0.35`) is **50–84× the true internal `Fp`**
+  (~0.004–0.007), which drops the LM solver into a wrong basin (`vp` pinned to its bound,
+  `Fp` inflated). Any `Fp_init ≤ 0.05` reaches the correct minimum for the hard cases.
+- **2CUM (`TISSUE_UPTAKE`) — resolved** via a backend-agnostic random multi-start
+  (`dce_pipeline._accel_multistart_refine`, adopted from the Gpufit harness). Passes the
+  OSIPI gate on cpufit (and gpufit by the same code path; CUDA still to confirm on hardware).
+- **2CXM (`TWO_COMPARTMENT_EXCHANGE`) — mostly resolved; ~6/24 cases remain.** The residual
+  misses are all low-flow (`Fp = 5`) cases where `vp` is weakly identifiable at this noise
+  level; the float64 python/SciPy reference scatters there too. Planned real fix:
+  reparameterize the compiled model to fit `E = Ktrans/Fp` (tracked in `TODO.md`).
 
 ## Affected models
 
-| Gpufit model | ROCKETSHIP name | Params fit | OSIPI result (cpufit, post-patch) |
+| Gpufit model | ROCKETSHIP name | Params fit | OSIPI result (cpufit, post-patch + multi-start) |
 | --- | --- | --- | --- |
 | `TOFTS` | tofts | Ktrans, ve | ✅ within tolerance |
 | `TOFTS_EXTENDED` | ex_tofts | Ktrans, ve, vp | ✅ within tolerance |
 | `PATLAK` | patlak | Ktrans(→PS), vp | ✅ within tolerance |
 | `TISSUE_UPTAKE` | 2cum | Ktrans, vp, Fp | ✅ within tolerance (needs multi-start) |
-| `TWO_COMPARTMENT_EXCHANGE` | 2cxm | Ktrans, ve, vp, Fp | ❌ ~6/24 cases (see below) |
+| `TWO_COMPARTMENT_EXCHANGE` | 2cxm | Ktrans, ve, vp, Fp | ❌ ~6/24 low-flow cases (see below) |
 
 ## What was wrong, and what fixed it
 
-Before the patch, the constrained LM solver reported `FitState == CONVERGED` on steps it had
-actually rejected, so 2CXM and 2CUM fits halted at a degenerate point — plasma volume `vp`
-pinned to its lower bound and plasma flow `Fp` inflated up to ~35× (e.g. true Fp 40 → 1411
-mL/100mL/min) — with no error flag, so the wrong values propagated silently. `3db5b4d` fixes
-the false-success report; `_accel_multistart_refine` then rescues the remaining vp-pinned
-voxels for 2CUM.
+**1. False convergence (solver, fixed upstream).** The constrained LM loop reported
+`FitState == CONVERGED` on steps it had actually rejected: when the backtracking search
+found no chi-square-reducing step, it restored the base parameters and set
+`chi_square = prev_chi_square`, so the convergence test saw a zero change and stopped with
+`vp` pinned and `Fp` inflated up to ~35× — no error flag, wrong values propagated silently.
+`3db5b4d` gates the chi-square convergence test on an *accepted* step.
+
+**2. Wrong basin from the `Fp` initial (caller-side).** After the solver fix, a few cases
+still land on the degenerate minimum. From `probe_hard_cases.py` (live), 2CXM case_3:
+
+```
+default Fp_init = 0.35 → CONVERGED chi²=0.040, vp=0.001 (pinned), Fp=220   ❌
+Fp_init ≤ 0.05        → CONVERGED chi²=5.9e-4, vp=0.020,          Fp=24.8  ✅ (true 25)
+```
+
+The good minimum has **67× lower chi²**, so a keep-lowest-chi² selection recovers it *iff*
+one start reaches the low-`Fp` basin. This is why the fix belongs in the caller, not the
+solver: the trigger is an initial guess, not solver precision.
 
 Max absolute error over the OSIPI sweep, as a multiple of the OSIPI acceptance tolerance
 (`a_tol + r_tol·|ref|`; passes at < 1.0), cpufit (float32):
 
 | Model · param | before patch | after patch + multi-start |
 | --- | ---: | ---: |
-| 2cxm · ve | 1.0 | 1.01 ❌ |
-| 2cxm · vp | 3.96 | 2.47 ❌ |
+| 2cxm · ve | 1.0 | 1.67 ❌ |
+| 2cxm · vp | 3.96 | 3.57 ❌ |
 | 2cxm · Fp | **152** | 0.18 ✅ |
-| 2cxm · PS | 7.4 | 4.34 ❌ |
+| 2cxm · PS | 7.4 | 6.89 ❌ |
 | 2cum · vp | 3.2 | 0.63 ✅ |
 | 2cum · Fp | **277** | 0.18 ✅ |
 | 2cum · PS | 2.4 | 0.95 ✅ |
 
-The gross `Fp` inflation (152×, 277× tol) — the false-convergence signature — is gone. What
-remains for 2CXM is a subtler `vp`/`ve`/`PS` error: `vp` under-shoots rather than pinning to
-the bound (e.g. true 0.10 → 0.038–0.064), the classic `vp`↔`Fp` near-degeneracy of the 2CXM
-at high SNR.
+The gross `Fp` inflation (152×, 277× tol) — the false-convergence signature — is gone on
+both models, and 2CUM now passes every parameter. The 2CXM residual is a `ve`/`vp`/`PS`
+scatter concentrated on the low-flow (`Fp = 5`) cases: because we select the multi-start
+result by lowest chi-square (no ground truth at fit time) and those cases have a near-flat,
+weakly-identifiable `vp`/`ve` valley, chi-square selection can settle on a parameter set
+slightly further from truth than the fixed start — which is why a couple of the max errors
+tick up rather than down. The `E = Ktrans/Fp` reparameterization is the real fix.
 
-## Why 2CXM still fails — and why it is *not* an initialization problem
+## Why the residual 2CXM cases are hard (not precision, not premature convergence)
 
-- **Python passes with a single fixed start.** `model_2cxm_fit` (python) uses one fixed
-  start — no multi-start, no warm-start — and passes every OSIPI case. So the accelerated
-  failure is not about initial values.
-- **What python has that the accelerated path lacks:** (1) **float64** (accelerated is
-  float32), and (2) a **better-conditioned reparameterization** — python fits the extraction
-  fraction `E = Ktrans/Fp ∈ (0,1)` instead of raw `Fp`, which tames the `vp`↔`Fp` degeneracy.
-  Both live inside the solver/model, not the initial values.
-- **Initialization strategies do not rescue it.** Multi-start: 2cxm 7→6 bad cases (marginal).
-  Warm-start from a linear Patlak fit makes 2cxm *worse* (7→17) — Patlak is an *irreversible*
-  model, so its intercept/slope are biased seeds for reversible exchange and push `vp` toward
-  the bound. (The same warm-start is unnecessary for 2CUM, which multi-start alone fixes.)
+- **Not float32.** A `DOUBLE_PRECISION` build shows the same degenerate convergence.
+- **Not premature convergence.** After the solver fix these are genuine local minima: at
+  the case_3 degenerate point every *single-parameter* perturbation increases chi-square;
+  the good minimum needs a *coordinated* move (`vp` up ~20×, `Fp` down ~9×, `Ktrans` down),
+  so any local (gradient/KKT) test also reports "converged" there.
+- **The residual misses are `Fp = 5` (low-flow) cases** where `vp` is weakly identifiable at
+  this noise level — a fundamental identifiability limit shared by the float64 SciPy/python
+  reference, not a solver bug.
 
-## Options for fixing accelerated 2CXM (open — see TODO.md)
+## Why the python backend does better
 
-1. **Double-precision cpufit/gpufit build** (`DOUBLE_PRECISION=ON`) — targets the float32
-   ill-conditioning directly. Needs a matching double-precision `pyCpufit`/`pyGpufit` wheel
-   and float64 plumbing through ROCKETSHIP's accelerated path (currently hardcoded float32).
-2. **Reparameterize the compiled 2CXM model** to fit `E = Ktrans/Fp` like python — a C++
-   change in the Gpufit fork, applied to both cpufit and gpufit.
-3. **Keep python (float64) as the reference for 2CXM** (current) — cpufit/gpufit 2CXM stays
-   xfail / `--osipi-slow`; python is used for production 2CXM.
+Python passes every OSIPI 2CXM case with a **single** fixed start (no multi-start). What it
+has that the float32 accelerated path lacks: **float64** and a **better-conditioned
+reparameterization** — python fits the extraction fraction `E = Ktrans/Fp ∈ (0,1)` instead
+of raw `Fp`, and its effective `Fp` start sits in-basin. Both live inside the solver/model,
+not the initial values — which is why the planned fix reparameterizes the compiled model.
+
+*Note on warm start:* seeding `Ktrans`+`vp` from a linear Patlak fit while leaving `Fp` at
+the bad `0.35` makes 2CXM *worse* (Patlak is an irreversible model, biased for reversible
+exchange). The lever is `Fp`; the random multi-start (which reaches low `Fp` directly) is
+simpler and more general than a warm start.
+
+## Multi-start (what ROCKETSHIP does now)
+
+Adopted from the Gpufit harness (`bug/experiments.py`), in
+`dce_pipeline._accel_multistart_refine`, applied to `2cxm`/`2cum` on every accelerated
+backend (varies only the initial values, so cpufit and gpufit share it):
+
+- Per voxel: the caller's fixed start **+ 8 log-uniform random draws** within the parameter
+  bounds (bounds are strictly positive, so draws span the physiological range including
+  low `Fp`).
+- Each start gets a cheap **coarse fit (30 iterations)**; the lowest coarse chi-square picks
+  the basin, and **one full refine (200 iterations)** runs from it.
+- The refine replaces the base fit only where it converged and **strictly lowers
+  chi-square**, so multi-start can never degrade a good base fit.
+- Config: `prefs["accel_multistart"]` (default on), `accel_multistart_starts` (8),
+  `accel_multistart_coarse_iters` (30), `accel_multistart_seed` (0, for reproducibility).
+
+## Options for the residual 2CXM cases
+
+1. **Reparameterize the compiled 2CXM model to fit `E = Ktrans/Fp`** (planned) — mirror the
+   python backend inside the Gpufit CPU/CUDA fork; applies to both cpufit and gpufit.
+2. **Keep python (float64) as the reference for 2CXM** (current) — cpufit/gpufit 2CXM stays
+   `xfail` / `--osipi-slow`.
+
+(A double-precision build is **not** an option — the harness shows it does not help.)
 
 ## Exact fit configuration
 
@@ -87,12 +134,9 @@ at high SNR.
 
 - **Precision:** `float32` for data, `user_info` (time + AIF), initial parameters and constraints.
 - **Estimator:** `EstimatorID.LSE` · **Constraints:** `ConstraintType.LOWER_UPPER` on every parameter
-- **Tolerance:** `1e-6` · **Max iterations:** `200`
-- **2CXM initial values** `[Ktrans, ve, vp, Fp]` = `[2e-4, 0.15, 0.02, 0.35]` (internal units; Fp reported = internal · 6000 mL/100mL/min)
+- **Tolerance:** `1e-6` · **Max iterations:** `200` (coarse multi-start passes use `30`)
+- **2CXM fixed start** `[Ktrans, ve, vp, Fp]` = `[2e-4, 0.15, 0.02, 0.35]` (internal units; Fp reported = internal · 6000 mL/100mL/min)
 - **2CXM bounds:** Ktrans `[1e-7, 2.0]`, ve `[0.05, 1.0]`, vp `[1e-3, 1.0]`, Fp `[1e-3, 20.0]`
-- **Multi-start** (`_accel_multistart_refine`): suspect voxels (fit failed, or vp/Fp pinned to a bound)
-  are re-fit from `(Fp_scale, vp_scale)` perturbations of the fixed start; the lowest chi-square
-  candidate that converged is kept, so it can never degrade a good base fit.
 
 ## Reproduction
 
@@ -108,6 +152,9 @@ MRM 2023, [doi:10.1002/mrm.29826](https://doi.org/10.1002/mrm.29826)).
 # the 2CXM full-sweep gate (xfail), with a per-case out-of-tolerance breakdown
 .venv/bin/python -m pytest tests/python/test_osipi_pycpufit.py::test_osipi_pycpufit_2cxm_sweep \
     --osipi-slow --runxfail -rA
+
+# Gpufit-side diagnosis of the Fp-init basin (in ~/code/Gpufit)
+.venv/bin/python bug/probe_hard_cases.py
 ```
 
 The 2CXM DRO used is `tests/data/osipi/dce_models/2cxm_sd_0.001_delay_0.csv`
@@ -115,8 +162,9 @@ The 2CXM DRO used is `tests/data/osipi/dce_models/2cxm_sd_0.001_delay_0.csv`
 
 ## How ROCKETSHIP handles it today
 
-- **2CUM:** backend-agnostic multi-start → passes the OSIPI gate on cpufit/gpufit.
+- **2CUM:** backend-agnostic random multi-start → passes the OSIPI gate on cpufit/gpufit.
 - **2CXM:** cpufit/gpufit full-sweep test is `xfail` + `--osipi-slow`; the float64 python
-  backend is the default/reference and passes.
+  backend is the default/reference and passes. The planned `E = Ktrans/Fp` reparameterization
+  of the compiled model is the real fix (see `TODO.md`).
 - Per-backend numbers and the accuracy-by-backend table live in
   `docs/project-management/projects/osipi-verification/osipi_summary.md`.

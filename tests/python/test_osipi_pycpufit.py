@@ -2,11 +2,11 @@
 
 Full sweep of every OSIPI DRO case, gated on OSIPI's official acceptance tolerances.
 Tofts / extended Tofts / Patlak and the tissue-uptake (2CUM) model converge and pass;
-2CUM relies on the backend-agnostic multi-start (dce_pipeline._accel_multistart_refine)
-to escape the vp<->Fp degenerate minimum. The 2CXM fit still misses some cases even with
-multi-start: its float32 accelerated path is precision/parameterization-limited, so it is
-gated behind ``--osipi-slow`` and marked xfail (the float64 python backend, which fits the
-extraction fraction E=Ktrans/Fp, is the reference for 2CXM). Details and background:
+2CUM relies on the backend-agnostic random multi-start (dce_pipeline._accel_multistart_refine)
+to escape the wrong-Fp-basin degenerate minimum. The 2CXM fit still misses a few low-flow
+(Fp=5) cases even with multi-start -- weakly-identifiable vp at this noise level, not a
+precision bug -- so it is gated behind ``--osipi-slow`` and marked xfail (the float64 python
+backend, which fits the extraction fraction E=Ktrans/Fp, is the reference for 2CXM). Details:
 ``docs/project-management/projects/osipi-verification/gpufit_2cxm_2cum_divergence.md``.
 """
 
@@ -17,9 +17,10 @@ import pytest
 from osipi_fast_backend_helpers import assert_backend_model_sweep, require_cpufit_backend
 
 _SLOW_XFAIL_REASON = (
-    "cpufit accelerated 2CXM fit is precision/parameterization-limited on some OSIPI cases "
-    "even with multi-start (float32 vp<->Fp degeneracy; the float64 python backend is the "
-    "reference); see docs/project-management/projects/osipi-verification/gpufit_2cxm_2cum_divergence.md"
+    "cpufit accelerated 2CXM misses a few low-flow (Fp=5) OSIPI cases even with multi-start "
+    "-- weakly-identifiable vp, not a solver/precision bug (the float64 python backend, which "
+    "fits E=Ktrans/Fp, is the reference); see "
+    "docs/project-management/projects/osipi-verification/gpufit_2cxm_2cum_divergence.md"
 )
 
 

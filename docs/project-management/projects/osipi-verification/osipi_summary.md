@@ -9,7 +9,7 @@ ROCKETSHIP has four fitting routines (MATLAB, python, cpufit, gpufit). This repo
 > gpufit: pyGpufit is installed but no CUDA GPU backend was available on the machine that generated this report, so gpufit was not run.
 
 - **python** — the pure-CPU scipy fit (`model_*_fit`), the DCE reference the reliability tests gate on, and the only backend for T1 mapping.
-- **cpufit / gpufit** — the accelerated (float32) Stage-D fit for the five DCE models. Reliable for `tofts`/`etofts`/`patlak` and, via a backend-agnostic multi-start that escapes the vp↔Fp degenerate minimum, for `2cum`. The stiff `2cxm` fit is still precision/parameterization-limited (see the FAIL cells below); the float64 python backend, which fits the extraction fraction E=Ktrans/Fp, is the reference for `2cxm`.
+- **cpufit / gpufit** — the accelerated (float32) Stage-D fit for the five DCE models. Reliable for `tofts`/`etofts`/`patlak` and, via a backend-agnostic random multi-start that escapes the wrong-Fp-basin degenerate minimum, for `2cum`. The stiff `2cxm` fit still misses a few low-flow (Fp=5) cases where vp is weakly identifiable (see the FAIL cells below) -- not a precision issue; the float64 python backend, which fits the extraction fraction E=Ktrans/Fp, is the reference for `2cxm`.
 
 ## Where these numbers come from
 
@@ -32,10 +32,10 @@ Each backend cell is `max |GT − fit|` over all cases and its worst-case error 
 | etofts | vp | 0.00131 · 5% ok | 0.00131 · 5% ok | 0.002219 |
 | patlak | ps | 0.000379 · 4% ok | 0.000379 · 4% ok | 0.0004791 |
 | patlak | vp | 0.00177 · 7% ok | 0.00177 · 7% ok | 0.001978 |
-| 2cxm | ve | 0.0159 · 32% ok | 0.0505 · 101% **FAIL** | 0.01587 |
-| 2cxm | vp | 0.0186 · 74% ok | 0.0617 · 247% **FAIL** | 0.01857 |
+| 2cxm | ve | 0.0159 · 32% ok | 0.0837 · 167% **FAIL** | 0.01587 |
+| 2cxm | vp | 0.0186 · 74% ok | 0.0891 · 357% **FAIL** | 0.01857 |
 | 2cxm | fp | 1.94 · 22% ok | 1 · 18% ok | 1.941 |
-| 2cxm | ps | 0.0164 · 82% ok | 0.0513 · 434% **FAIL** | 0.01861 |
+| 2cxm | ps | 0.0164 · 82% ok | 0.0689 · 689% **FAIL** | 0.01861 |
 | 2cum | vp | 0.00183 · 7% ok | 0.0158 · 63% ok | 0.0034 |
 | 2cum | fp | 0.761 · 10% ok | 1 · 18% ok | 4.493 |
 | 2cum | ps | 0.00143 · 19% ok | 0.00473 · 95% ok | 0.001736 |

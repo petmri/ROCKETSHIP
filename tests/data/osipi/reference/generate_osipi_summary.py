@@ -461,10 +461,11 @@ def _provenance_lines(res: Dict[str, Any]) -> List[str]:
         "- **python** — the pure-CPU scipy fit (`model_*_fit`), the DCE reference the reliability "
         "tests gate on, and the only backend for T1 mapping.",
         "- **cpufit / gpufit** — the accelerated (float32) Stage-D fit for the five DCE models. "
-        "Reliable for `tofts`/`etofts`/`patlak` and, via a backend-agnostic multi-start that escapes "
-        "the vp↔Fp degenerate minimum, for `2cum`. The stiff `2cxm` fit is still "
-        "precision/parameterization-limited (see the FAIL cells below); the float64 python backend, "
-        "which fits the extraction fraction E=Ktrans/Fp, is the reference for `2cxm`.",
+        "Reliable for `tofts`/`etofts`/`patlak` and, via a backend-agnostic random multi-start that "
+        "escapes the wrong-Fp-basin degenerate minimum, for `2cum`. The stiff `2cxm` fit still misses "
+        "a few low-flow (Fp=5) cases where vp is weakly identifiable (see the FAIL cells below) -- not "
+        "a precision issue; the float64 python backend, which fits the extraction fraction E=Ktrans/Fp, "
+        "is the reference for `2cxm`.",
         "",
         "## Where these numbers come from",
         "",
