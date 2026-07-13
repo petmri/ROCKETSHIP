@@ -15,6 +15,8 @@ sys.path.insert(0, str(REPO_ROOT / "python"))
 
 from rocketship import model_extended_tofts_fit, model_patlak_fit, model_tofts_fit  # noqa: E402
 
+from osipi_official_tolerances import official_abs_tol
+
 
 OSIPI_ROOT = REPO_ROOT / "tests" / "data" / "osipi"
 DCE_DATA_DIR = OSIPI_ROOT / "dce_models"
@@ -96,57 +98,71 @@ def peer_dce_primary_metrics() -> dict[str, dict[str, dict[str, float]]]:
     }
 
 
+def _param_metrics(method: str, param: str, cases: list[tuple[float, float]]) -> dict[str, float]:
+    """Aggregate stats + OSIPI official-tolerance gate for one model/param.
+
+    ``cases`` is a list of (reference, fitted) pairs. The official gate mirrors OSIPI's
+    per-case ``assert_allclose(atol=a_tol, rtol=r_tol)``.
+    """
+    errs = [abs(fit - ref) for ref, fit in cases]
+    worst_frac = 0.0
+    passed = True
+    for ref, fit in cases:
+        tol = official_abs_tol(method, param, ref)
+        ratio = abs(fit - ref) / tol if tol > 0 else math.inf
+        worst_frac = max(worst_frac, ratio)
+        if not (math.isfinite(fit) and abs(fit - ref) <= tol):
+            passed = False
+    out = _summary(errs)
+    out["official_worst_frac"] = float(worst_frac)
+    out["official_pass"] = float(1.0 if passed else 0.0)
+    return out
+
+
 def compute_dce_primary_metrics() -> dict[str, dict[str, dict[str, float]]]:
-    tofts_errs = {"Ktrans": [], "ve": []}
+    tofts: dict[str, list[tuple[float, float]]] = {"Ktrans": [], "ve": []}
     for row in _rows(DCE_DATA_DIR / "dce_DRO_data_tofts.csv"):
         fit = model_tofts_fit(_series(row["C"]), _series(row["ca"]), _series(row["t"]))
-        tofts_errs["Ktrans"].append(abs((float(fit[0]) * 60.0) - float(row["Ktrans"])))
-        tofts_errs["ve"].append(abs(float(fit[1]) - float(row["ve"])))
+        tofts["Ktrans"].append((float(row["Ktrans"]), float(fit[0]) * 60.0))
+        tofts["ve"].append((float(row["ve"]), float(fit[1])))
 
-    ex_errs = {"Ktrans": [], "ve": [], "vp": []}
+    ex: dict[str, list[tuple[float, float]]] = {"Ktrans": [], "ve": [], "vp": []}
     for row in _rows(DCE_DATA_DIR / "dce_DRO_data_extended_tofts.csv"):
         fit = model_extended_tofts_fit(_series(row["C"]), _series(row["ca"]), _series(row["t"]))
-        ex_errs["Ktrans"].append(abs((float(fit[0]) * 60.0) - float(row["Ktrans"])))
-        ex_errs["ve"].append(abs(float(fit[1]) - float(row["ve"])))
-        ex_errs["vp"].append(abs(float(fit[2]) - float(row["vp"])))
+        ex["Ktrans"].append((float(row["Ktrans"]), float(fit[0]) * 60.0))
+        ex["ve"].append((float(row["ve"]), float(fit[1])))
+        ex["vp"].append((float(row["vp"]), float(fit[2])))
 
-    patlak_errs = {"ps": [], "vp": []}
+    patlak: dict[str, list[tuple[float, float]]] = {"ps": [], "vp": []}
     for row in _rows(DCE_DATA_DIR / "patlak_sd_0.02_delay_0.csv"):
         fit = model_patlak_fit(_series(row["C_t"]), _series(row["cp_aif"]), _series(row["t"]))
-        patlak_errs["ps"].append(abs((float(fit[0]) * 60.0) - float(row["ps"])))
-        patlak_errs["vp"].append(abs(float(fit[1]) - float(row["vp"])))
+        patlak["ps"].append((float(row["ps"]), float(fit[0]) * 60.0))
+        patlak["vp"].append((float(row["vp"]), float(fit[1])))
 
     return {
-        "tofts": {param: _summary(values) for param, values in tofts_errs.items()},
-        "etofts": {param: _summary(values) for param, values in ex_errs.items()},
-        "patlak": {param: _summary(values) for param, values in patlak_errs.items()},
+        "tofts": {p: _param_metrics("tofts", p, cases) for p, cases in tofts.items()},
+        "etofts": {p: _param_metrics("etofts", p, cases) for p, cases in ex.items()},
+        "patlak": {p: _param_metrics("patlak", p, cases) for p, cases in patlak.items()},
     }
-
-
-def strict_peer_max_limit(peer_max_abs_error: float) -> float:
-    peer_max = float(peer_max_abs_error)
-    epsilon = max(1e-12, abs(peer_max) * 1e-6)
-    return peer_max + epsilon
 
 
 def evaluate_dce_primary_gate(
     ours: dict[str, dict[str, dict[str, float]]], peer: dict[str, dict[str, dict[str, float]]]
 ) -> tuple[bool, list[dict[str, Any]]]:
+    """Hard gate on OSIPI official acceptance tolerances; peer max reported for context."""
     checks: list[dict[str, Any]] = []
     for method, method_metrics in ours.items():
         peer_method = peer[method]
         for param, ours_metrics in method_metrics.items():
-            peer_metrics = peer_method[param]
-            limit = strict_peer_max_limit(float(peer_metrics["max_abs_error"]))
-            ours_max = float(ours_metrics["max_abs_error"])
+            passed = bool(ours_metrics.get("official_pass", 0.0))
             checks.append(
                 {
                     "method": method,
                     "param": param,
-                    "ours_max_abs_error": ours_max,
-                    "peer_max_abs_error": float(peer_metrics["max_abs_error"]),
-                    "limit_max_abs_error": limit,
-                    "pass": ours_max <= limit,
+                    "ours_max_abs_error": float(ours_metrics["max_abs_error"]),
+                    "official_worst_frac": float(ours_metrics.get("official_worst_frac", math.nan)),
+                    "peer_max_abs_error": float(peer_method[param]["max_abs_error"]),
+                    "pass": passed,
                 }
             )
     return bool(all(bool(c["pass"]) for c in checks)), checks

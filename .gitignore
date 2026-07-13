@@ -215,3 +215,6 @@ _ci_baseline_candidate/
 
 # Local runner scratch output (never committed)
 RUNNER_DATA/
+
+# Reference papers (copyrighted PDFs; cited by DOI, not committed)
+tests/data/osipi/reference/*.pdf

@@ -1,0 +1,39 @@
+{
+  "_provenance": {
+    "description": "OSIPI's own published pass/fail tolerances for the DCE model DRO tests. These are the round, method-agnostic acceptance bars every contributor implementation is asserted against in the OSIPI test suite (np.testing.assert_allclose(measured, reference, atol=a_tol, rtol=r_tol)), transcribed verbatim from source. Per the OSIPI paper (van Houdt et al., MRM 2023, doi:10.1002/mrm.29826) these were set deliberately WIDE as validity/bug checks and are 'not intended to indicate an acceptable level of accuracy'. The ROCKETSHIP DCE reliability tests gate on these; the finer per-implementation error spread lives in osipi_peer_error_summary.json (also reproducible, but near-circular for the LEK-ported 2cxm/tissue_uptake models, so reported not gated).",
+    "source_repo": "https://github.com/OSIPI/DCE-DSC-MRI_TestResults",
+    "source_commit": "23d3714797045d8103d5b5fa4f4c016840094dc0",
+    "source_file": "test/DCEmodels/DCEmodels_data.py",
+    "pass_criterion": "abs(measured - reference) <= a_tol + r_tol * abs(reference)",
+    "units": {
+      "ve": "fractional", "vp": "fractional", "Ktrans": "1/min",
+      "fp": "mL/100mL/min", "ps": "1/min", "delay": "s"
+    }
+  },
+  "DCEmodels": {
+    "tofts": {
+      "ve":     {"a_tol": 0.05,  "r_tol": 0.0},
+      "Ktrans": {"a_tol": 0.005, "r_tol": 0.1}
+    },
+    "etofts": {
+      "vp":     {"a_tol": 0.025, "r_tol": 0.0},
+      "ve":     {"a_tol": 0.05,  "r_tol": 0.0},
+      "Ktrans": {"a_tol": 0.005, "r_tol": 0.1}
+    },
+    "patlak": {
+      "vp": {"a_tol": 0.025, "r_tol": 0.0},
+      "ps": {"a_tol": 0.005, "r_tol": 0.1}
+    },
+    "2CXM": {
+      "vp": {"a_tol": 0.025, "r_tol": 0.0},
+      "ve": {"a_tol": 0.05,  "r_tol": 0.0},
+      "fp": {"a_tol": 5.0,   "r_tol": 0.1},
+      "ps": {"a_tol": 0.005, "r_tol": 0.1}
+    },
+    "2CUM": {
+      "vp": {"a_tol": 0.025, "r_tol": 0.0},
+      "fp": {"a_tol": 5.0,   "r_tol": 0.1},
+      "ps": {"a_tol": 0.005, "r_tol": 0.1}
+    }
+  }
+}

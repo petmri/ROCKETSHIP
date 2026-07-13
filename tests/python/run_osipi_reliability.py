@@ -104,18 +104,19 @@ def _print_si_to_conc_summary(payload: dict[str, Any]) -> None:
 def _print_dce_primary_summary(payload: dict[str, Any]) -> None:
     rows: list[dict[str, str]] = []
     for check in payload["checks"]:
+        frac = check.get("official_worst_frac")
         rows.append(
             {
                 "method": str(check["method"]),
                 "param": str(check["param"]),
                 "ours_max": _format_float(check["ours_max_abs_error"]),
-                "peer_max": _format_float(check["peer_max_abs_error"]),
-                "limit_max": _format_float(check["limit_max_abs_error"]),
+                "gate_%": ("n/a" if frac is None else f"{float(frac) * 100:.1f}"),
+                "peer_max*": _format_float(check["peer_max_abs_error"]),
                 "pass": str(bool(check["pass"])).lower(),
             }
         )
-    print("[OSIPI-RELIABILITY] suite=dce-primary")
-    print(_render_table(rows, ["method", "param", "ours_max", "peer_max", "limit_max", "pass"]))
+    print("[OSIPI-RELIABILITY] suite=dce-primary (gate: OSIPI official tolerance; peer_max* informational)")
+    print(_render_table(rows, ["method", "param", "ours_max", "gate_%", "peer_max*", "pass"]))
 
 
 def _write_summary(path: Path, payload: dict[str, Any]) -> None:

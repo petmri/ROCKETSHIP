@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import json
 import math
 from pathlib import Path
 import sys
@@ -24,11 +23,12 @@ from dce_pipeline import (  # noqa: E402
     probe_acceleration_backend,
 )
 
+from osipi_official_tolerances import official_abs_tol  # noqa: E402
+
 
 OSIPI_ROOT = REPO_ROOT / "tests" / "data" / "osipi"
 DCE_DATA_DIR = OSIPI_ROOT / "dce_models"
 REFERENCE_DIR = OSIPI_ROOT / "reference"
-PEER_ERROR_SUMMARY = json.loads((REFERENCE_DIR / "osipi_peer_error_summary.json").read_text())
 
 FAST_BACKEND_CASES: dict[str, dict[str, str]] = {
     "tofts": {
@@ -85,20 +85,6 @@ def _rows(csv_file: Path) -> list[dict[str, str]]:
 
 def _series(raw: str) -> list[float]:
     return [float(x) for x in str(raw).split()]
-
-
-def _peer_method_metrics(category: str, method: str) -> dict[str, Any]:
-    methods = PEER_ERROR_SUMMARY["metrics"][category]
-    if method in methods:
-        return methods[method]
-    for key, value in methods.items():
-        if str(key).lower() == method.lower():
-            return value
-    raise KeyError(f"Missing peer method '{method}' in category '{category}'")
-
-
-def _peer_max_abs_error(category: str, method: str, param: str) -> float:
-    return float(_peer_method_metrics(category, method)[param]["max_abs_error"])
 
 
 def _assert_close(actual: float, expected: float, tol: float, label: str, param: str) -> None:
@@ -241,14 +227,14 @@ def assert_fast_backend_model_case(model_name: str, acceleration_backend: str) -
         _assert_close(
             float(fit[0]) * 60.0,
             float(row["Ktrans"]),
-            _peer_max_abs_error("DCEmodels", method, "Ktrans") + 1e-6,
+            official_abs_tol(method, "Ktrans", float(row["Ktrans"])),
             label,
             "Ktrans",
         )
         _assert_close(
             float(fit[1]),
             float(row["ve"]),
-            _peer_max_abs_error("DCEmodels", method, "ve") + 1e-6,
+            official_abs_tol(method, "ve", float(row["ve"])),
             label,
             "ve",
         )
@@ -258,21 +244,21 @@ def assert_fast_backend_model_case(model_name: str, acceleration_backend: str) -
         _assert_close(
             float(fit[0]) * 60.0,
             float(row["Ktrans"]),
-            _peer_max_abs_error("DCEmodels", method, "Ktrans") + 1e-6,
+            official_abs_tol(method, "Ktrans", float(row["Ktrans"])),
             label,
             "Ktrans",
         )
         _assert_close(
             float(fit[1]),
             float(row["ve"]),
-            _peer_max_abs_error("DCEmodels", method, "ve") + 1e-6,
+            official_abs_tol(method, "ve", float(row["ve"])),
             label,
             "ve",
         )
         _assert_close(
             float(fit[2]),
             float(row["vp"]),
-            _peer_max_abs_error("DCEmodels", method, "vp") + 1e-6,
+            official_abs_tol(method, "vp", float(row["vp"])),
             label,
             "vp",
         )
@@ -282,14 +268,14 @@ def assert_fast_backend_model_case(model_name: str, acceleration_backend: str) -
         _assert_close(
             float(fit[0]) * 60.0,
             float(row["ps"]),
-            _peer_max_abs_error("DCEmodels", method, "ps") + 1e-6,
+            official_abs_tol(method, "ps", float(row["ps"])),
             label,
             "ps",
         )
         _assert_close(
             float(fit[1]),
             float(row["vp"]),
-            _peer_max_abs_error("DCEmodels", method, "vp") + 1e-6,
+            official_abs_tol(method, "vp", float(row["vp"])),
             label,
             "vp",
         )
@@ -301,28 +287,28 @@ def assert_fast_backend_model_case(model_name: str, acceleration_backend: str) -
         _assert_close(
             float(fit[1]),
             float(row["ve"]),
-            _peer_max_abs_error("DCEmodels", method, "ve") + 1e-6,
+            official_abs_tol(method, "ve", float(row["ve"])),
             label,
             "ve",
         )
         _assert_close(
             float(fit[2]),
             float(row["vp"]),
-            _peer_max_abs_error("DCEmodels", method, "vp") + 1e-6,
+            official_abs_tol(method, "vp", float(row["vp"])),
             label,
             "vp",
         )
         _assert_close(
             fp_per_sec * 60.0 * 100.0,
             float(row["fp"]),
-            _peer_max_abs_error("DCEmodels", method, "fp") + 1e-6,
+            official_abs_tol(method, "fp", float(row["fp"])),
             label,
             "fp",
         )
         _assert_close(
             _ps_per_min_from_ktrans_fp_per_sec(ktrans_per_sec, fp_per_sec),
             float(row["ps"]),
-            _peer_max_abs_error("DCEmodels", method, "ps") + 1e-6,
+            official_abs_tol(method, "ps", float(row["ps"])),
             label,
             "ps",
         )
@@ -334,21 +320,21 @@ def assert_fast_backend_model_case(model_name: str, acceleration_backend: str) -
         _assert_close(
             float(fit[2]),
             float(row["vp"]),
-            _peer_max_abs_error("DCEmodels", method, "vp") + 1e-6,
+            official_abs_tol(method, "vp", float(row["vp"])),
             label,
             "vp",
         )
         _assert_close(
             fp_per_sec * 60.0 * 100.0,
             float(row["fp"]),
-            _peer_max_abs_error("DCEmodels", method, "fp") + 1e-6,
+            official_abs_tol(method, "fp", float(row["fp"])),
             label,
             "fp",
         )
         _assert_close(
             _ps_per_min_from_ktrans_fp_per_sec(ktrans_per_sec, fp_per_sec),
             float(row["ps"]),
-            _peer_max_abs_error("DCEmodels", method, "ps") + 1e-6,
+            official_abs_tol(method, "ps", float(row["ps"])),
             label,
             "ps",
         )
