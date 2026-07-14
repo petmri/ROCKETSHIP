@@ -2879,7 +2879,9 @@ def _stage_d_fit_prefs(config: DcePipelineConfig) -> Dict[str, Any]:
         "lower_limit_vp": _safe_float(_stage_override(config, "voxel_lower_limit_vp", 1e-3), 1e-3),
         "upper_limit_vp": _safe_float(_stage_override(config, "voxel_upper_limit_vp", 1.0), 1.0),
         "initial_value_vp": _safe_float(_stage_override(config, "voxel_initial_value_vp", 0.02), 0.02),
-        "lower_limit_fp": _safe_float(_stage_override(config, "voxel_lower_limit_fp", 1e-3), 1e-3),
+        # 1e-4/s (~0.6 mL/100mL/min) so low-flow tissue (OSIPI DRO fp=5 mL/100mL/min ~= 8.3e-4/s)
+        # is representable; the prior 1e-3/s (~6 mL/100mL/min) excluded it.
+        "lower_limit_fp": _safe_float(_stage_override(config, "voxel_lower_limit_fp", 1e-4), 1e-4),
         "upper_limit_fp": _safe_float(_stage_override(config, "voxel_upper_limit_fp", 100.0), 100.0),
         "initial_value_fp": _safe_float(_stage_override(config, "voxel_initial_value_fp", 0.2), 0.2),
         "lower_limit_tp": _safe_float(_stage_override(config, "voxel_lower_limit_tp", 0.0), 0.0),
@@ -2914,9 +2916,8 @@ def _stage_d_fit_prefs(config: DcePipelineConfig) -> Dict[str, Any]:
         "2cxm_lower_limit_vp": _stage_override(config, "voxel_lower_limit_vp_2cxm", 1e-3),
         "2cxm_upper_limit_vp": _stage_override(config, "voxel_upper_limit_vp_2cxm", 1.0),
         "2cxm_initial_value_vp": _stage_override(config, "voxel_initial_value_vp_2cxm", 0.02),
-        # Fp floor in internal (per-input-time) units. The default input timer is seconds,
-        # so 1e-4/s ~= 0.6 mL/100mL/min -- low enough to represent low-flow tissue (OSIPI
-        # DRO fp=5 mL/100mL/min ~= 8.3e-4/s). The prior 1e-3/s (~6 mL/100mL/min) excluded it.
+        # Matches the shared "lower_limit_fp" default (see above); kept as its own override
+        # key so 2cxm can still be tuned independently of other models if needed.
         "2cxm_lower_limit_fp": _stage_override(config, "voxel_lower_limit_fp_2cxm", 1e-4),
         "2cxm_upper_limit_fp": _stage_override(config, "voxel_upper_limit_fp_2cxm", 20.0),
         "2cxm_initial_value_fp": _stage_override(config, "voxel_initial_value_fp_2cxm", 0.35),
@@ -2929,7 +2930,7 @@ def _stage_d_fit_prefs(config: DcePipelineConfig) -> Dict[str, Any]:
         "tissue_uptake_lower_limit_vp": _stage_override(config, "voxel_lower_limit_vp_tissue_uptake", 1e-3),
         "tissue_uptake_upper_limit_vp": _stage_override(config, "voxel_upper_limit_vp_tissue_uptake", 1.0),
         "tissue_uptake_initial_value_vp": _stage_override(config, "voxel_initial_value_vp_tissue_uptake", 0.02),
-        # See 2cxm_lower_limit_fp: 1e-4/s floor keeps low-flow tissue (fp~=5) reachable.
+        # Matches the shared "lower_limit_fp" default; see 2cxm_lower_limit_fp above.
         "tissue_uptake_lower_limit_fp": _stage_override(config, "voxel_lower_limit_fp_tissue_uptake", 1e-4),
         "tissue_uptake_upper_limit_fp": _stage_override(config, "voxel_upper_limit_fp_tissue_uptake", 20.0),
         "tissue_uptake_initial_value_fp": _stage_override(config, "voxel_initial_value_fp_tissue_uptake", 0.35),

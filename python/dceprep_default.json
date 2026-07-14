@@ -93,7 +93,7 @@
     "voxel_lower_limit_vp": 0.001,
     "voxel_upper_limit_vp": 1,
     "voxel_initial_value_vp": 0.02,
-    "voxel_lower_limit_fp": 0.001,
+    "voxel_lower_limit_fp": 0.0001,
     "voxel_upper_limit_fp": 100,
     "voxel_initial_value_fp": 0.2,
     "voxel_lower_limit_tp": 0,
