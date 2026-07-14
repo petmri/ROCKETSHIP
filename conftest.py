@@ -66,13 +66,6 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     group.addoption("--parity-cpu-optional-models", "--cpu-opt-models", action="store", default="patlak")
     group.addoption("--parity-require-all-models", "--all-models", action="store_true", default=False)
     group.addoption(
-        "--run-osipi-slow",
-        "--osipi-slow",
-        action="store_true",
-        default=False,
-        help="Enable long-running OSIPI reliability fits. Alias: --osipi-slow",
-    )
-    group.addoption(
         "--run-qualification",
         action="store_true",
         default=False,
@@ -165,11 +158,6 @@ def parity_suite(request: pytest.FixtureRequest) -> set[str]:
         tokens |= {"allmodels"}
     tokens.add("standard")  # the gated standard suite is always part of a parity run
     return tokens
-
-
-@pytest.fixture(scope="session")
-def run_osipi_slow(request: pytest.FixtureRequest) -> bool:
-    return bool(request.config.getoption("--run-osipi-slow"))
 
 
 @pytest.fixture(scope="session")

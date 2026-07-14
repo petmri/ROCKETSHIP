@@ -26,9 +26,11 @@ Keep strategic sequencing in `docs/project-management/ROADMAP.md` and current me
 ## External Accelerator Handoff (Open Items Only)
 
 ### GPUfit / CPUfit Backend
-- [ ] **Reparameterize the compiled `2cxm` (and `2cum`) model to fit `E=Ktrans/Fp` in the Gpufit CPU/CUDA fork** — mirror the float64 python backend, which recovers these fits well. This is the planned real fix for the residual accelerated `2cxm` misses, applied to both cpufit and gpufit. **(NOT STARTED — next up.)** See `docs/project-management/projects/osipi-verification/gpufit_2cxm_2cum_divergence.md`.
-- [ ] **Residual `2cxm` accelerated misses are low-flow (`Fp=5`), weakly-identifiable `vp` cases.** After the upstream false-CONVERGED fix (Gpufit `dev` `3db5b4d`) and the backend-agnostic random multi-start (log-uniform starts, coarse→refine; resolved `tissue_uptake`/2CUM and most of `2cxm`), a few `Fp=5` OSIPI cases remain outside tolerance — `vp` is weakly identifiable at this noise level and the float64 python/SciPy reference scatters there too. Root cause is the `Fp` initial landing in a wrong basin, **not float32 precision** (a `DOUBLE_PRECISION` cpufit build shows the same degenerate minima, so a double-precision build is not a fix).
-- [ ] Verify CUDA/GPUfit runtime behavior on CUDA-capable hardware for the false-CONVERGED fix, the backend-agnostic multi-start (2CUM), and the `TOFTS_EXTENDED`/`2CXM` backend fixes (multi-start is verified on cpufit only locally).
+The `E=Ktrans/Fp` reparam + O(N) convolution + analytic-Jacobian fix is **done and verified on
+cpufit** (all 5 OSIPI sweeps pass incl. all 24 2CXM; ~3000× faster on 2cxm) — see `COMPLETED.md`
+and `docs/project-management/projects/osipi-verification/STATUS.md`. Remaining:
+- [ ] **Verify the reparam kernels on CUDA hardware.** The `.cuh` kernels (`two-compartment_exchange.cuh`, `tissue_uptake.cuh`) carry the same reparam + analytic Jacobian and are host-verified (analytic-vs-central L2 ~1e-9), but not built/run with nvcc here. Build pyGpufit and run `test_osipi_pygpufit.py` on a CUDA box; the `2cxm` gpufit test is `xfail(strict=False)` until then. Also confirm the false-CONVERGED fix + multi-start (2CUM) on hardware.
+- [ ] **Review the `Fp` floor default change** (`2cxm`/`tissue_uptake` `lower_limit_fp` 1e-3→1e-4 in `dce_pipeline._stage_d_fit_prefs`) before dev-merge — it affects all backends (only relaxes the feasible region; physically ~0.6 mL/100mL/min).
 - [ ] Verify bound handling and initialization consistency across GPUfit/CPUfit implementations.
 - [ ] Provide backend diagnostics that can be surfaced directly in Python test failure messages.
 

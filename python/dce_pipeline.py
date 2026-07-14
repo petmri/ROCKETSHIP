@@ -2914,7 +2914,10 @@ def _stage_d_fit_prefs(config: DcePipelineConfig) -> Dict[str, Any]:
         "2cxm_lower_limit_vp": _stage_override(config, "voxel_lower_limit_vp_2cxm", 1e-3),
         "2cxm_upper_limit_vp": _stage_override(config, "voxel_upper_limit_vp_2cxm", 1.0),
         "2cxm_initial_value_vp": _stage_override(config, "voxel_initial_value_vp_2cxm", 0.02),
-        "2cxm_lower_limit_fp": _stage_override(config, "voxel_lower_limit_fp_2cxm", 1e-3),
+        # Fp floor in internal (per-input-time) units. The default input timer is seconds,
+        # so 1e-4/s ~= 0.6 mL/100mL/min -- low enough to represent low-flow tissue (OSIPI
+        # DRO fp=5 mL/100mL/min ~= 8.3e-4/s). The prior 1e-3/s (~6 mL/100mL/min) excluded it.
+        "2cxm_lower_limit_fp": _stage_override(config, "voxel_lower_limit_fp_2cxm", 1e-4),
         "2cxm_upper_limit_fp": _stage_override(config, "voxel_upper_limit_fp_2cxm", 20.0),
         "2cxm_initial_value_fp": _stage_override(config, "voxel_initial_value_fp_2cxm", 0.35),
         "2cxm_max_nfev": _stage_override(config, "voxel_MaxFunEvals_2cxm", 140),
@@ -2926,7 +2929,8 @@ def _stage_d_fit_prefs(config: DcePipelineConfig) -> Dict[str, Any]:
         "tissue_uptake_lower_limit_vp": _stage_override(config, "voxel_lower_limit_vp_tissue_uptake", 1e-3),
         "tissue_uptake_upper_limit_vp": _stage_override(config, "voxel_upper_limit_vp_tissue_uptake", 1.0),
         "tissue_uptake_initial_value_vp": _stage_override(config, "voxel_initial_value_vp_tissue_uptake", 0.02),
-        "tissue_uptake_lower_limit_fp": _stage_override(config, "voxel_lower_limit_fp_tissue_uptake", 1e-3),
+        # See 2cxm_lower_limit_fp: 1e-4/s floor keeps low-flow tissue (fp~=5) reachable.
+        "tissue_uptake_lower_limit_fp": _stage_override(config, "voxel_lower_limit_fp_tissue_uptake", 1e-4),
         "tissue_uptake_upper_limit_fp": _stage_override(config, "voxel_upper_limit_fp_tissue_uptake", 20.0),
         "tissue_uptake_initial_value_fp": _stage_override(config, "voxel_initial_value_fp_tissue_uptake", 0.35),
         "tissue_uptake_lower_limit_tp": _stage_override(config, "voxel_lower_limit_tp_tissue_uptake", 0.0),
@@ -3404,6 +3408,28 @@ _ACCEL_MULTISTART_STARTS = 8         # random log-uniform starts beyond the fixe
 _ACCEL_MULTISTART_COARSE_ITERS = 30  # cheap coarse fit to pick the basin before refining
 
 
+def _extraction_fraction_init_bounds(
+    ktrans_init: float,
+    ktrans_lo: float,
+    ktrans_hi: float,
+    fp_init: float,
+    fp_lo: float,
+    fp_hi: float,
+) -> tuple:
+    """Map (Ktrans, Fp) init/bounds to the extraction-fraction E = Ktrans/Fp.
+
+    The accelerated 2CXM/2CUM kernels now fit ``E in (0, 1)`` (recover ``Ktrans =
+    E * Fp``), which removes the ``Ktrans = Fp`` pole. This mirrors the float64 python
+    reference (``dce_models._fit_2cxm_osipi_canonical``) so both paths share the same
+    E-space start and bounds. Returns ``(e_init, e_lo, e_hi)``.
+    """
+    e_lo = min(max(ktrans_lo / max(fp_hi, 1e-12), 0.0), 1.0 - 1e-10)
+    e_hi = min(max(ktrans_hi / max(fp_lo, 1e-12), e_lo + 1e-10), 1.0 - 1e-8)
+    e_init = ktrans_init / max(fp_init, 1e-12)
+    e_init = min(max(e_init, e_lo + 1e-10), e_hi - 1e-10)
+    return float(e_init), float(e_lo), float(e_hi)
+
+
 def _accel_multistart_refine(
     *,
     run_fit,
@@ -3552,11 +3578,20 @@ def _fit_stage_d_model_accelerated(
             dtype=np.float32,
         )
     elif model_name == "tissue_uptake":
-        # GpuFit/CpuFit tissue uptake parameter order is [Ktrans, vp, fp].
+        # Accelerated 2CUM now fits E = Ktrans/Fp; kernel param order is [E, vp, Fp].
+        # Recover Ktrans = E*Fp on output. E-space init/bounds mirror the python reference.
         model_id_name = "TISSUE_UPTAKE"
+        e_init, e_lo, e_hi = _extraction_fraction_init_bounds(
+            float(prefs["initial_value_ktrans"]),
+            float(prefs["lower_limit_ktrans"]),
+            float(prefs["upper_limit_ktrans"]),
+            float(prefs["initial_value_fp"]),
+            float(prefs["lower_limit_fp"]),
+            float(prefs["upper_limit_fp"]),
+        )
         initial_row = np.array(
             [
-                float(prefs["initial_value_ktrans"]),
+                e_init,
                 float(prefs["initial_value_vp"]),
                 float(prefs["initial_value_fp"]),
             ],
@@ -3564,8 +3599,8 @@ def _fit_stage_d_model_accelerated(
         )
         bounds_row = np.array(
             [
-                float(prefs["lower_limit_ktrans"]),
-                float(prefs["upper_limit_ktrans"]),
+                e_lo,
+                e_hi,
                 float(prefs["lower_limit_vp"]),
                 float(prefs["upper_limit_vp"]),
                 float(prefs["lower_limit_fp"]),
@@ -3574,10 +3609,20 @@ def _fit_stage_d_model_accelerated(
             dtype=np.float32,
         )
     else:
+        # Accelerated 2CXM now fits E = Ktrans/Fp; kernel param order is [E, ve, vp, Fp].
+        # Recover Ktrans = E*Fp on output. E-space init/bounds mirror the python reference.
         model_id_name = "TWO_COMPARTMENT_EXCHANGE"
+        e_init, e_lo, e_hi = _extraction_fraction_init_bounds(
+            float(prefs["initial_value_ktrans"]),
+            float(prefs["lower_limit_ktrans"]),
+            float(prefs["upper_limit_ktrans"]),
+            float(prefs["initial_value_fp"]),
+            float(prefs["lower_limit_fp"]),
+            float(prefs["upper_limit_fp"]),
+        )
         initial_row = np.array(
             [
-                float(prefs["initial_value_ktrans"]),
+                e_init,
                 float(prefs["initial_value_ve"]),
                 float(prefs["initial_value_vp"]),
                 float(prefs["initial_value_fp"]),
@@ -3586,8 +3631,8 @@ def _fit_stage_d_model_accelerated(
         )
         bounds_row = np.array(
             [
-                float(prefs["lower_limit_ktrans"]),
-                float(prefs["upper_limit_ktrans"]),
+                e_lo,
+                e_hi,
                 float(prefs["lower_limit_ve"]),
                 float(prefs["upper_limit_ve"]),
                 float(prefs["lower_limit_vp"]),
@@ -3689,27 +3734,31 @@ def _fit_stage_d_model_accelerated(
         return out
 
     if model_name == "tissue_uptake":
+        # Kernel params are [E, vp, Fp]; recover Ktrans = E * Fp.
+        ktrans = params[:, 0] * params[:, 2]
         out = np.full((n_fits, len(MODEL_LAYOUTS["tissue_uptake"]["param_names"])), np.nan, dtype=np.float64)
-        out[:, 0] = params[:, 0]
+        out[:, 0] = ktrans
         out[:, 1] = params[:, 2]
         out[:, 2] = params[:, 1]
         out[:, 3] = chi
-        out[:, 4] = params[:, 0]
-        out[:, 5] = params[:, 0]
+        out[:, 4] = ktrans
+        out[:, 5] = ktrans
         out[:, 6] = params[:, 2]
         out[:, 7] = params[:, 2]
         out[:, 8] = params[:, 1]
         out[:, 9] = params[:, 1]
         return out
 
+    # 2cxm: kernel params are [E, ve, vp, Fp]; recover Ktrans = E * Fp.
+    ktrans = params[:, 0] * params[:, 3]
     out = np.full((n_fits, len(MODEL_LAYOUTS["2cxm"]["param_names"])), np.nan, dtype=np.float64)
-    out[:, 0] = params[:, 0]
+    out[:, 0] = ktrans
     out[:, 1] = params[:, 1]
     out[:, 2] = params[:, 2]
     out[:, 3] = params[:, 3]
     out[:, 4] = chi
-    out[:, 5] = params[:, 0]
-    out[:, 6] = params[:, 0]
+    out[:, 5] = ktrans
+    out[:, 6] = ktrans
     out[:, 7] = params[:, 1]
     out[:, 8] = params[:, 1]
     out[:, 9] = params[:, 2]

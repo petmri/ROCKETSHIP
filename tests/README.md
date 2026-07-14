@@ -11,7 +11,7 @@ shown here as `pytest` for brevity.
 | Default Python suite (incl. gated DCE parity) | `pytest tests/python` |
 | DCE parity, all models (reported extras) | `pytest tests/python -m parity --parity-suite=allmodels -s` |
 | Runtime parity vs MATLAB (needs MATLAB) | `pytest tests/python/test_runtime_parity.py --run-runtime-parity` |
-| OSIPI reliability | `pytest tests/python -m osipi -v` (add `--osipi-slow` for long fits) |
+| OSIPI reliability | `pytest tests/python -m osipi -v` (runs the full 2CXM/2CUM sweeps by default) |
 | BIDS qualification | `pytest tests/python --run-qualification` |
 | MATLAB unit tests | `run_unit_tests()` in MATLAB |
 | Coverage | `pytest tests/python -q --cov=python --cov-report=term-missing --cov-fail-under=60` |
@@ -104,7 +104,7 @@ pytest tests/python/test_t1_map_parity.py
 **OSIPI reliability** (ground-truth correctness against published peer tolerances):
 
 ```bash
-pytest tests/python -m osipi -v                 # all; add --osipi-slow for long fits
+pytest tests/python -m osipi -v                 # all OSIPI checks (incl. full 2CXM/2CUM sweeps)
 pytest tests/python/test_osipi_backend_consistency.py -v   # cpu vs cpufit/gpufit
 pytest tests/python/test_osipi_pycpufit.py tests/python/test_osipi_pygpufit.py -m fast -v
 python tests/python/run_osipi_reliability.py --suite all --summary-json /tmp/osipi_summary.json

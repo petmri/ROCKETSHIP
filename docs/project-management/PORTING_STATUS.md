@@ -11,7 +11,7 @@ Do not maintain long task lists here (use `TODO.md`) and do not archive historic
 ### Automated Baseline
 - Command: `.venv/bin/python -m pytest tests/python -q`
 - Result: `179 passed, 11 skipped, 2 xfailed`
-- The OSIPI secondary-model reliability checks (`2cxm`, `tissue_uptake`/`2cum`) are now promoted to real passing gates: the two fast CPUfit cases (`test_osipi_pycpufit_2cxm_fast`, `test_osipi_pycpufit_tissue_uptake_fast`) run in the default suite, and the full-sweep reliability cases (`test_osipi_dce_reliability.py::test_osipi_2cxm_reliability_delay0_against_reference_values`, `::test_osipi_2cum_reliability_delay0_against_reference_values`) pass under `--osipi-slow` (0 nonfinite failures; within OSIPI peer max-abs-error). 2CXM `ve`/`fp` clear peer tolerance by a thin margin (~1e-5), so watch for cross-platform sensitivity.
+- The OSIPI secondary-model reliability checks (`2cxm`, `tissue_uptake`/`2cum`) are now promoted to real passing gates: the two fast CPUfit cases (`test_osipi_pycpufit_2cxm_fast`, `test_osipi_pycpufit_tissue_uptake_fast`) run in the default suite, and the full-sweep reliability cases (`test_osipi_dce_reliability.py::test_osipi_2cxm_reliability_delay0_against_reference_values`, `::test_osipi_2cum_reliability_delay0_against_reference_values`) now run in the default suite (the `--osipi-slow` gate was removed; 0 nonfinite failures; within OSIPI peer max-abs-error). 2CXM `ve`/`fp` clear peer tolerance by a thin margin (~1e-5), so watch for cross-platform sensitivity.
 - The 2 remaining `xfailed` are the phantom-GT provisional-tolerance checks (`test_phantom_gt_reliability.py`), which stay xfail pending matched-model phantom generation.
 
 ### Latest Qualification Packet

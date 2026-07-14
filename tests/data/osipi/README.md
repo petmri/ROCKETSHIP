@@ -151,11 +151,8 @@ where cpufit/gpufit diverge on 2CXM/2CUM.
 ```bash
 cd /path/to/ROCKETSHIP
 
-# OSIPI tests only
+# OSIPI tests only (includes the full 2CXM / 2CUM sweeps + reliability fits by default)
 .venv/bin/python -m pytest tests/python -m osipi -v
-
-# include the longer full-sweep 2CXM / 2CUM reliability fits
-.venv/bin/python -m pytest tests/python -m osipi -v --osipi-slow
 
 # reliability summary to a JSON file
 .venv/bin/python tests/python/run_osipi_reliability.py \

@@ -32,8 +32,6 @@ OSIPI_ROOT = REPO_ROOT / "tests" / "data" / "osipi"
 DCE_DATA_DIR = OSIPI_ROOT / "dce_models"
 REFERENCE_DIR = OSIPI_ROOT / "reference"
 
-SLOW_SKIP_MSG = "Use --osipi-slow to run long OSIPI reliability fits."
-
 
 def _rows(csv_file: Path) -> list[dict[str, str]]:
     with csv_file.open(newline="") as handle:
@@ -63,9 +61,6 @@ def _assert_within_official(actual: float, expected: float, method: str, param: 
     )
 
 
-def _require_osipi_slow(run_osipi_slow: bool) -> None:
-    if not run_osipi_slow:
-        pytest.skip(SLOW_SKIP_MSG)
 
 
 def _ps_per_min_from_ktrans_fp_per_sec(ktrans_per_sec: float, fp_per_sec: float) -> float:
@@ -147,10 +142,8 @@ def test_osipi_patlak_reliability_delay0_against_reference_values() -> None:
 
 
 @pytest.mark.osipi
-@pytest.mark.osipi_slow
 @pytest.mark.slow
-def test_osipi_2cxm_reliability_delay0_against_reference_values(run_osipi_slow: bool) -> None:
-    _require_osipi_slow(run_osipi_slow)
+def test_osipi_2cxm_reliability_delay0_against_reference_values() -> None:
     rows = _rows(DCE_DATA_DIR / "2cxm_sd_0.001_delay_0.csv")
 
     for row in rows:
@@ -169,10 +162,8 @@ def test_osipi_2cxm_reliability_delay0_against_reference_values(run_osipi_slow: 
 
 
 @pytest.mark.osipi
-@pytest.mark.osipi_slow
 @pytest.mark.slow
-def test_osipi_2cum_reliability_delay0_against_reference_values(run_osipi_slow: bool) -> None:
-    _require_osipi_slow(run_osipi_slow)
+def test_osipi_2cum_reliability_delay0_against_reference_values() -> None:
     rows = _rows(DCE_DATA_DIR / "2cum_sd_0.0025_delay_0.csv")
 
     for row in rows:

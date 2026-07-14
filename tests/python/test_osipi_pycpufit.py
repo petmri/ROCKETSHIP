@@ -1,13 +1,13 @@
 """OSIPI DCE reliability — cpufit backend (pyCpufit accelerated Stage-D fit).
 
 Full sweep of every OSIPI DRO case, gated on OSIPI's official acceptance tolerances.
-Tofts / extended Tofts / Patlak and the tissue-uptake (2CUM) model converge and pass;
-2CUM relies on the backend-agnostic random multi-start (dce_pipeline._accel_multistart_refine)
-to escape the wrong-Fp-basin degenerate minimum. The 2CXM fit still misses a few low-flow
-(Fp=5) cases even with multi-start -- weakly-identifiable vp at this noise level, not a
-precision bug -- so it is gated behind ``--osipi-slow`` and marked xfail (the float64 python
-backend, which fits the extraction fraction E=Ktrans/Fp, is the reference for 2CXM). Details:
-``docs/project-management/projects/osipi-verification/gpufit_2cxm_2cum_divergence.md``.
+All accelerated Stage-D models pass: Tofts / extended Tofts / Patlak, plus the multi-
+compartment 2CUM (tissue uptake) and 2CXM. 2CUM/2CXM now fit the extraction fraction
+E=Ktrans/Fp with an O(N) exponential-recurrence convolution and analytic Jacobians (the
+Ktrans=Fp pole becomes the bound E->1), and use the backend-agnostic random multi-start
+(dce_pipeline._accel_multistart_refine) to pick the flow basin. The low-flow (Fp=5) cases
+that previously missed now pass once Fp can reach that regime (lower_limit_fp). Details:
+``docs/project-management/projects/osipi-verification/STATUS.md``.
 """
 
 from __future__ import annotations
@@ -16,22 +16,10 @@ import pytest
 
 from osipi_fast_backend_helpers import assert_backend_model_sweep, require_cpufit_backend
 
-_SLOW_XFAIL_REASON = (
-    "cpufit accelerated 2CXM misses a few low-flow (Fp=5) OSIPI cases even with multi-start "
-    "-- weakly-identifiable vp, not a solver/precision bug (the float64 python backend, which "
-    "fits E=Ktrans/Fp, is the reference); see "
-    "docs/project-management/projects/osipi-verification/gpufit_2cxm_2cum_divergence.md"
-)
-
 
 @pytest.fixture(scope="module")
 def cpufit_backend() -> str:
     return require_cpufit_backend()
-
-
-def _require_slow(run_osipi_slow: bool) -> None:
-    if not run_osipi_slow:
-        pytest.skip("Use --osipi-slow to run the full accelerated 2CXM/2CUM sweep.")
 
 
 @pytest.mark.osipi
@@ -50,18 +38,13 @@ def test_osipi_pycpufit_patlak_sweep(cpufit_backend: str) -> None:
 
 
 @pytest.mark.osipi
-@pytest.mark.osipi_slow
-@pytest.mark.slow
-@pytest.mark.xfail(reason=_SLOW_XFAIL_REASON, strict=False)
-def test_osipi_pycpufit_2cxm_sweep(cpufit_backend: str, run_osipi_slow: bool) -> None:
-    _require_slow(run_osipi_slow)
+def test_osipi_pycpufit_2cxm_sweep(cpufit_backend: str) -> None:
+    # Passes the full OSIPI gate after the E=Ktrans/Fp reparam + analytic Jacobian + the
+    # lowered Fp floor that lets low-flow (Fp=5) cases be represented.
     assert_backend_model_sweep("2cxm", cpufit_backend)
 
 
 @pytest.mark.osipi
-@pytest.mark.osipi_slow
-@pytest.mark.slow
-def test_osipi_pycpufit_tissue_uptake_sweep(cpufit_backend: str, run_osipi_slow: bool) -> None:
+def test_osipi_pycpufit_tissue_uptake_sweep(cpufit_backend: str) -> None:
     # Passes via the backend-agnostic multi-start that rescues the vp<->Fp degenerate minimum.
-    _require_slow(run_osipi_slow)
     assert_backend_model_sweep("tissue_uptake", cpufit_backend)
