@@ -484,7 +484,7 @@ class TestDcePipeline:
             assert info["method_requested"] == "glr"
             assert info["method_used"] == "glr"
 
-    def test_resolve_baseline_window_defaults_to_legacy_sobel_when_no_options_set(self) -> None:
+    def test_resolve_baseline_window_defaults_to_piecewise_constant_when_no_options_set(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))
             config.stage_overrides = {
@@ -501,8 +501,60 @@ class TestDcePipeline:
             assert ss_start == 0
             assert 1 <= ss_end <= 12
             assert info["method_requested"] == "none"
-            assert info["method_used"] == "legacy_sobel"
-            assert info["source"] == "default_auto_method:legacy_sobel"
+            assert info["method_used"] == "piecewise_constant"
+            assert info["source"] == "default_auto_method:piecewise_constant"
+
+    def test_resolve_baseline_window_uses_aif_sidecar_when_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            aif_path = Path(config.aif_files[0])
+            sidecar_path = Path(str(aif_path)[: -len(".nii.gz")] + ".json")
+            sidecar_path.write_text(json.dumps({"SteadyStateEndTimeIndex": 5}))
+            config.stage_overrides = {"stage_a_mode": "scaffold"}
+            stlv = np.full((12, 2), 100.0, dtype=np.float64)
+
+            ss_start, ss_end, info = _resolve_baseline_window(config, n_timepoints=12, stlv=stlv)
+
+            assert (ss_start, ss_end) == (0, 5)
+            assert info["method_used"] == "aif_sidecar"
+            assert info["source"] == f"aif_sidecar:SteadyStateEndTimeIndex:{sidecar_path}"
+
+    def test_resolve_baseline_window_falls_back_to_auto_when_sidecar_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            config.stage_overrides = {
+                "stage_a_mode": "scaffold",
+                "steady_state_auto_method": "piecewise_constant",
+            }
+            mean_curve = np.full(24, 100.0, dtype=np.float64)
+            mean_curve[4:7] = np.array([99.5, 99.0, 99.3], dtype=np.float64)
+            mean_curve[7:] = 140.0
+            stlv = np.tile(mean_curve[:, np.newaxis], (1, 3))
+
+            ss_start, ss_end, info = _resolve_baseline_window(config, n_timepoints=24, stlv=stlv)
+
+            assert ss_start == 0
+            assert info["method_used"] == "piecewise_constant"
+            assert info["source"] == "steady_state_auto_method:piecewise_constant"
+
+    def test_resolve_baseline_window_manual_end_overrides_aif_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            aif_path = Path(config.aif_files[0])
+            sidecar_path = Path(str(aif_path)[: -len(".nii.gz")] + ".json")
+            sidecar_path.write_text(json.dumps({"SteadyStateEndTimeIndex": 5}))
+            config.stage_overrides = {
+                "stage_a_mode": "scaffold",
+                "steady_state_start": 1,
+                "steady_state_end": 3,
+            }
+            stlv = np.full((12, 2), 100.0, dtype=np.float64)
+
+            ss_start, ss_end, info = _resolve_baseline_window(config, n_timepoints=12, stlv=stlv)
+
+            assert (ss_start, ss_end) == (0, 3)
+            assert info["method_used"] == "manual"
+            assert info["source"] == "steady_state_end"
 
     def test_resolve_timepoint_window_defaults_to_full_range(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -49,7 +49,7 @@
     "time_resolution_min": null,
     "steady_state_start": 1,
     "steady_state_end": null,
-    "steady_state_auto_method": "legacy_sobel",
+    "steady_state_auto_method": "piecewise_constant",
     "noise_pixsize": 5,
     "snr_filter": 0.0,
     "blood_t1_ms": null,

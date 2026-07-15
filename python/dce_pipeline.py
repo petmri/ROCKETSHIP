@@ -1464,6 +1464,35 @@ def _piecewise_constant_baseline_end(stlv: np.ndarray) -> Dict[str, Any]:
     }
 
 
+def _resolve_aif_sidecar_steady_state_end(config: DcePipelineConfig) -> Tuple[Optional[int], Optional[str]]:
+    """Look up a manually-pinned baseline end from the AIF file's JSON sidecar.
+
+    Mirrors the DCE dynamic-file sidecar discovery in `_resolve_dynamic_metadata`: same
+    basename as `config.aif_files[0]` with `.nii`/`.nii.gz` swapped for `.json`. This is
+    the documented mechanism for fixed/predictable runs (e.g. phantom ground-truth
+    alignment, benchmark determinism) — used in place of ad hoc stage_overrides pins.
+    Returns (end_1b, sidecar_path), or (None, None) when no sidecar or key is present.
+    """
+    if not config.aif_files:
+        return None, None
+    aif_path = Path(config.aif_files[0])
+    aif_text = str(aif_path)
+    if aif_text.endswith(".nii.gz"):
+        sidecar_path = Path(aif_text[: -len(".nii.gz")] + ".json")
+    elif aif_path.suffix.lower() == ".nii":
+        sidecar_path = aif_path.with_suffix(".json")
+    else:
+        return None, None
+
+    if not sidecar_path.exists():
+        return None, None
+
+    payload = _load_json(sidecar_path)
+    if "SteadyStateEndTimeIndex" not in payload:
+        return None, None
+    return int(payload["SteadyStateEndTimeIndex"]), str(sidecar_path)
+
+
 def _resolve_baseline_window(
     config: DcePipelineConfig,
     n_timepoints: int,
@@ -1482,11 +1511,16 @@ def _resolve_baseline_window(
     used_method = "manual" if end_is_set else "default"
     auto_details: Optional[Dict[str, Any]] = None
     end_source: str
+    sidecar_end_1b, sidecar_path = (None, None) if end_is_set else _resolve_aif_sidecar_steady_state_end(config)
     if end_is_set:
         end_1b = int(end_raw)
         end_source = "steady_state_end"
+    elif sidecar_end_1b is not None:
+        end_1b = int(sidecar_end_1b)
+        used_method = "aif_sidecar"
+        end_source = f"aif_sidecar:SteadyStateEndTimeIndex:{sidecar_path}"
     else:
-        auto_method = auto_method_requested if auto_method_requested != "none" else "legacy_sobel"
+        auto_method = auto_method_requested if auto_method_requested != "none" else "piecewise_constant"
         if stlv is None:
             raise ValueError(
                 "stage_overrides.steady_state_auto_method requires Stage-A AIF signal data to estimate baseline end"
@@ -1502,7 +1536,7 @@ def _resolve_baseline_window(
         end_1b = int(auto_details["end_ss_1b"])
         used_method = auto_method
         if auto_method_requested == "none":
-            end_source = "default_auto_method:legacy_sobel"
+            end_source = "default_auto_method:piecewise_constant"
         else:
             end_source = f"steady_state_auto_method:{auto_method}"
 
