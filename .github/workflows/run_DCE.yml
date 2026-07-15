@@ -124,6 +124,30 @@ jobs:
           python tests/contracts/check_baseline_drift.py \
             --candidate _ci_baseline_candidate/matlab_reference_v1.json
 
+      - name: Regenerate MATLAB region-parity baseline (drift-check candidate)
+        uses: matlab-actions/run-command@v2
+        with:
+          command: >-
+            addpath('.'); addpath('tests/matlab');
+            generate_dce_tofts_parity_map(
+            'outputRoot', '_ci_matlabref_candidate/sub-10bbbdownsample',
+            'dynamicPath', 'tests/data/BIDS_test/rawdata/sub-10bbbdownsample/ses-01/dce/sub-10bbbdownsample_ses-01_DCE.nii',
+            'aifRoiPath', 'tests/data/BIDS_test/derivatives/sub-10bbbdownsample/ses-01/dce/sub-10bbbdownsample_ses-01_desc-AIFroi_mask.nii',
+            'brainRoiPath', 'tests/data/BIDS_test/derivatives/sub-10bbbdownsample/ses-01/anat/sub-10bbbdownsample_ses-01_desc-brain_mask.nii',
+            't1MapPath', 'tests/data/BIDS_test/derivatives/sub-10bbbdownsample/ses-01/anat/sub-10bbbdownsample_ses-01_space-DCEref_T1map.nii',
+            'noiseRoiPath', 'tests/data/BIDS_test/derivatives/sub-10bbbdownsample/ses-01/anat/sub-10bbbdownsample_ses-01_desc-noise_mask.nii',
+            'models', {'tofts', 'patlak'});
+
+      - name: Check MATLAB region-parity baseline drift (sub-10bbbdownsample)
+        # Fails if a fresh MATLAB run of generate_dce_tofts_parity_map no longer matches
+        # the committed derivatives/matlabref/... maps, i.e. MATLAB's own pipeline
+        # (steady-state auto-detect, fitting, etc.) changed without regenerating the
+        # fixture. Complements the contract drift guard above, which never exercises
+        # A_make_R1maps_func/find_end_ss.
+        run: |
+          python tests/contracts/check_matlabref_map_drift.py \
+            --candidate-root _ci_matlabref_candidate/sub-10bbbdownsample
+
       - name: Generate MATLAB parity baseline maps (downsample fixture)
         uses: matlab-actions/run-command@v2
         with:
