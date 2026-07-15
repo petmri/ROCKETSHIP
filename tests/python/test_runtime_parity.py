@@ -189,14 +189,22 @@ def test_runtime_parity_dce_tofts(
 
     root = Path(runtime_parity_dce_root) if runtime_parity_dce_root else _default_downsample_root()
     paths = _dataset_paths(root)
-    assert paths["dynamic"].exists(), f"Missing DCE dynamic input: {paths['dynamic']}"
+    # BIDS layout: no flat subjectRoot/Dynamic_t1w.nii, so pass explicit overrides
+    # for generate_dce_tofts_parity_map rather than relying on its flat-layout defaults.
+    for key in ("dynamic", "aif", "roi", "t1map", "noise"):
+        assert paths[key].exists(), f"Missing DCE {key} input: {paths[key]}"
 
     # MATLAB tofts Ktrans map (timed) into a private results dir.
     ml_out = tmp_path / "results_matlab"
     batch = (
         "addpath('.'); addpath('tests/matlab'); "
-        f"generate_dce_tofts_parity_map('subjectRoot', '{paths['root']}', "
-        f"'outputRoot', '{ml_out}', 'models', {{'tofts'}});"
+        f"generate_dce_tofts_parity_map('outputRoot', '{ml_out}', "
+        f"'dynamicPath', '{paths['dynamic']}', "
+        f"'aifRoiPath', '{paths['aif']}', "
+        f"'brainRoiPath', '{paths['roi']}', "
+        f"'t1MapPath', '{paths['t1map']}', "
+        f"'noiseRoiPath', '{paths['noise']}', "
+        f"'models', {{'tofts'}});"
     )
     matlab_seconds = _time_matlab(matlab_cmd, batch)
     ml_ktrans_path = ml_out / "Dyn-1_tofts_fit_Ktrans.nii"
