@@ -298,8 +298,6 @@ def _python_config_payload(
             "aif_curve_mode": "fitted",
             "time_smoothing": "none",
             "time_smoothing_window": 0,
-            "steady_state_start": 1,
-            "steady_state_end": 2,
             "snr_filter": 0.0,
         },
     }

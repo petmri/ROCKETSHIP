@@ -65,8 +65,6 @@ def _make_config(root: Path, output_dir: Path, extra_overrides: dict | None = No
         "time_resolution_sec": float(meta["time_resolution_sec"]),
         "start_injection_min": float(meta["start_injection_min"]),
         "end_injection_min": float(meta["end_injection_min"]),
-        "steady_state_start": 1,
-        "steady_state_end": 3,
         "relaxivity": float(meta["relaxivity"]),
         "hematocrit": float(meta["hematocrit"]),
         "snr_filter": 0.0,
