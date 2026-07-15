@@ -936,20 +936,6 @@ def _resolve_dynamic_metadata(
     }
 
 
-def _baseline_window(config: DcePipelineConfig, n_timepoints: int) -> Tuple[int, int]:
-    start_raw = _stage_override(config, "steady_state_start", 1)
-    end_raw = _stage_override(config, "steady_state_end", min(2, n_timepoints))
-    if not _override_value_is_set(start_raw):
-        start_raw = 1
-    if not _override_value_is_set(end_raw):
-        end_raw = min(2, n_timepoints)
-    start_1b = int(start_raw)
-    end_1b = int(end_raw)
-    start_1b = max(1, min(start_1b, n_timepoints))
-    end_1b = max(start_1b, min(end_1b, n_timepoints))
-    return start_1b - 1, end_1b
-
-
 def _resolve_timepoint_window(
     config: DcePipelineConfig,
     n_timepoints: int,
