@@ -108,10 +108,8 @@ def _make_config(
         "tr_ms": 8.29,
         "fa_deg": 15.0,
         "time_resolution_sec": 15.84,
-        "start_injection_min": 0.5,
-        "end_injection_min": 0.7,
-        "steady_state_start": 1,
-        "steady_state_end": 2,
+        "steady_state_auto_method": "piecewise_constant",
+        "auto_find_injection": 1,
         "relaxivity": 3.6,
         "hematocrit": 0.42,
         "snr_filter": 5.0,
@@ -208,16 +206,11 @@ def _make_config(
 
 
 def _make_tofts_post_8ef4988_config(paths: dict, out_dir: Path, *, backend: str) -> DcePipelineConfig:
+    # _make_config's defaults already auto-detect steady-state end + injection timing
+    # (the "post-8ef4988 timing policy"); this wrapper only layers the fitted-AIF timing
+    # method on top for the tofts-only runtime-parity comparison.
     config = _make_config(paths, out_dir, backend=backend, models=["tofts"])
-    overrides = dict(config.stage_overrides)
-    overrides["aif_biexp_timing_method"] = "fit_transition_times"
-    overrides.pop("start_injection_min", None)
-    overrides.pop("end_injection_min", None)
-    overrides.pop("steady_state_start", None)
-    overrides.pop("steady_state_end", None)
-    overrides["steady_state_auto_method"] = "find_end_ss"
-    overrides["auto_find_injection"] = 1
-    config.stage_overrides = overrides
+    config.stage_overrides = {**config.stage_overrides, "aif_biexp_timing_method": "fit_transition_times"}
     return config
 
 
