@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import re
+import shutil
 import sys
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -148,12 +149,20 @@ def _run_dce_for_phantom_session(
         "write_param_maps": True,
         "write_postfit_arrays": False,
     }
+    aif_path = aif
     if steady_state_end_1b is not None and int(steady_state_end_1b) >= 1:
-        # Phantom-only diagnostic alignment: use generator-provided baseline_images so
-        # Stage-A baseline matches the GT AIF header. This is not the general real-data
-        # solution; TODO is to port MATLAB baseline auto-detection into the pipeline.
-        stage_overrides["steady_state_start"] = 1
-        stage_overrides["steady_state_end"] = int(steady_state_end_1b)
+        # Phantom ground-truth alignment: the generator-provided baseline_images value
+        # must match the GT AIF header exactly, so pin it via the AIF sidecar mechanism
+        # (SteadyStateEndTimeIndex) rather than auto-detecting. Copy the AIF file into
+        # the scratch output_dir first so the sidecar doesn't get written into the
+        # committed fixture tree.
+        aif_copy_dir = output_dir / "aif_sidecar"
+        aif_copy_dir.mkdir(parents=True, exist_ok=True)
+        aif_path = aif_copy_dir / aif.name
+        shutil.copyfile(aif, aif_path)
+        sidecar_suffix = ".nii.gz" if aif.name.endswith(".nii.gz") else aif.suffix
+        sidecar_path = aif_copy_dir / (aif.name[: -len(sidecar_suffix)] + ".json")
+        sidecar_path.write_text(json.dumps({"SteadyStateEndTimeIndex": int(steady_state_end_1b)}))
 
     cfg = DcePipelineConfig.from_dict(
         {
@@ -165,7 +174,7 @@ def _run_dce_for_phantom_session(
             "write_xls": False,
             "aif_mode": "auto",
             "dynamic_files": [str(dynamic)],
-            "aif_files": [str(aif)],
+            "aif_files": [str(aif_path)],
             "roi_files": [str(roi)],
             "t1map_files": [str(t1_map_path)],
             # Synthetic phantom fixtures can have near-zero background noise; use ROI for deterministic noise estimate.
