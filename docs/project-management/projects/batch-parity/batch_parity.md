@@ -1,5 +1,17 @@
 # Batch Parity Status (MATLAB vs Python DCE)
 
+> **Staleness note (2026-07-17):** most of this document predates the steady-state/
+> injection-timing overhaul (Python now always auto-detects steady-state end, matching
+> MATLAB's `find_end_ss`, with a `SteadyStateEndTimeIndex` AIF-sidecar override for
+> fixed/reproducible runs -- see `docs/dce_options.md`) and the Stage-D fit-backend
+> consolidation (`docs/project-management/projects/stage-d-fit-consolidation/`). The
+> "Key Diagnostics and Artifacts" paths below are absolute macOS paths
+> (`/Users/samuelbarnes/...`) from a different dev machine and likely don't resolve
+> here. The specific Stage-A/B numeric snapshots ("Latest CPU-vs-MATLAB clean-reference
+> check") and the "auto vs manual injection window" framing in Outstanding TODO #4
+> predate that overhaul and should be re-verified, not assumed current, before acting on
+> them. Left as-is rather than rewritten -- flagging per request, not fixing now.
+
 ## Scope
 Primary tracking for parity work on `RUNNER_DATA/sub-1101743/{ses-01,ses-02}` and related parity fixtures.
 
@@ -131,6 +143,71 @@ Interpretation:
   - Phase 1: add fixtures + Stage-B contract test + input-method matrix test.
   - Phase 2: add CPU-vs-CPUfit checkpoint test and wire into extended parity runner.
   - Phase 3: add CI split (`fast` on PR, `extended/nightly` scheduled) with JSON trend artifacts.
+
+## Tabled: Patlak/GPUfit non-identifiability at a parameter bound (2026-07-17)
+
+Found while building the Stage-D fit-backend consolidation
+(`docs/project-management/projects/stage-d-fit-consolidation/`); likely the same class
+of issue as "Regression on GPU-accelerated backend behavior observed in qualification
+test" above. **Tabled until after that refactor's remaining models
+(tofts/ex_tofts/tissue_uptake/2cxm) are migrated** -- documenting now so it isn't lost.
+
+**Symptom:** `patlak_ktrans_brain_auto_vs_cpu` / `_auto_vs_matlab`
+(`tests/python/test_dce_pipeline_parity_metrics.py::test_bbb_p19_region_parity`, model
+`patlak`, region `brain`, `sub-10bbbdownsample` fixture) collapses to corr ~-0.007,
+despite `gm`/`wm` regions on the exact same fixture already being perfect (corr=1.0).
+
+**Root cause chain (fully isolated, not guessed):**
+1. Switching Python's steady-state window from a hardcoded `[1,2]` test override to
+   MATLAB-matching auto-detection (a correct, intentional fix) widened the true Ktrans
+   range in this fixture's 237-voxel sparse sample from ~0.014 max to ~0.51 max. Verified
+   by isolating steady-state-auto vs injection-timing-auto independently -- steady-state
+   alone reproduces the full regression; injection-timing alone does not. Full isolation
+   table + implicated commits (`3c17ff3...` -> `66fd795...`) are in the consolidation
+   plan's Motivation section.
+2. The widened range exposed a real architectural bug: patlak's accelerated (gpufit)
+   fit had zero per-voxel seeding (one fixed, data-blind `initial_value_ktrans` for every
+   voxel) and no multi-start, unlike the CPU path (seeded per-voxel from the closed-form
+   linear-Patlak estimate). Fixed by the Stage-D consolidation's patlak pilot
+   (`python/dce_fit_backends.py`): both backends now seed each voxel from the same
+   linear estimate, expanded into x1/x10/x100 candidates.
+3. That fix resolved the gap for the overwhelming majority of voxels, but **one single
+   voxel** (out of 237) still fully explains the residual near-zero correlation --
+   Pearson correlation over a small, tightly-clustered-near-zero sample is extremely
+   sensitive to one high-leverage outlier.
+4. Deep-dived that one voxel directly (captured the exact per-voxel candidates/results
+   from a live pipeline run): its linear-regression seed is itself degenerate
+   (ktrans0=-0.637, vp0=15.39 -- vp's upper bound is 1.0), so the x1/x10/x100 multiplier
+   strategy gives **zero effective diversity** here (all three candidates collapse to
+   the same bounds-clipped starting point on both backends).
+5. vp saturates its upper bound (1.0) on both backends regardless of candidate. Once vp
+   is pinned there, CPU (float64 scipy `trf`) converges to Ktrans=0.512261 with
+   SSE=8339.5; gpufit (float32) converges to Ktrans=0.0 with chi-square=10231.9.
+   **CPU's objective is objectively lower/better, not merely a different-but-equally-
+   valid point on a flat manifold** -- gpufit is landing in a genuinely worse local
+   optimum near this boundary.
+6. Ruled out iteration/tolerance budget as the cause: rerunning with
+   `gpu_max_n_iterations=2000` and `gpu_tolerance=1e-10` (vs. defaults 200/1e-6, a
+   10x/10,000x increase) changed nothing -- gpufit reports `state=0` (converged) well
+   before that budget, so more budget can't help; the solver believes it's done.
+
+**Open questions for whoever picks this back up:**
+- Does GPUfit/CPUfit's internal LM step-acceptance/convergence check behave differently
+  in float32 near a bound vs. scipy's float64 `trf`? (Most likely explanation, not yet
+  confirmed against the library internals.)
+- Should candidate assembly clamp/reject an out-of-bounds or sign-flipped linear seed
+  before building the x1/x10/x100 multipliers, so a degenerate seed doesn't silently
+  collapse to zero diversity?
+- Should a voxel where a parameter lands on its bound automatically escalate to the
+  random-log-uniform multi-start (`2cxm`/`tissue_uptake`'s current rescue mechanism)
+  rather than the fixed-multiplier strategy?
+
+**Current mitigation plan (not yet implemented):** a GM/WM-style gating exception for
+patlak+`brain` in the parity test (matching the existing tofts+`gm` precedent already in
+`test_bbb_p19_region_parity`), since this is a non-identifiability/backend-precision
+issue, not a fitter bug to chase further right now.
+
+See also: `parity-whole-brain-roi-noise` and `parity-backend-divergence` memory notes.
 
 ## Testing Gap Analysis
 The CPU-vs-CPUfit divergence and weighted-AIF side effects were not caught early because:

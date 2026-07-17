@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 
 import numpy as np
 
+from dce_fit_backends import fit_patlak_stage_d
 from dce_models import (
     model_2cxm_cfit,
     model_2cxm_fit,
@@ -3531,11 +3532,14 @@ def _fit_stage_d_model_accelerated(
     if model_name not in ACCELERATED_STAGE_D_MODELS:
         return None
 
-    fit_module = _load_fit_module_for_acceleration(acceleration_backend)
     n_fits = int(ct.shape[1])
     if n_fits == 0:
         return np.zeros((0, len(MODEL_LAYOUTS[model_name]["param_names"])), dtype=np.float64)
 
+    if model_name == "patlak":
+        return fit_patlak_stage_d(ct, cp_use, timer, prefs, backend=acceleration_backend)
+
+    fit_module = _load_fit_module_for_acceleration(acceleration_backend)
     data = np.ascontiguousarray(np.asarray(ct.T, dtype=np.float32))
     timer_f32 = np.ascontiguousarray(np.asarray(timer, dtype=np.float32).reshape(-1))
     cp_f32 = np.ascontiguousarray(np.asarray(cp_use, dtype=np.float32).reshape(-1))
@@ -3575,24 +3579,6 @@ def _fit_stage_d_model_accelerated(
                 float(prefs["upper_limit_ktrans"]),
                 float(prefs["lower_limit_ve"]),
                 float(prefs["upper_limit_ve"]),
-                float(prefs["lower_limit_vp"]),
-                float(prefs["upper_limit_vp"]),
-            ],
-            dtype=np.float32,
-        )
-    elif model_name == "patlak":
-        model_id_name = "PATLAK"
-        initial_row = np.array(
-            [
-                float(prefs["initial_value_ktrans"]),
-                float(prefs["initial_value_vp"]),
-            ],
-            dtype=np.float32,
-        )
-        bounds_row = np.array(
-            [
-                float(prefs["lower_limit_ktrans"]),
-                float(prefs["upper_limit_ktrans"]),
                 float(prefs["lower_limit_vp"]),
                 float(prefs["upper_limit_vp"]),
             ],
@@ -3745,13 +3731,6 @@ def _fit_stage_d_model_accelerated(
         out[:, 7] = params[:, 1]
         out[:, 8] = params[:, 2]
         out[:, 9] = params[:, 2]
-        return out
-
-    if model_name == "patlak":
-        out = np.full((n_fits, len(MODEL_LAYOUTS["patlak"]["param_names"])), -1.0, dtype=np.float64)
-        out[:, 0] = params[:, 0]
-        out[:, 1] = params[:, 1]
-        out[:, 2] = chi
         return out
 
     if model_name == "tissue_uptake":

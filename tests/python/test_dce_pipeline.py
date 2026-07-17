@@ -962,13 +962,6 @@ class TestDcePipeline:
                 [1.0, 2.0, 3.0, 0.1, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0],
             ),
             (
-                "patlak",
-                _FakeAccelModule.ModelID.PATLAK,
-                [0.11, 0.33],
-                [0.01, 1.01, 0.03, 1.03],
-                [1.0, 2.0, 0.1, -1.0, -1.0, -1.0, -1.0],
-            ),
-            (
                 "tissue_uptake",
                 _FakeAccelModule.ModelID.TISSUE_UPTAKE,
                 # param[0] is now E = Ktrans/Fp = 0.11/0.44 = 0.25; bounds[0] = [ktrans_lo/fp_hi, ~1].
@@ -1050,6 +1043,64 @@ class TestDcePipeline:
         # refine calls (2cxm/2cum) perturb the initials and are not asserted here.
         assert np.allclose(_FakeAccelModule.first_call["initial_parameters"][0, :], np.asarray(expected_init))
         assert np.allclose(_FakeAccelModule.first_call["constraints"][0, :], np.asarray(expected_bounds))
+
+    def test_stage_d_accelerated_patlak_uses_per_voxel_linear_seed(self) -> None:
+        """Patlak now routes through dce_fit_backends: unlike the other accelerated
+        models (which start every voxel from the same fixed prefs value), it seeds
+        each voxel's first candidate from the closed-form linear-Patlak estimate --
+        the same seeding dce_models.model_patlak_fit has always used on the CPU path.
+        """
+        from dce_models import model_patlak_linear
+
+        ct = np.asarray(
+            [
+                [1.0, 2.0],
+                [1.1, 2.1],
+                [1.2, 2.2],
+                [1.3, 2.3],
+                [1.4, 2.4],
+            ],
+            dtype=np.float64,
+        )
+        cp = np.asarray([0.7, 0.8, 0.9, 1.0, 1.1], dtype=np.float64)
+        timer = np.asarray([0.0, 0.1, 0.2, 0.3, 0.4], dtype=np.float64)
+        prefs = {
+            "initial_value_ktrans": 0.11,
+            "initial_value_vp": 0.33,
+            "lower_limit_ktrans": 0.01,
+            "upper_limit_ktrans": 1.01,
+            "lower_limit_vp": 0.03,
+            "upper_limit_vp": 1.03,
+            "gpu_tolerance": 1e-6,
+            "gpu_max_n_iterations": 64,
+        }
+        expected_seed = model_patlak_linear(list(ct[:, 0]), list(cp), list(timer))
+        expected_init = [float(expected_seed[0]), float(expected_seed[1])]
+
+        _FakeAccelModule.last_call = None
+        _FakeAccelModule.first_call = None
+        with patch("dce_pipeline._load_fit_module_for_acceleration", return_value=_FakeAccelModule):
+            out = _fit_stage_d_model_accelerated(
+                model_name="patlak",
+                ct=ct,
+                cp_use=cp,
+                timer=timer,
+                prefs=prefs,
+                acceleration_backend="cpufit_cpu",
+            )
+
+        assert out is not None
+        assert out.shape == (ct.shape[1], len(MODEL_LAYOUTS["patlak"]["param_names"]))
+        # Fake module always returns canned params=[1, 2], chi=0.1 regardless of the
+        # candidate tried; CI columns stay at the -1.0 sentinel patlak has always used
+        # on the accelerated backend (no Jacobian available there).
+        assert np.allclose(out[0, :], np.asarray([1.0, 2.0, 0.1, -1.0, -1.0, -1.0, -1.0]))
+        assert _FakeAccelModule.first_call is not None
+        assert _FakeAccelModule.first_call["model_id"] == _FakeAccelModule.ModelID.PATLAK
+        assert np.allclose(_FakeAccelModule.first_call["initial_parameters"][0, :], np.asarray(expected_init))
+        assert np.allclose(
+            _FakeAccelModule.first_call["constraints"][0, :], np.asarray([0.01, 1.01, 0.03, 1.03])
+        )
 
     @pytest.mark.parametrize("model_name", ["ex_tofts", "tissue_uptake", "2cxm"])
     def test_stage_d_uses_acceleration_for_new_models(self, model_name: str) -> None:
