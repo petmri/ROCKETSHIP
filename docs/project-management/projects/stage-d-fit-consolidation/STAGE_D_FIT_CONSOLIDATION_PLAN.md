@@ -251,6 +251,148 @@ CPU convention with a "raw-only" accelerated convention under one shared candida
   `model_vp_fit` and `model_fxr_fit` -- two models never in scope for this project (not in
   `ACCELERATED_STAGE_D_MODELS`). They stay.
 
+## Call-chain simplification (2026-07-17)
+
+Once all five models shared the same `fit_*_stage_d(ct, cp, timer, prefs, backend)`
+signature (single or batched voxels, either backend), the long-standing early split
+between "accelerated" (batched) and "CPU" (a per-voxel loop through `_fit_model_curve` ->
+a thin `model_*_fit` wrapper -> the same `fit_*_stage_d` anyway) turned out to be
+artificial duplication, not a real architectural need -- both paths ended up at the exact
+same function, just reached differently. Simplified `_fit_stage_d_model`'s CPU fallback to
+call the same batched `fit_*_stage_d(..., backend="python")` directly (one call, not a
+per-voxel loop), via a small `_stage_d_fit_funcs()` registry shared with
+`_fit_stage_d_model_accelerated` (also simplified from five near-identical branches to one
+dict lookup). `_fit_model_curve` now only handles `fxr` (the one model outside this shared
+architecture, since its per-voxel R1 baseline can't be batched the same way) -- its other
+five branches, and the five `model_*_fit` imports they used, are gone from
+`dce_pipeline.py` (the `model_*_fit` wrappers themselves stay in `dce_models.py`: they're
+still the public single-voxel API used directly by tests, `rocketship.py`, and
+diagnostic scripts).
+
+One real robustness gap this closed: `_run_scipy_per_voxel` (patlak/tofts/ex_tofts'
+shared python runner) had no per-voxel exception handling, relying on the now-removed
+outer per-voxel loop in `dce_pipeline.py` to isolate one bad voxel from the rest of the
+batch. Added the same per-voxel try/except tissue_uptake/2cxm's runners already had, so
+one malformed voxel (e.g. a stray NaN that leaked through a mask) still can't sink an
+entire batch.
+
+`_stage_d_fit_funcs()` is a function, not a module-level dict: a dict literal built once
+at import time would capture the original `fit_*_stage_d` function objects, which doesn't
+observe later monkeypatching of e.g. `dce_pipeline.fit_tofts_stage_d` in tests (a dict
+holds object references, not name lookups) -- discovered when two tests that patch a
+`fit_*_stage_d` name by string kept getting the unpatched original. Rebuilding the dict
+inside a function each call reads the current module-level names instead. Two existing
+tests (`test_stage_d_gpu_failure_without_cpufit_falls_back_to_cpu`,
+`test_stage_d_nonfinite_accelerated_output_falls_back_to_cpu`) were testing the old
+per-voxel `_fit_model_curve` CPU fallback specifically and were rewritten to assert the
+new batched call instead; every other accelerated-fallback-chain test was untouched since
+it mocks `_fit_stage_d_model_accelerated` itself, which kept its exact external behavior.
+
+Verified: full `pytest tests/python -q` still 195 passed (same pre-existing tabled
+failure only); `-m osipi` still 22 passed.
+
+### Second pass: collapsing `dce_fit_backends.py`'s internal duplication
+
+Tracing the call chain all the way down (`_fit_stage_d_model` -> `fit_with_multistart` ->
+`run_backend_fit` -> per-model runner -> `_run_scipy_per_voxel`/`_run_accelerated`) surfaced
+one more genuine 1:1 wrapper and, more importantly, ~250 lines of near-identical logic
+copy-pasted across the five `fit_*_stage_d` entry points:
+
+- **`run_backend_fit` deleted**, merged into `fit_with_multistart` (its only caller,
+  confirmed via full-repo grep; not imported or mocked by any test). `fit_with_multistart`
+  now looks up the per-model/per-backend runner once per multistart loop instead of once
+  per candidate.
+- **Every `fit_*_stage_d` function had the identical ~12-line input-validation block**
+  (normalize `ct`/`cp`/`timer`, detect single-voxel, check shapes) **and an almost-identical
+  output-row assembly loop** (copy point estimates + sse, then either real CI bounds or a
+  per-model fallback). Extracted both into shared helpers: `_validate_stage_d_inputs` and
+  `_assemble_stage_d_output`. The output layout turned out to be a universal convention
+  across all five models' `MODEL_LAYOUTS` (`row_len = 3*n_params + 1`: point estimates,
+  then sse, then interleaved ci_low/ci_high pairs in the same order) -- confirmed by
+  checking every model's layout before generalizing, not assumed.
+  - This required unifying the "extra" payload every runner returns: patlak/tofts/
+    ex_tofts's python runner (`_run_scipy_per_voxel`) used to hand back the raw scipy
+    `OptimizeResult`, with CI computed later at the top level via `_ci_bounds_from_fit`;
+    tissue_uptake/2cxm's bespoke runners already computed `(ci_lo, ci_hi)` tuples directly
+    (they need extra rate-scaling `_ci_bounds_from_fit` alone can't do). Moved the
+    `_ci_bounds_from_fit` call inside `_run_scipy_per_voxel` itself so all five models'
+    runners return the same `(ci_lo, ci_hi)`-tuple-or-`None` shape, letting one output
+    assembler handle every model.
+  - One real difference survives, by design, not oversight: patlak's accelerated backend
+    fills missing CIs with a `-1.0` sentinel (its long-standing quirk), while every other
+    model repeats the point estimate. `_assemble_stage_d_output` takes this as an explicit
+    `ci_fallback` argument rather than silently unifying the two conventions.
+- **Introduced `_ModelSpec`/`_MODEL_SPECS`/`_fit_stage_d_batch`**: a small dataclass
+  bundling each model's `settings_fn`/`bounds_fn`/`assemble_fn`/`n_params`/`ci_fallback`,
+  and one generic engine that assembles inputs, runs `fit_with_multistart`, and calls
+  `_assemble_stage_d_output`. The five public `fit_patlak_stage_d`/`fit_tofts_stage_d`/etc.
+  functions **could not be deleted or merged into one** -- `dce_pipeline.py` imports each
+  by name and several tests patch them by name (e.g.
+  `patch("dce_pipeline.fit_tofts_stage_d", ...)`), so each stayed a real, individually
+  importable/patchable function -- but each is now a 1-line delegation to
+  `_fit_stage_d_batch(model_name, ...)` plus its (kept, since it documents real per-model
+  behavior differences) docstring, down from ~35-45 lines apiece.
+- Caught one arithmetic bug immediately via the test suite: first wrote
+  `_assemble_stage_d_output`'s row length as `2*n_params + 1` (an off-by-n error --
+  forgot the output has *two* CI columns per parameter, not one) and got an `IndexError`
+  on the very first test run; fixed to `3*n_params + 1` and re-verified.
+
+Verified again after this pass: full `pytest tests/python -q` still 195 passed (same
+pre-existing tabled failure only); `-m osipi` still 22 passed.
+
+### Third pass: "python" as just another fallback candidate, and a real bug found along the way
+
+`_fit_stage_d_model` still had a two-stage shape: a loop trying accelerated backend
+candidates, then -- as an entirely separate code block below it -- a single CPU/python
+fallback call. Since every candidate (accelerated or not) already goes through
+`_fit_stage_d_model_accelerated`, which is backend-string-agnostic (it just guards and
+delegates to the model's `fit_*_stage_d`), there was no real reason for "python" to be a
+separate step rather than the final entry in the same candidate list.
+
+Tracing this surfaced a real, previously-invisible bug: `_apply_model_specific_prefs`
+(which strips e.g. `2cxm_lower_limit_fp` down to `lower_limit_fp` for that model
+specifically -- the mechanism `_stage_d_fit_prefs` provides so 2cxm/tissue_uptake, the two
+models flagged elsewhere in this doc as least stable, can be tuned independently without
+affecting other models) was being called **only** in the CPU/python fallback branch. The
+accelerated-attempt loop passed `prefs` raw. `tests/python/osipi_fast_backend_helpers.py`
+already worked around this itself (it calls `_apply_model_specific_prefs` before invoking
+the accelerated function directly) -- which is how the gap was found, not from a failing
+test. Net effect in production: whenever the accelerated backend actually succeeded (the
+common case), 2cxm/tissue_uptake's per-model override knobs
+(`voxel_lower_limit_fp_2cxm`, `voxel_initial_value_vp_tissue_uptake`, etc.) were silently
+ignored; they only took effect on the rare run that fell all the way back to pure CPU.
+
+Asked the user how to handle this rather than silently folding in a numeric behavior
+change alongside a structural refactor; they chose to fix it. `_fit_stage_d_model` now
+calls `_apply_model_specific_prefs` once, before building the candidate list, and every
+candidate -- accelerated or "python" -- gets the same processed prefs.
+`_acceleration_backend_attempt_order(acceleration_backend) + ["python"]` is the full
+candidate list unconditionally (when `acceleration_backend == "none"`, the accelerated
+part is `[]`, so the list is just `["python"]`, same net effect as before). Log messages
+were reworded from "acceleration backend" / "falling back to pure CPU" to "backend" / "no
+fallback remains", since "python" being just another candidate makes the old CPU-specific
+phrasing inaccurate.
+
+Two tests (`test_stage_d_gpu_failure_without_cpufit_falls_back_to_cpu`,
+`test_stage_d_nonfinite_accelerated_output_falls_back_to_cpu`) previously mocked
+`fit_tofts_stage_d`/`fit_ex_tofts_stage_d` directly to test the CPU-fallback step in
+isolation (from the prior pass, when it was a separate code path); rewritten to mock
+`_fit_stage_d_model_accelerated` with backend-conditional `fake_accel` functions instead,
+matching every other fallback-chain test's style now that "python" is just another value
+of `acceleration_backend` passed to the same seam. Every other fallback-chain test needed
+no changes (they all return early on a successful earlier candidate, so never reach
+"python").
+
+`_fit_model_curve` renamed to `_fit_fxr_curve` (it now only ever handles `fxr`, the one
+model outside the shared batched architecture, since its per-voxel R1 baseline can't be
+batched the same way). `ACCELERATED_STAGE_D_MODELS` deleted (fully superseded by
+`_stage_d_fit_funcs()`'s keys, and no longer referenced anywhere after this pass).
+
+Verified: full `pytest tests/python -q` still 195 passed (same pre-existing tabled
+failure only); `-m osipi` still 22 passed -- the osipi backend-consistency/reliability
+sweeps are exactly where a 2cxm/tissue_uptake prefs-handling change would be expected to
+show up, and they stayed green.
+
 ## Possible follow-ups (not started, not blocking)
 
 - If real BIDS batch runtime on GPU hardware is measurably slower for tissue_uptake/2cxm,

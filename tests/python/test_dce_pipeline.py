@@ -754,40 +754,41 @@ class TestDcePipeline:
         cp = np.asarray([0.8, 0.9, 1.0, 1.1, 1.2], dtype=np.float64)
         timer = np.asarray([0.0, 0.1, 0.2, 0.3, 0.4], dtype=np.float64)
 
-        accel_calls: list[str] = []
-        cpu_calls: list[int] = []
+        calls: list[str] = []
 
         def fake_accel(**kwargs):
-            accel_calls.append(str(kwargs["acceleration_backend"]))
-            raise RuntimeError("the provided PTX was compiled with an unsupported toolchain")
-
-        def fake_cpu_fit(*args, **kwargs):
-            del args, kwargs
-            cpu_calls.append(1)
-            return np.asarray([0.2, 0.3, 0.4, 0.2, 0.2, 0.3, 0.3], dtype=np.float64)
+            backend = str(kwargs["acceleration_backend"])
+            calls.append(backend)
+            if backend == "gpufit_cuda":
+                raise RuntimeError("the provided PTX was compiled with an unsupported toolchain")
+            if backend == "python":
+                return np.tile(
+                    np.asarray([0.2, 0.3, 0.4, 0.2, 0.2, 0.3, 0.3], dtype=np.float64), (ct.shape[1], 1)
+                )
+            return None
 
         with patch("dce_pipeline._cpufit_import_available", return_value=False):
             with patch("dce_pipeline._fit_stage_d_model_accelerated", side_effect=fake_accel):
-                with patch("dce_pipeline._fit_model_curve", side_effect=fake_cpu_fit):
-                    out = _fit_stage_d_model(
-                        model_name="tofts",
-                        ct=ct,
-                        cp_use=cp,
-                        timer=timer,
-                        prefs={},
-                        r1o=None,
-                        relaxivity=3.6,
-                        fw=0.8,
-                        stlv_use=None,
-                        sttum=None,
-                        start_injection_min=0.0,
-                        sss=None,
-                        ssstum=None,
-                        acceleration_backend="gpufit_cuda",
-                    )
+                out = _fit_stage_d_model(
+                    model_name="tofts",
+                    ct=ct,
+                    cp_use=cp,
+                    timer=timer,
+                    prefs={},
+                    r1o=None,
+                    relaxivity=3.6,
+                    fw=0.8,
+                    stlv_use=None,
+                    sttum=None,
+                    start_injection_min=0.0,
+                    sss=None,
+                    ssstum=None,
+                    acceleration_backend="gpufit_cuda",
+                )
 
-        assert accel_calls == ["gpufit_cuda"]
-        assert len(cpu_calls) == ct.shape[1]
+        # "python" is now just the final candidate in the same fallback chain
+        # (no cpufit_cpu available here), not a separate code path.
+        assert calls == ["gpufit_cuda", "python"]
         assert out.shape == (ct.shape[1], 7)
         assert np.allclose(out[:, 0], 0.2)
         assert np.allclose(out[:, 1], 0.3)
@@ -856,34 +857,37 @@ class TestDcePipeline:
         row_len = len(MODEL_LAYOUTS["ex_tofts"]["param_names"])
         accel_nan = np.full((ct.shape[1], row_len), np.nan, dtype=np.float64)
         cpu_row = np.asarray([0.2, 0.3, 0.1, 0.05, 0.2, 0.2, 0.3, 0.3, 0.1, 0.1], dtype=np.float64)
-        cpu_calls: list[int] = []
+        calls: list[str] = []
 
-        def fake_cpu_fit(*args, **kwargs):
-            del args, kwargs
-            cpu_calls.append(1)
-            return cpu_row
+        def fake_accel(**kwargs):
+            backend = str(kwargs["acceleration_backend"])
+            calls.append(backend)
+            if backend == "python":
+                return np.tile(cpu_row, (ct.shape[1], 1))
+            return accel_nan
 
         with patch("dce_pipeline._gpufit_import_available", return_value=False):
-            with patch("dce_pipeline._fit_stage_d_model_accelerated", return_value=accel_nan):
-                with patch("dce_pipeline._fit_model_curve", side_effect=fake_cpu_fit):
-                    out = _fit_stage_d_model(
-                        model_name="ex_tofts",
-                        ct=ct,
-                        cp_use=cp,
-                        timer=timer,
-                        prefs={},
-                        r1o=None,
-                        relaxivity=3.6,
-                        fw=0.8,
-                        stlv_use=None,
-                        sttum=None,
-                        start_injection_min=0.0,
-                        sss=None,
-                        ssstum=None,
-                        acceleration_backend="cpufit_cpu",
-                    )
+            with patch("dce_pipeline._fit_stage_d_model_accelerated", side_effect=fake_accel):
+                out = _fit_stage_d_model(
+                    model_name="ex_tofts",
+                    ct=ct,
+                    cp_use=cp,
+                    timer=timer,
+                    prefs={},
+                    r1o=None,
+                    relaxivity=3.6,
+                    fw=0.8,
+                    stlv_use=None,
+                    sttum=None,
+                    start_injection_min=0.0,
+                    sss=None,
+                    ssstum=None,
+                    acceleration_backend="cpufit_cpu",
+                )
 
-        assert len(cpu_calls) == ct.shape[1]
+        # "python" is now just the final candidate in the same fallback chain
+        # (no gpufit fallback available here), not a separate code path.
+        assert calls == ["cpufit_cpu", "python"]
         assert out.shape == (ct.shape[1], row_len)
         assert np.all(np.isfinite(out[:, :3]))
         assert np.allclose(out[0, :], cpu_row)

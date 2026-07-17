@@ -455,6 +455,12 @@ def _run_scipy_per_voxel(
 
     ``cfit_fn(params_vec, cp_vec, t_vec) -> predicted Ct list`` wraps the
     model's forward curve function (e.g. `model_patlak_cfit`, `model_tofts_cfit`).
+    Exceptions are caught per voxel: one bad voxel leaves that voxel's row NaN
+    rather than failing the whole (now batched, no outer per-voxel loop in
+    dce_pipeline.py) call. `extra[i]` is a `(ci_lo, ci_hi)` tuple (or `None` on
+    failure) -- the same format every model's runner uses, so the top-level
+    `fit_*_stage_d` output assembly doesn't need to know whether a given
+    backend exposes a Jacobian.
     """
     settings = inputs.prefs
     lb = [float(inputs.bounds_row[2 * j]) for j in range(n_params)]
@@ -466,7 +472,7 @@ def _run_scipy_per_voxel(
     n_voxels = inputs.n_voxels
     params = np.full((n_voxels, n_params), np.nan, dtype=np.float64)
     chi = np.full(n_voxels, np.nan, dtype=np.float64)
-    success = np.ones(n_voxels, dtype=bool)
+    success = np.zeros(n_voxels, dtype=bool)
     extra = np.empty(n_voxels, dtype=object)
 
     for i in range(n_voxels):
@@ -477,10 +483,14 @@ def _run_scipy_per_voxel(
             return [pred[j] - ct_vec[j] for j in range(len(ct_vec))]
 
         x0 = [min(max(float(initial_parameters[i, j]), lb[j]), ub[j]) for j in range(n_params)]
-        fit = least_squares(residual, x0=x0, bounds=(lb, ub), **lsq_kwargs)
+        try:
+            fit = least_squares(residual, x0=x0, bounds=(lb, ub), **lsq_kwargs)
+        except Exception:
+            continue
         params[i, :] = fit.x
         chi[i] = float(sum(v * v for v in fit.fun))
-        extra[i] = fit
+        success[i] = True
+        extra[i] = _ci_bounds_from_fit(fit)
 
     return params, success, chi, extra
 
@@ -827,32 +837,6 @@ _ACCELERATED_RUNNERS = {
 }
 
 
-def run_backend_fit(
-    backend: str,
-    model_name: str,
-    inputs: FitInputs,
-    initial_parameters: np.ndarray,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Run one fit attempt for every voxel from `initial_parameters`.
-
-    Returns (params, success_mask, chi_square, extra) arrays, one row per
-    voxel; `extra` carries a backend-specific per-voxel payload (the scipy
-    ``OptimizeResult`` for ``backend="python"``, used for confidence-interval
-    computation; ``None`` for accelerated backends, which don't expose a
-    Jacobian). Backend-agnostic entry point: the caller assembles `inputs`
-    once and passes the same object regardless of which backend is selected.
-    """
-    runners = _PYTHON_RUNNERS if backend == "python" else _ACCELERATED_RUNNERS
-    runner = runners.get(model_name)
-    if runner is None:
-        raise NotImplementedError(
-            f"run_backend_fit: model '{model_name}' is not yet migrated for backend '{backend}'"
-        )
-    if backend == "python":
-        return runner(inputs, initial_parameters)
-    return runner(backend, inputs, initial_parameters)
-
-
 def fit_with_multistart(
     backend: str,
     model_name: str,
@@ -863,10 +847,20 @@ def fit_with_multistart(
 
     Generalizes dce_models._best_fit_over_starts and
     dce_pipeline._accel_multistart_refine's "keep the lower SSE/chi-square"
-    bookkeeping into one implementation that works whether `run_backend_fit`
-    fits one voxel at a time (python) or the whole batch at once
-    (cpufit/gpufit).
+    bookkeeping into one implementation that works whether a candidate is fit
+    one voxel at a time (python) or the whole batch at once (cpufit/gpufit).
+
+    Returns (params, success_mask, chi_square, extra) for the best candidate
+    per voxel; `extra` is a `(ci_lo, ci_hi)` tuple or `None` (see
+    `_run_scipy_per_voxel`/`_run_accelerated`).
     """
+    runners = _PYTHON_RUNNERS if backend == "python" else _ACCELERATED_RUNNERS
+    runner = runners.get(model_name)
+    if runner is None:
+        raise NotImplementedError(
+            f"fit_with_multistart: model '{model_name}' is not yet migrated for backend '{backend}'"
+        )
+
     n_starts, n_voxels, n_params = candidates.shape
     best_params = np.full((n_voxels, n_params), np.nan, dtype=np.float64)
     best_chi = np.full(n_voxels, np.inf, dtype=np.float64)
@@ -874,7 +868,10 @@ def fit_with_multistart(
     best_extra = np.empty(n_voxels, dtype=object)
 
     for s in range(n_starts):
-        params, success, chi, extra = run_backend_fit(backend, model_name, inputs, candidates[s])
+        if backend == "python":
+            params, success, chi, extra = runner(inputs, candidates[s])
+        else:
+            params, success, chi, extra = runner(backend, inputs, candidates[s])
         with np.errstate(invalid="ignore"):
             improved = success & np.isfinite(chi) & (chi < best_chi)
         best_params[improved] = params[improved]
@@ -884,6 +881,125 @@ def fit_with_multistart(
 
     best_chi = np.where(best_success, best_chi, np.nan)
     return best_params, best_success, best_chi, best_extra
+
+
+def _validate_stage_d_inputs(
+    ct: np.ndarray, cp: np.ndarray, timer: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, bool]:
+    """Normalize/validate the (ct, cp, timer) triple shared by every fit_*_stage_d entry point.
+
+    Returns (ct_arr, cp_arr, timer_arr, single_voxel); ct_arr is always 2-D
+    (n_time, n_voxels), with single_voxel recording whether the caller passed
+    a bare (n_time,) vector that should be unwrapped again on output.
+    """
+    ct_arr = np.asarray(ct, dtype=np.float64)
+    single_voxel = ct_arr.ndim == 1
+    if single_voxel:
+        ct_arr = ct_arr[:, None]
+    cp_arr = np.asarray(cp, dtype=np.float64).reshape(-1)
+    timer_arr = np.asarray(timer, dtype=np.float64).reshape(-1)
+
+    if not (ct_arr.shape[0] == cp_arr.shape[0] == timer_arr.shape[0]):
+        raise ValueError(
+            f"ct/cp/timer lengths differ: {ct_arr.shape[0]} / {cp_arr.shape[0]} / {timer_arr.shape[0]}"
+        )
+    if ct_arr.shape[0] == 0:
+        raise ValueError("ct/cp/timer must be non-empty")
+    return ct_arr, cp_arr, timer_arr, single_voxel
+
+
+def _assemble_stage_d_output(
+    n_voxels: int,
+    n_params: int,
+    params: np.ndarray,
+    chi: np.ndarray,
+    extra: np.ndarray,
+    *,
+    ci_fallback: str,
+) -> np.ndarray:
+    """Build the shared MATLAB-style output row every model uses.
+
+    Column layout (row_len = 3*n_params + 1): point estimates, then sse, then
+    ci_low/ci_high interleaved per parameter in the same order -- true for all
+    five models' `MODEL_LAYOUTS` entries. `extra[i]` is a `(ci_lo, ci_hi)`
+    tuple (real CIs, from either backend's runner) or `None` (no Jacobian
+    available); `ci_fallback` picks what the CI columns fall back to in the
+    `None` case: `"point_estimate"` (repeat the fitted value, used by every
+    model but patlak) or `"sentinel"` (patlak's -1.0, its long-standing
+    accelerated-backend convention).
+    """
+    row_len = 3 * n_params + 1
+    out = np.full((n_voxels, row_len), np.nan, dtype=np.float64)
+    for i in range(n_voxels):
+        out[i, :n_params] = params[i, :]
+        out[i, n_params] = float(chi[i])
+        extra_i = extra[i]
+        for j in range(n_params):
+            lo_col, hi_col = n_params + 1 + 2 * j, n_params + 2 + 2 * j
+            if extra_i is not None:
+                ci_lo, ci_hi = extra_i
+                out[i, lo_col], out[i, hi_col] = float(ci_lo[j]), float(ci_hi[j])
+            elif ci_fallback == "sentinel":
+                out[i, lo_col] = out[i, hi_col] = -1.0
+            else:
+                out[i, lo_col] = out[i, hi_col] = float(params[i, j])
+    return out
+
+
+@dataclass
+class _ModelSpec:
+    """Everything `_fit_stage_d_batch` needs to fit one model, gathered in one place."""
+
+    settings_fn: Any
+    bounds_fn: Any
+    assemble_fn: Any
+    n_params: int
+    ci_fallback: str  # "point_estimate" or "sentinel" (patlak only, see _assemble_stage_d_output)
+
+
+_MODEL_SPECS: Dict[str, _ModelSpec] = {
+    "patlak": _ModelSpec(_patlak_settings, _patlak_bounds_row, assemble_patlak_candidates, 2, "sentinel"),
+    "tofts": _ModelSpec(_tofts_settings, _tofts_bounds_row, assemble_tofts_candidates, 2, "point_estimate"),
+    "ex_tofts": _ModelSpec(
+        _ex_tofts_settings, _ex_tofts_bounds_row, assemble_ex_tofts_candidates, 3, "point_estimate"
+    ),
+    "tissue_uptake": _ModelSpec(
+        _tissue_uptake_settings,
+        _tissue_uptake_bounds_row,
+        assemble_tissue_uptake_candidates,
+        3,
+        "point_estimate",
+    ),
+    "2cxm": _ModelSpec(_2cxm_settings, _2cxm_bounds_row, assemble_2cxm_candidates, 4, "point_estimate"),
+}
+
+
+def _fit_stage_d_batch(
+    model_name: str,
+    ct: np.ndarray,
+    cp: np.ndarray,
+    timer: np.ndarray,
+    prefs: Optional[Dict[str, Any]],
+    backend: str,
+) -> np.ndarray:
+    """Shared engine behind every `fit_*_stage_d` entry point.
+
+    Assembles this model's settings/bounds/candidates via its `_ModelSpec`,
+    runs them through `fit_with_multistart`, and maps the result to the
+    model's MATLAB-style output row. One or many voxels, either backend --
+    see the public `fit_*_stage_d` wrappers for the per-model contract.
+    """
+    ct_arr, cp_arr, timer_arr, single_voxel = _validate_stage_d_inputs(ct, cp, timer)
+
+    spec = _MODEL_SPECS[model_name]
+    settings = spec.settings_fn(prefs)
+    bounds_row = spec.bounds_fn(settings)
+    inputs = FitInputs(ct=ct_arr, cp=cp_arr, timer=timer_arr, bounds_row=bounds_row, prefs=settings)
+    candidates = spec.assemble_fn(inputs)
+
+    params, _success, chi, extra = fit_with_multistart(backend, model_name, inputs, candidates)
+    out = _assemble_stage_d_output(ct_arr.shape[1], spec.n_params, params, chi, extra, ci_fallback=spec.ci_fallback)
+    return out[0] if single_voxel else out
 
 
 def fit_patlak_stage_d(
@@ -904,44 +1020,11 @@ def fit_patlak_stage_d(
 
     Returns a MATLAB-style row: (7,) for a single voxel, (n_voxels, 7) for a
     batch, matching dce_pipeline.MODEL_LAYOUTS["patlak"]["param_names"]
-    (Ktrans, vp, sse, ktrans_ci_low/high, vp_ci_low/high).
+    (Ktrans, vp, sse, ktrans_ci_low/high, vp_ci_low/high). On the accelerated
+    backend (no Jacobian available), CI columns are -1.0 -- patlak's
+    long-standing accelerated-backend sentinel, unlike every other model here.
     """
-    ct_arr = np.asarray(ct, dtype=np.float64)
-    single_voxel = ct_arr.ndim == 1
-    if single_voxel:
-        ct_arr = ct_arr[:, None]
-    cp_arr = np.asarray(cp, dtype=np.float64).reshape(-1)
-    timer_arr = np.asarray(timer, dtype=np.float64).reshape(-1)
-
-    if not (ct_arr.shape[0] == cp_arr.shape[0] == timer_arr.shape[0]):
-        raise ValueError(
-            f"ct/cp/timer lengths differ: {ct_arr.shape[0]} / {cp_arr.shape[0]} / {timer_arr.shape[0]}"
-        )
-    if ct_arr.shape[0] == 0:
-        raise ValueError("ct/cp/timer must be non-empty")
-
-    settings = _patlak_settings(prefs)
-    bounds_row = _patlak_bounds_row(settings)
-    inputs = FitInputs(ct=ct_arr, cp=cp_arr, timer=timer_arr, bounds_row=bounds_row, prefs=settings)
-    candidates = assemble_patlak_candidates(inputs)
-
-    params, _success, chi, extra = fit_with_multistart(backend, "patlak", inputs, candidates)
-
-    n_voxels = ct_arr.shape[1]
-    out = np.full((n_voxels, 7), np.nan, dtype=np.float64)
-    for i in range(n_voxels):
-        out[i, 0] = float(params[i, 0])
-        out[i, 1] = float(params[i, 1])
-        out[i, 2] = float(chi[i])
-        fit_obj = extra[i]
-        if fit_obj is not None:
-            ci_lo, ci_hi = _ci_bounds_from_fit(fit_obj)
-            out[i, 3], out[i, 4] = ci_lo[0], ci_hi[0]
-            out[i, 5], out[i, 6] = ci_lo[1], ci_hi[1]
-        else:
-            out[i, 3] = out[i, 4] = out[i, 5] = out[i, 6] = -1.0
-
-    return out[0] if single_voxel else out
+    return _fit_stage_d_batch("patlak", ct, cp, timer, prefs, backend)
 
 
 def fit_tofts_stage_d(
@@ -954,8 +1037,7 @@ def fit_tofts_stage_d(
     """Stage-D tofts fit for one or many voxels, on any backend.
 
     Single fixed starting candidate today (no multi-start, matching the prior
-    implementation on both backends), run through the same
-    assemble-candidates/`fit_with_multistart` machinery as patlak.
+    implementation on both backends).
 
     Args:
       ct: (n_time,) for a single voxel, or (n_time, n_voxels) for a batch.
@@ -970,43 +1052,7 @@ def fit_tofts_stage_d(
     backend (no Jacobian available), CI columns repeat the point estimate --
     the same convention the prior implementation used for this model.
     """
-    ct_arr = np.asarray(ct, dtype=np.float64)
-    single_voxel = ct_arr.ndim == 1
-    if single_voxel:
-        ct_arr = ct_arr[:, None]
-    cp_arr = np.asarray(cp, dtype=np.float64).reshape(-1)
-    timer_arr = np.asarray(timer, dtype=np.float64).reshape(-1)
-
-    if not (ct_arr.shape[0] == cp_arr.shape[0] == timer_arr.shape[0]):
-        raise ValueError(
-            f"ct/cp/timer lengths differ: {ct_arr.shape[0]} / {cp_arr.shape[0]} / {timer_arr.shape[0]}"
-        )
-    if ct_arr.shape[0] == 0:
-        raise ValueError("ct/cp/timer must be non-empty")
-
-    settings = _tofts_settings(prefs)
-    bounds_row = _tofts_bounds_row(settings)
-    inputs = FitInputs(ct=ct_arr, cp=cp_arr, timer=timer_arr, bounds_row=bounds_row, prefs=settings)
-    candidates = assemble_tofts_candidates(inputs)
-
-    params, _success, chi, extra = fit_with_multistart(backend, "tofts", inputs, candidates)
-
-    n_voxels = ct_arr.shape[1]
-    out = np.full((n_voxels, 7), np.nan, dtype=np.float64)
-    for i in range(n_voxels):
-        out[i, 0] = float(params[i, 0])
-        out[i, 1] = float(params[i, 1])
-        out[i, 2] = float(chi[i])
-        fit_obj = extra[i]
-        if fit_obj is not None:
-            ci_lo, ci_hi = _ci_bounds_from_fit(fit_obj)
-            out[i, 3], out[i, 4] = ci_lo[0], ci_hi[0]
-            out[i, 5], out[i, 6] = ci_lo[1], ci_hi[1]
-        else:
-            out[i, 3] = out[i, 4] = float(params[i, 0])
-            out[i, 5] = out[i, 6] = float(params[i, 1])
-
-    return out[0] if single_voxel else out
+    return _fit_stage_d_batch("tofts", ct, cp, timer, prefs, backend)
 
 
 def fit_ex_tofts_stage_d(
@@ -1019,8 +1065,7 @@ def fit_ex_tofts_stage_d(
     """Stage-D ex_tofts fit for one or many voxels, on any backend.
 
     Fixed x1/x10/x100-on-Ktrans multi-start (the same 3 candidates
-    `dce_models.model_extended_tofts_fit` has always tried on the CPU path),
-    run through the shared assemble-candidates/`fit_with_multistart` machinery.
+    `dce_models.model_extended_tofts_fit` has always tried on the CPU path).
     Unlike the tofts/patlak migrations, this is a real behavior change on the
     accelerated backend: it previously ran a single fixed start with no
     multistart at all, and now gets the same 3-candidate multistart the CPU
@@ -1040,46 +1085,7 @@ def fit_ex_tofts_stage_d(
     point estimate -- the same convention the prior implementation used for
     this model.
     """
-    ct_arr = np.asarray(ct, dtype=np.float64)
-    single_voxel = ct_arr.ndim == 1
-    if single_voxel:
-        ct_arr = ct_arr[:, None]
-    cp_arr = np.asarray(cp, dtype=np.float64).reshape(-1)
-    timer_arr = np.asarray(timer, dtype=np.float64).reshape(-1)
-
-    if not (ct_arr.shape[0] == cp_arr.shape[0] == timer_arr.shape[0]):
-        raise ValueError(
-            f"ct/cp/timer lengths differ: {ct_arr.shape[0]} / {cp_arr.shape[0]} / {timer_arr.shape[0]}"
-        )
-    if ct_arr.shape[0] == 0:
-        raise ValueError("ct/cp/timer must be non-empty")
-
-    settings = _ex_tofts_settings(prefs)
-    bounds_row = _ex_tofts_bounds_row(settings)
-    inputs = FitInputs(ct=ct_arr, cp=cp_arr, timer=timer_arr, bounds_row=bounds_row, prefs=settings)
-    candidates = assemble_ex_tofts_candidates(inputs)
-
-    params, _success, chi, extra = fit_with_multistart(backend, "ex_tofts", inputs, candidates)
-
-    n_voxels = ct_arr.shape[1]
-    out = np.full((n_voxels, 10), np.nan, dtype=np.float64)
-    for i in range(n_voxels):
-        out[i, 0] = float(params[i, 0])
-        out[i, 1] = float(params[i, 1])
-        out[i, 2] = float(params[i, 2])
-        out[i, 3] = float(chi[i])
-        fit_obj = extra[i]
-        if fit_obj is not None:
-            ci_lo, ci_hi = _ci_bounds_from_fit(fit_obj)
-            out[i, 4], out[i, 5] = ci_lo[0], ci_hi[0]
-            out[i, 6], out[i, 7] = ci_lo[1], ci_hi[1]
-            out[i, 8], out[i, 9] = ci_lo[2], ci_hi[2]
-        else:
-            out[i, 4] = out[i, 5] = float(params[i, 0])
-            out[i, 6] = out[i, 7] = float(params[i, 1])
-            out[i, 8] = out[i, 9] = float(params[i, 2])
-
-    return out[0] if single_voxel else out
+    return _fit_stage_d_batch("ex_tofts", ct, cp, timer, prefs, backend)
 
 
 def fit_tissue_uptake_stage_d(
@@ -1092,12 +1098,11 @@ def fit_tissue_uptake_stage_d(
     """Stage-D tissue_uptake fit for one or many voxels, on any backend.
 
     Fixed default + per-voxel linear-Patlak seed + N random log-uniform
-    draws (see `assemble_tissue_uptake_candidates`), run through the shared
-    `fit_with_multistart` machinery. Real behavior change on both backends:
-    CPU previously used 4 hand-tuned candidates plus a patlak seed; the
-    accelerated backend previously used its own separate random-multistart
-    mechanism (`_accel_multistart_refine`). Both now draw from the same
-    shared candidate set.
+    draws (see `assemble_tissue_uptake_candidates`). Real behavior change on
+    both backends: CPU previously used 4 hand-tuned candidates plus a patlak
+    seed; the accelerated backend previously used its own separate
+    random-multistart mechanism (`_accel_multistart_refine`, now removed).
+    Both now draw from the same shared candidate set.
 
     Args:
       ct: (n_time,) for a single voxel, or (n_time, n_voxels) for a batch.
@@ -1112,46 +1117,7 @@ def fit_tissue_uptake_stage_d(
     On the accelerated backend (no Jacobian available), CI columns repeat the
     point estimate -- the same convention the prior implementation used.
     """
-    ct_arr = np.asarray(ct, dtype=np.float64)
-    single_voxel = ct_arr.ndim == 1
-    if single_voxel:
-        ct_arr = ct_arr[:, None]
-    cp_arr = np.asarray(cp, dtype=np.float64).reshape(-1)
-    timer_arr = np.asarray(timer, dtype=np.float64).reshape(-1)
-
-    if not (ct_arr.shape[0] == cp_arr.shape[0] == timer_arr.shape[0]):
-        raise ValueError(
-            f"ct/cp/timer lengths differ: {ct_arr.shape[0]} / {cp_arr.shape[0]} / {timer_arr.shape[0]}"
-        )
-    if ct_arr.shape[0] == 0:
-        raise ValueError("ct/cp/timer must be non-empty")
-
-    settings = _tissue_uptake_settings(prefs)
-    bounds_row = _tissue_uptake_bounds_row(settings)
-    inputs = FitInputs(ct=ct_arr, cp=cp_arr, timer=timer_arr, bounds_row=bounds_row, prefs=settings)
-    candidates = assemble_tissue_uptake_candidates(inputs)
-
-    params, _success, chi, extra = fit_with_multistart(backend, "tissue_uptake", inputs, candidates)
-
-    n_voxels = ct_arr.shape[1]
-    out = np.full((n_voxels, 10), np.nan, dtype=np.float64)
-    for i in range(n_voxels):
-        out[i, 0] = float(params[i, 0])
-        out[i, 1] = float(params[i, 1])
-        out[i, 2] = float(params[i, 2])
-        out[i, 3] = float(chi[i])
-        extra_i = extra[i]
-        if extra_i is not None:
-            ci_lo, ci_hi = extra_i
-            out[i, 4], out[i, 5] = float(ci_lo[0]), float(ci_hi[0])
-            out[i, 6], out[i, 7] = float(ci_lo[1]), float(ci_hi[1])
-            out[i, 8], out[i, 9] = float(ci_lo[2]), float(ci_hi[2])
-        else:
-            out[i, 4] = out[i, 5] = float(params[i, 0])
-            out[i, 6] = out[i, 7] = float(params[i, 1])
-            out[i, 8] = out[i, 9] = float(params[i, 2])
-
-    return out[0] if single_voxel else out
+    return _fit_stage_d_batch("tissue_uptake", ct, cp, timer, prefs, backend)
 
 
 def fit_2cxm_stage_d(
@@ -1163,13 +1129,12 @@ def fit_2cxm_stage_d(
 ) -> np.ndarray:
     """Stage-D 2cxm fit for one or many voxels, on any backend.
 
-    Fixed default + N random log-uniform draws (see `assemble_2cxm_candidates`),
-    run through the shared `fit_with_multistart` machinery. Real behavior
-    change on both backends: CPU previously had no multistart at all for this
-    model (a single canonical `curve_fit` call); the accelerated backend
-    previously used its own separate random-multistart mechanism
-    (`_accel_multistart_refine`). Both now draw from the same shared
-    candidate set.
+    Fixed default + N random log-uniform draws (see `assemble_2cxm_candidates`).
+    Real behavior change on both backends: CPU previously had no multistart at
+    all for this model (a single canonical `curve_fit` call); the accelerated
+    backend previously used its own separate random-multistart mechanism
+    (`_accel_multistart_refine`, now removed). Both now draw from the same
+    shared candidate set.
 
     Args:
       ct: (n_time,) for a single voxel, or (n_time, n_voxels) for a batch.
@@ -1185,46 +1150,6 @@ def fit_2cxm_stage_d(
     columns repeat the point estimate -- the same convention the prior
     implementation used.
     """
-    ct_arr = np.asarray(ct, dtype=np.float64)
-    single_voxel = ct_arr.ndim == 1
-    if single_voxel:
-        ct_arr = ct_arr[:, None]
-    cp_arr = np.asarray(cp, dtype=np.float64).reshape(-1)
-    timer_arr = np.asarray(timer, dtype=np.float64).reshape(-1)
-
-    if not (ct_arr.shape[0] == cp_arr.shape[0] == timer_arr.shape[0]):
-        raise ValueError(
-            f"ct/cp/timer lengths differ: {ct_arr.shape[0]} / {cp_arr.shape[0]} / {timer_arr.shape[0]}"
-        )
-    if ct_arr.shape[0] == 0:
-        raise ValueError("ct/cp/timer must be non-empty")
-
-    settings = _2cxm_settings(prefs)
-    bounds_row = _2cxm_bounds_row(settings)
-    inputs = FitInputs(ct=ct_arr, cp=cp_arr, timer=timer_arr, bounds_row=bounds_row, prefs=settings)
-    candidates = assemble_2cxm_candidates(inputs)
-
-    params, _success, chi, extra = fit_with_multistart(backend, "2cxm", inputs, candidates)
-
-    n_voxels = ct_arr.shape[1]
-    out = np.full((n_voxels, 13), np.nan, dtype=np.float64)
-    for i in range(n_voxels):
-        out[i, 0] = float(params[i, 0])
-        out[i, 1] = float(params[i, 1])
-        out[i, 2] = float(params[i, 2])
-        out[i, 3] = float(params[i, 3])
-        out[i, 4] = float(chi[i])
-        extra_i = extra[i]
-        if extra_i is not None:
-            ci_lo, ci_hi = extra_i
-            out[i, 5], out[i, 6] = float(ci_lo[0]), float(ci_hi[0])
-            out[i, 7], out[i, 8] = float(ci_lo[1]), float(ci_hi[1])
-            out[i, 9], out[i, 10] = float(ci_lo[2]), float(ci_hi[2])
-            out[i, 11], out[i, 12] = float(ci_lo[3]), float(ci_hi[3])
-        else:
-            out[i, 5] = out[i, 6] = float(params[i, 0])
-            out[i, 7] = out[i, 8] = float(params[i, 1])
-            out[i, 9] = out[i, 10] = float(params[i, 2])
-            out[i, 11] = out[i, 12] = float(params[i, 3])
+    return _fit_stage_d_batch("2cxm", ct, cp, timer, prefs, backend)
 
     return out[0] if single_voxel else out

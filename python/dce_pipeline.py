@@ -23,17 +23,12 @@ from dce_fit_backends import (
 )
 from dce_models import (
     model_2cxm_cfit,
-    model_2cxm_fit,
     model_extended_tofts_cfit,
-    model_extended_tofts_fit,
     model_fxr_cfit,
     model_fxr_fit,
     model_patlak_cfit,
-    model_patlak_fit,
     model_tissue_uptake_cfit,
-    model_tissue_uptake_fit,
     model_tofts_cfit,
-    model_tofts_fit,
 )
 
 
@@ -212,7 +207,6 @@ MODEL_LAYOUTS: Dict[str, Dict[str, Any]] = {
 }
 
 SUPPORTED_STAGE_D_MODELS = {"tofts", "ex_tofts", "patlak", "tissue_uptake", "2cxm", "fxr", "auc"}
-ACCELERATED_STAGE_D_MODELS = {"tofts", "ex_tofts", "patlak", "tissue_uptake", "2cxm"}
 PREFERENCE_NUMERIC_CHARS = set("0123456789eE.+-*/^() ")
 
 
@@ -3101,7 +3095,7 @@ def _write_param_maps(
     return paths
 
 
-def _fit_model_curve(
+def _fit_fxr_curve(
     model_name: str,
     ct: np.ndarray,
     cp: np.ndarray,
@@ -3111,44 +3105,35 @@ def _fit_model_curve(
     relaxivity: float,
     fw: float,
 ) -> np.ndarray:
+    """Per-voxel fxr fit -- the one model outside the shared batched Stage-D architecture.
+
+    fxr's per-voxel R1 baseline (`r1o`) can't be batched the way the five
+    models in `_stage_d_fit_funcs()` are, so it keeps the older
+    one-voxel-at-a-time calling convention. `model_name` is still checked
+    (rather than assumed) so a future model accidentally routed here -- e.g.
+    because it wasn't added to `_MODEL_SPECS` -- fails loudly instead of
+    silently mis-fitting.
+    """
+    if model_name != "fxr":
+        raise ValueError(f"Unsupported model '{model_name}'")
+    if r1o is None:
+        raise ValueError("FXR fitting requires R1 baseline values")
     ct_list = [float(v) for v in ct]
     cp_list = [float(v) for v in cp]
     timer_list = [float(v) for v in timer]
-
-    if model_name == "tofts":
-        prefs_local = _apply_model_specific_prefs(prefs, "tofts")
-        return np.asarray(model_tofts_fit(ct_list, cp_list, timer_list, prefs_local), dtype=np.float64)
-    if model_name == "ex_tofts":
-        prefs_local = _apply_model_specific_prefs(prefs, "ex_tofts")
-        return np.asarray(model_extended_tofts_fit(ct_list, cp_list, timer_list, prefs_local), dtype=np.float64)
-    if model_name == "patlak":
-        prefs_local = _apply_model_specific_prefs(prefs, "patlak")
-        return np.asarray(model_patlak_fit(ct_list, cp_list, timer_list, prefs_local), dtype=np.float64)
-    if model_name == "tissue_uptake":
-        # Patlak-linear seeding now lives in dce_fit_backends.assemble_tissue_uptake_candidates,
-        # shared with the accelerated backend; model_tissue_uptake_fit computes it internally.
-        prefs_local = _apply_model_specific_prefs(prefs, "tissue_uptake")
-        return np.asarray(model_tissue_uptake_fit(ct_list, cp_list, timer_list, prefs_local), dtype=np.float64)
-    if model_name == "2cxm":
-        prefs_local = _apply_model_specific_prefs(prefs, "2cxm")
-        return np.asarray(model_2cxm_fit(ct_list, cp_list, timer_list, prefs_local), dtype=np.float64)
-    if model_name == "fxr":
-        if r1o is None:
-            raise ValueError("FXR fitting requires R1 baseline values")
-        return np.asarray(
-            model_fxr_fit(
-                ct_list,
-                cp_list,
-                timer_list,
-                float(r1o),
-                float(r1o),
-                float(relaxivity),
-                float(fw),
-                prefs,
-            ),
-            dtype=np.float64,
-        )
-    raise ValueError(f"Unsupported model '{model_name}'")
+    return np.asarray(
+        model_fxr_fit(
+            ct_list,
+            cp_list,
+            timer_list,
+            float(r1o),
+            float(r1o),
+            float(relaxivity),
+            float(fw),
+            prefs,
+        ),
+        dtype=np.float64,
+    )
 
 
 def _predict_curve_from_fit_row(
@@ -3400,6 +3385,20 @@ def _accelerated_output_has_usable_primary_params(model_name: str, output: np.nd
     return bool(np.any(finite_rows))
 
 
+# Registry of the shared fit_*_stage_d(ct, cp, timer, prefs, backend) entry points,
+# rebuilt on every call (not a module-level dict) so patching e.g. dce_pipeline.fit_tofts_stage_d
+# in tests takes effect -- a dict literal built once at import time would capture the
+# original function objects and never see the patch.
+def _stage_d_fit_funcs() -> Dict[str, Callable[..., np.ndarray]]:
+    return {
+        "patlak": fit_patlak_stage_d,
+        "tofts": fit_tofts_stage_d,
+        "ex_tofts": fit_ex_tofts_stage_d,
+        "tissue_uptake": fit_tissue_uptake_stage_d,
+        "2cxm": fit_2cxm_stage_d,
+    }
+
+
 def _fit_stage_d_model_accelerated(
     model_name: str,
     ct: np.ndarray,
@@ -3410,22 +3409,15 @@ def _fit_stage_d_model_accelerated(
 ) -> Optional[np.ndarray]:
     if acceleration_backend == "none":
         return None
-    if model_name not in ACCELERATED_STAGE_D_MODELS:
+    fit_func = _stage_d_fit_funcs().get(model_name)
+    if fit_func is None:
         return None
 
     n_fits = int(ct.shape[1])
     if n_fits == 0:
         return np.zeros((0, len(MODEL_LAYOUTS[model_name]["param_names"])), dtype=np.float64)
 
-    if model_name == "patlak":
-        return fit_patlak_stage_d(ct, cp_use, timer, prefs, backend=acceleration_backend)
-    if model_name == "tofts":
-        return fit_tofts_stage_d(ct, cp_use, timer, prefs, backend=acceleration_backend)
-    if model_name == "ex_tofts":
-        return fit_ex_tofts_stage_d(ct, cp_use, timer, prefs, backend=acceleration_backend)
-    if model_name == "tissue_uptake":
-        return fit_tissue_uptake_stage_d(ct, cp_use, timer, prefs, backend=acceleration_backend)
-    return fit_2cxm_stage_d(ct, cp_use, timer, prefs, backend=acceleration_backend)
+    return fit_func(ct, cp_use, timer, prefs, backend=acceleration_backend)
 
 
 def _fit_auc_matrix(
@@ -3523,60 +3515,69 @@ def _fit_stage_d_model(
             raise ValueError("AUC fitting requires Stlv_use and Sttum arrays")
         return _fit_auc_matrix(timer, cp_use, ct, stlv_use, sttum, start_injection_min, sss, ssstum)
 
-    if acceleration_backend != "none" and model_name in ACCELERATED_STAGE_D_MODELS:
-        candidates = _acceleration_backend_attempt_order(acceleration_backend)
+    fit_func = _stage_d_fit_funcs().get(model_name)
+    if fit_func is not None:
+        # "python" is just the final, always-available candidate in the same fallback
+        # chain (acceleration_backend="none" -> chain is just ["python"]). Prefs are
+        # resolved once so every candidate -- accelerated or not -- sees the same
+        # model-specific overrides (e.g. voxel_lower_limit_fp_2cxm).
+        prefs_local = _apply_model_specific_prefs(prefs, model_name)
+        candidates = _acceleration_backend_attempt_order(acceleration_backend) + ["python"]
         for idx, backend_candidate in enumerate(candidates):
+            next_candidate = candidates[idx + 1] if idx + 1 < len(candidates) else None
             try:
-                accelerated = _fit_stage_d_model_accelerated(
+                result = _fit_stage_d_model_accelerated(
                     model_name=model_name,
                     ct=ct,
                     cp_use=cp_use,
                     timer=timer,
-                    prefs=prefs,
+                    prefs=prefs_local,
                     acceleration_backend=backend_candidate,
                 )
-                if accelerated is not None:
-                    if _accelerated_output_has_usable_primary_params(model_name, accelerated):
-                        return accelerated
-                    if idx + 1 < len(candidates):
+                if result is not None:
+                    if _accelerated_output_has_usable_primary_params(model_name, result):
+                        return result
+                    if next_candidate is not None:
                         print(
-                            f"[DCE] Stage-D {model_name}: acceleration backend '{backend_candidate}' produced "
-                            "non-finite core parameter output; trying fallback acceleration backend "
-                            f"'{candidates[idx + 1]}'.",
+                            f"[DCE] Stage-D {model_name}: backend '{backend_candidate}' produced non-finite "
+                            f"core parameter output; trying fallback backend '{next_candidate}'.",
                             flush=True,
                         )
                     else:
                         print(
-                            f"[DCE] Stage-D {model_name}: acceleration backend '{backend_candidate}' produced "
-                            "non-finite core parameter output; falling back to pure CPU.",
+                            f"[DCE] Stage-D {model_name}: backend '{backend_candidate}' produced non-finite "
+                            "core parameter output; no fallback remains.",
                             flush=True,
                         )
                     continue
-                if idx + 1 < len(candidates):
+                if next_candidate is not None:
                     print(
-                        f"[DCE] Stage-D {model_name}: acceleration backend '{backend_candidate}' returned no result; "
-                        f"trying fallback acceleration backend '{candidates[idx + 1]}'.",
+                        f"[DCE] Stage-D {model_name}: backend '{backend_candidate}' returned no result; "
+                        f"trying fallback backend '{next_candidate}'.",
                         flush=True,
                     )
             except Exception as exc:
-                if idx + 1 < len(candidates):
+                if next_candidate is not None:
                     print(
-                        f"[DCE] Stage-D {model_name}: acceleration backend '{backend_candidate}' unavailable "
-                        f"({exc}); trying fallback acceleration backend '{candidates[idx + 1]}'.",
+                        f"[DCE] Stage-D {model_name}: backend '{backend_candidate}' unavailable "
+                        f"({exc}); trying fallback backend '{next_candidate}'.",
                         flush=True,
                     )
                 else:
                     print(
-                        f"[DCE] Stage-D {model_name}: acceleration backend '{backend_candidate}' unavailable "
-                        f"({exc}); falling back to pure CPU.",
+                        f"[DCE] Stage-D {model_name}: backend '{backend_candidate}' unavailable ({exc}); "
+                        "no fallback remains.",
                         flush=True,
                     )
+        return np.full((ct.shape[1], row_len), np.nan, dtype=np.float64)
 
+    # fxr (and any other model outside the shared batched architecture, e.g. because its
+    # per-voxel R1 baseline can't be batched): per-voxel loop through _fit_fxr_curve.
     out = np.full((ct.shape[1], row_len), np.nan, dtype=np.float64)
     for i in range(ct.shape[1]):
         try:
             r1o_val = float(r1o[i]) if r1o is not None and i < r1o.size else None
-            row = _fit_model_curve(model_name, ct[:, i], cp_use, timer, prefs, r1o_val, relaxivity, fw)
+            row = _fit_fxr_curve(model_name, ct[:, i], cp_use, timer, prefs, r1o_val, relaxivity, fw)
             n_copy = min(row_len, row.shape[0])
             out[i, :n_copy] = row[:n_copy]
         except Exception:
