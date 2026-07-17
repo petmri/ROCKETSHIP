@@ -886,153 +886,21 @@ def model_tissue_uptake_fit(
 ) -> List[float]:
     """Python inverse-fit counterpart of `dce/model_tissue_uptake.m`.
 
-    Internal canonical units:
-      - time in minutes
-      - ktrans/fp in per-minute
-
-    Returned ktrans/fp values are converted back to match input timer units.
+    Thin single-voxel wrapper over the shared Stage-D fit machinery in
+    `dce_fit_backends` (the same candidate-assembly/multi-start code path
+    used by the accelerated cpufit/gpufit backends for this model).
     """
-    ct_vec = [float(v) for v in ct]
-    cp_vec = [float(v) for v in cp]
-    t_vec = [float(v) for v in timer]
-
-    if not (len(ct_vec) == len(cp_vec) == len(t_vec)):
-        raise ValueError(
-            f"ct/cp/timer lengths differ: {len(ct_vec)} / {len(cp_vec)} / {len(t_vec)}"
-        )
-    if len(t_vec) == 0:
-        raise ValueError("ct/cp/timer must be non-empty")
-
     _reject_algorithm_override(prefs, "tissue_uptake")
-    timer_min, _, rate_in_to_min, rate_min_to_output = _canonical_time_context(
-        t_vec,
+    from dce_fit_backends import fit_tissue_uptake_stage_d  # local: avoids an import cycle
+
+    row = fit_tissue_uptake_stage_d(
+        np.asarray([float(v) for v in ct], dtype=np.float64),
+        np.asarray([float(v) for v in cp], dtype=np.float64),
+        np.asarray([float(v) for v in timer], dtype=np.float64),
         prefs,
+        backend="python",
     )
-
-    defaults = {
-        "lower_limit_ktrans": 1e-7,
-        "upper_limit_ktrans": 2.0,
-        "initial_value_ktrans": 2e-4,
-        "lower_limit_fp": 1e-4,
-        "upper_limit_fp": 100.0,
-        "initial_value_fp": 0.2,
-        "lower_limit_tp": 0.0,
-        "upper_limit_tp": 1e6,
-        "initial_value_tp": 0.05,
-        "max_nfev": 2000,
-        "tol_fun": 1e-12,
-        "tol_x": 1e-6,
-        "robust": "off",
-    }
-    settings = _merge_prefs_in_canonical_units(
-        defaults,
-        prefs,
-        rate_keys=[
-            "lower_limit_ktrans",
-            "upper_limit_ktrans",
-            "initial_value_ktrans",
-            "lower_limit_fp",
-            "upper_limit_fp",
-            "initial_value_fp",
-        ],
-        time_constant_keys=[
-            "lower_limit_tp",
-            "upper_limit_tp",
-            "initial_value_tp",
-        ],
-        rate_in_to_min=rate_in_to_min,
-    )
-
-    def residual(params: List[float]) -> List[float]:
-        ktrans, fp, tp = params
-        pred = model_tissue_uptake_cfit(ktrans, fp, tp, cp_vec, timer_min)
-        return [pred[i] - ct_vec[i] for i in range(len(ct_vec))]
-
-    lb = [
-        float(settings["lower_limit_ktrans"]),
-        float(settings["lower_limit_fp"]),
-        float(settings["lower_limit_tp"]),
-    ]
-    ub = [
-        float(settings["upper_limit_ktrans"]),
-        float(settings["upper_limit_fp"]),
-        float(settings["upper_limit_tp"]),
-    ]
-    k_seed = float(settings["initial_value_ktrans"])
-    fp_seed = max(float(settings["initial_value_fp"]), k_seed * 1.25)
-    tp_seed = float(settings["initial_value_tp"])
-
-    starts = [
-        [
-            k_seed,
-            fp_seed,
-            tp_seed,
-        ],
-        [
-            k_seed * 2.0,
-            max(fp_seed * 1.5, k_seed * 1.6),
-            tp_seed,
-        ],
-        [
-            max(k_seed * 0.5, float(settings["lower_limit_ktrans"])),
-            max(fp_seed * 0.8, k_seed * 1.25),
-            min(tp_seed * 2.0, float(settings["upper_limit_tp"])),
-        ],
-        [
-            min(k_seed * 4.0, float(settings["upper_limit_ktrans"])),
-            max(fp_seed * 2.0, k_seed * 2.5),
-            tp_seed,
-        ],
-    ]
-
-    try:
-        patlak = model_patlak_linear(ct_vec, cp_vec, timer_min)
-        patlak_k = float(patlak[0])
-        if math.isfinite(patlak_k):
-            patlak_k = min(max(patlak_k, lb[0]), ub[0])
-            starts.append(
-                [
-                    patlak_k,
-                    min(max(max(fp_seed, patlak_k * 1.25), lb[1]), ub[1]),
-                    min(max(tp_seed, lb[2]), ub[2]),
-                ]
-            )
-    except Exception:
-        pass
-
-    lsq_kwargs = _least_squares_kwargs(settings, default_max_nfev=2000)
-    fit, sse = _best_fit_over_starts(residual, starts, lb, ub, lsq_kwargs)
-    ktrans = float(fit.x[0])
-    fp = float(fit.x[1])
-    tp = float(fit.x[2])
-
-    if abs(fp - ktrans) < 1e-12:
-        ps = 1e8
-    else:
-        ps = ktrans * fp / (fp - ktrans)
-    vp = (fp + ps) * tp
-    ktrans_out = ktrans * rate_min_to_output
-    fp_out = fp * rate_min_to_output
-
-    # CIs on the fit coefficients [Ktrans, Fp, Tp] (canonical per-min / min).
-    # Ktrans/Fp bounds scale to output rate units; vp CI propagates the Tp CI
-    # through vp = (Fp + PS) * Tp, matching dce/model_tissue_uptake.m.
-    ci_lo, ci_hi = _ci_bounds_from_fit(fit)
-    ktrans_ci = (ci_lo[0] * rate_min_to_output, ci_hi[0] * rate_min_to_output)
-    fp_ci = (ci_lo[1] * rate_min_to_output, ci_hi[1] * rate_min_to_output)
-    vp_ci = ((fp + ps) * ci_lo[2], (fp + ps) * ci_hi[2])
-    return [
-        ktrans_out,
-        fp_out,
-        vp,
-        sse,
-        ktrans_ci[0],
-        ktrans_ci[1],
-        fp_ci[0],
-        fp_ci[1],
-        vp_ci[0],
-        vp_ci[1],
-    ]
+    return [float(v) for v in row]
 
 
 def model_2cxm_fit(
@@ -1043,64 +911,23 @@ def model_2cxm_fit(
 ) -> List[float]:
     """Python inverse-fit counterpart of `dce/model_2cxm.m`.
 
-    Uses a single OSIPI LEK-style fit path with canonical internal units:
-      - time in minutes
-      - ktrans/fp in per-minute
-
-    Returned ktrans/fp values are converted back to match input timer units.
+    Thin single-voxel wrapper over the shared Stage-D fit machinery in
+    `dce_fit_backends` (the same candidate-assembly/multi-start code path
+    used by the accelerated cpufit/gpufit backends for this model).
     """
-    ct_vec = [float(v) for v in ct]
-    cp_vec = [float(v) for v in cp]
-    t_vec = [float(v) for v in timer]
-
-    if not (len(ct_vec) == len(cp_vec) == len(t_vec)):
-        raise ValueError(
-            f"ct/cp/timer lengths differ: {len(ct_vec)} / {len(cp_vec)} / {len(t_vec)}"
-        )
-    if len(t_vec) == 0:
-        raise ValueError("ct/cp/timer must be non-empty")
-
     _reject_algorithm_override(prefs, "2cxm")
-    timer_min, _, rate_in_to_min, rate_min_to_output = _canonical_time_context(
-        t_vec,
-        prefs,
-    )
+    from dce_fit_backends import fit_2cxm_stage_d  # local: avoids an import cycle
 
-    defaults = {
-        "lower_limit_ktrans": 1e-7,
-        "upper_limit_ktrans": 2.0,
-        "initial_value_ktrans": 2e-4,
-        "lower_limit_ve": 0.02,
-        "upper_limit_ve": 1.0,
-        "initial_value_ve": 0.2,
-        "lower_limit_vp": 1e-3,
-        "upper_limit_vp": 1.0,
-        "initial_value_vp": 0.02,
-        "lower_limit_fp": 1e-4,
-        "upper_limit_fp": 2.0,
-        "initial_value_fp": 20.0 / 100.0,
-        "max_nfev": 4000,
-    }
-    settings = _merge_prefs_in_canonical_units(
-        defaults,
+    row = fit_2cxm_stage_d(
+        np.asarray([float(v) for v in ct], dtype=np.float64),
+        np.asarray([float(v) for v in cp], dtype=np.float64),
+        np.asarray([float(v) for v in timer], dtype=np.float64),
         prefs,
-        rate_keys=[
-            "lower_limit_ktrans",
-            "upper_limit_ktrans",
-            "initial_value_ktrans",
-            "lower_limit_fp",
-            "upper_limit_fp",
-            "initial_value_fp",
-        ],
-        rate_in_to_min=rate_in_to_min,
+        backend="python",
     )
-
-    quick = _fit_2cxm_osipi_canonical(ct_vec, cp_vec, timer_min, settings=settings)
-    if quick is None:
+    if not math.isfinite(float(row[0])):
         raise ValueError("2cxm fit failed (requires >=3 strictly increasing time points).")
-    for idx in (0, 3, 5, 6, 11, 12):
-        quick[idx] = float(quick[idx]) * rate_min_to_output
-    return quick
+    return [float(v) for v in row]
 
 
 def model_fxr_fit(

@@ -14,7 +14,13 @@ from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 
 import numpy as np
 
-from dce_fit_backends import fit_ex_tofts_stage_d, fit_patlak_stage_d, fit_tofts_stage_d
+from dce_fit_backends import (
+    fit_2cxm_stage_d,
+    fit_ex_tofts_stage_d,
+    fit_patlak_stage_d,
+    fit_tissue_uptake_stage_d,
+    fit_tofts_stage_d,
+)
 from dce_models import (
     model_2cxm_cfit,
     model_2cxm_fit,
@@ -24,7 +30,6 @@ from dce_models import (
     model_fxr_fit,
     model_patlak_cfit,
     model_patlak_fit,
-    model_patlak_linear,
     model_tissue_uptake_cfit,
     model_tissue_uptake_fit,
     model_tofts_cfit,
@@ -3120,36 +3125,9 @@ def _fit_model_curve(
         prefs_local = _apply_model_specific_prefs(prefs, "patlak")
         return np.asarray(model_patlak_fit(ct_list, cp_list, timer_list, prefs_local), dtype=np.float64)
     if model_name == "tissue_uptake":
+        # Patlak-linear seeding now lives in dce_fit_backends.assemble_tissue_uptake_candidates,
+        # shared with the accelerated backend; model_tissue_uptake_fit computes it internally.
         prefs_local = _apply_model_specific_prefs(prefs, "tissue_uptake")
-        # MATLAB CPU path seeds tissue-uptake fits with a quick Patlak estimate per voxel.
-        try:
-            patlak_estimate = model_patlak_linear(ct_list, cp_list, timer_list)
-            ktrans_guess = float(patlak_estimate[0])
-            vp_guess = float(patlak_estimate[1])
-            if math.isfinite(ktrans_guess):
-                lo = float(prefs_local.get("lower_limit_ktrans", 1e-7))
-                hi = float(prefs_local.get("upper_limit_ktrans", 2.0))
-                prefs_local["initial_value_ktrans"] = min(max(ktrans_guess, lo), hi)
-            if math.isfinite(vp_guess):
-                lo_vp = float(prefs_local.get("lower_limit_vp", 1e-3))
-                hi_vp = float(prefs_local.get("upper_limit_vp", 1.0))
-                prefs_local["initial_value_vp"] = min(max(vp_guess, lo_vp), hi_vp)
-                # Use Patlak vp together with seeded ktrans/fp to initialize Tp.
-                k_seed = float(prefs_local.get("initial_value_ktrans", ktrans_guess))
-                fp_seed = float(prefs_local.get("initial_value_fp", 0.2))
-                fp_seed = max(fp_seed, k_seed * 1.25)
-                denom = fp_seed
-                if abs(fp_seed - k_seed) > 1e-12:
-                    ps_seed = (k_seed * fp_seed) / (fp_seed - k_seed)
-                    denom = fp_seed + ps_seed
-                if math.isfinite(denom) and abs(denom) > 1e-12:
-                    tp_guess = vp_guess / denom
-                    if math.isfinite(tp_guess) and tp_guess > 0.0:
-                        lo_tp = float(prefs_local.get("lower_limit_tp", 0.0))
-                        hi_tp = float(prefs_local.get("upper_limit_tp", 1e6))
-                        prefs_local["initial_value_tp"] = min(max(tp_guess, lo_tp), hi_tp)
-        except Exception:
-            pass
         return np.asarray(model_tissue_uptake_fit(ct_list, cp_list, timer_list, prefs_local), dtype=np.float64)
     if model_name == "2cxm":
         prefs_local = _apply_model_specific_prefs(prefs, "2cxm")
@@ -3422,103 +3400,6 @@ def _accelerated_output_has_usable_primary_params(model_name: str, output: np.nd
     return bool(np.any(finite_rows))
 
 
-# Accelerated models prone to the vp<->Fp degenerate minimum: the fixed start's Fp is
-# far above the true internal Fp, dropping the LM solver into a wrong basin (vp pinned to
-# its bound, Fp inflated). A random multi-start escapes it. See the OSIPI verification doc.
-_ACCEL_MULTISTART_MODELS = {"2cxm", "tissue_uptake"}
-_ACCEL_MULTISTART_STARTS = 8         # random log-uniform starts beyond the fixed caller start
-_ACCEL_MULTISTART_COARSE_ITERS = 30  # cheap coarse fit to pick the basin before refining
-
-
-def _extraction_fraction_init_bounds(
-    ktrans_init: float,
-    ktrans_lo: float,
-    ktrans_hi: float,
-    fp_init: float,
-    fp_lo: float,
-    fp_hi: float,
-) -> tuple:
-    """Map (Ktrans, Fp) init/bounds to the extraction-fraction E = Ktrans/Fp.
-
-    The accelerated 2CXM/2CUM kernels now fit ``E in (0, 1)`` (recover ``Ktrans =
-    E * Fp``), which removes the ``Ktrans = Fp`` pole. This mirrors the float64 python
-    reference (``dce_models._fit_2cxm_osipi_canonical``) so both paths share the same
-    E-space start and bounds. Returns ``(e_init, e_lo, e_hi)``.
-    """
-    e_lo = min(max(ktrans_lo / max(fp_hi, 1e-12), 0.0), 1.0 - 1e-10)
-    e_hi = min(max(ktrans_hi / max(fp_lo, 1e-12), e_lo + 1e-10), 1.0 - 1e-8)
-    e_init = ktrans_init / max(fp_init, 1e-12)
-    e_init = min(max(e_init, e_lo + 1e-10), e_hi - 1e-10)
-    return float(e_init), float(e_lo), float(e_hi)
-
-
-def _accel_multistart_refine(
-    *,
-    run_fit,
-    data: np.ndarray,
-    base_params: np.ndarray,
-    base_states: np.ndarray,
-    base_chi: np.ndarray,
-    initial_row: np.ndarray,
-    bounds_row: np.ndarray,
-    n_starts: int,
-    coarse_iters: int,
-    refine_iters: int,
-    seed: int = 0,
-):
-    """Random log-uniform multi-start (per voxel): coarse-explore, then refine.
-
-    Adopted from the Gpufit bug harness (``bug/experiments.py``). For every voxel the
-    caller's fixed start plus ``n_starts`` log-uniform draws within the parameter bounds
-    are each run through a cheap coarse fit (``coarse_iters``); the lowest coarse
-    chi-square picks the basin, and a single full refine (``refine_iters``) runs from it.
-    The refined fit replaces the base fit only where it converged and strictly lowers
-    chi-square, so multi-start can never degrade a good base fit. Backend-agnostic: it
-    varies only the initial values, so it applies identically to cpufit and gpufit.
-
-    ``run_fit(init_params, data, max_iter) -> (params, states, chi)``.
-    """
-    n_fits, n_params = int(base_params.shape[0]), int(base_params.shape[1])
-    if n_fits == 0 or n_starts <= 0:
-        return base_params, base_states, base_chi
-
-    lower = np.asarray(bounds_row[0::2], dtype=np.float64)
-    upper = np.asarray(bounds_row[1::2], dtype=np.float64)
-    log_lo = np.log(np.maximum(lower, 1e-30))
-    log_hi = np.log(np.maximum(upper, lower + 1e-30))
-    rng = np.random.default_rng(seed)
-
-    # Coarse exploration: caller's fixed start (candidate 0) + N log-uniform draws.
-    best_init = np.tile(np.asarray(initial_row, dtype=np.float64)[None, :], (n_fits, 1))
-    best_coarse = np.full(n_fits, np.inf, dtype=np.float64)
-    candidates = [np.tile(np.asarray(initial_row, dtype=np.float32)[None, :], (n_fits, 1))]
-    for _ in range(int(n_starts)):
-        draws = np.exp(log_lo[None, :] + rng.random((n_fits, n_params)) * (log_hi - log_lo)[None, :])
-        candidates.append(np.clip(draws, lower[None, :], upper[None, :]).astype(np.float32))
-    for cand in candidates:
-        _, s, c = run_fit(np.ascontiguousarray(cand), data, coarse_iters)
-        with np.errstate(invalid="ignore"):
-            improved = (s == 0) & np.isfinite(c) & (c < best_coarse)
-        best_coarse = np.where(improved, c, best_coarse)
-        best_init = np.where(improved[:, None], cand.astype(np.float64), best_init)
-
-    # Full refine from each voxel's best coarse basin, then keep-best vs the base fit.
-    ref_params, ref_states, ref_chi = run_fit(
-        np.ascontiguousarray(best_init.astype(np.float32)), data, refine_iters
-    )
-    out_params = base_params.copy()
-    out_states = base_states.copy()
-    out_chi = base_chi.copy()
-    with np.errstate(invalid="ignore"):
-        take = (ref_states == 0) & np.isfinite(ref_chi) & (
-            (base_states != 0) | ~np.isfinite(base_chi) | (ref_chi < base_chi)
-        )
-    out_params[take] = ref_params[take]
-    out_states[take] = ref_states[take]
-    out_chi[take] = ref_chi[take]
-    return out_params, out_states, out_chi
-
-
 def _fit_stage_d_model_accelerated(
     model_name: str,
     ct: np.ndarray,
@@ -3542,170 +3423,9 @@ def _fit_stage_d_model_accelerated(
         return fit_tofts_stage_d(ct, cp_use, timer, prefs, backend=acceleration_backend)
     if model_name == "ex_tofts":
         return fit_ex_tofts_stage_d(ct, cp_use, timer, prefs, backend=acceleration_backend)
-
-    fit_module = _load_fit_module_for_acceleration(acceleration_backend)
-    data = np.ascontiguousarray(np.asarray(ct.T, dtype=np.float32))
-    timer_f32 = np.ascontiguousarray(np.asarray(timer, dtype=np.float32).reshape(-1))
-    cp_f32 = np.ascontiguousarray(np.asarray(cp_use, dtype=np.float32).reshape(-1))
-    user_info = np.ascontiguousarray(np.concatenate([timer_f32, cp_f32], axis=0), dtype=np.float32)
-
     if model_name == "tissue_uptake":
-        # Accelerated 2CUM now fits E = Ktrans/Fp; kernel param order is [E, vp, Fp].
-        # Recover Ktrans = E*Fp on output. E-space init/bounds mirror the python reference.
-        model_id_name = "TISSUE_UPTAKE"
-        e_init, e_lo, e_hi = _extraction_fraction_init_bounds(
-            float(prefs["initial_value_ktrans"]),
-            float(prefs["lower_limit_ktrans"]),
-            float(prefs["upper_limit_ktrans"]),
-            float(prefs["initial_value_fp"]),
-            float(prefs["lower_limit_fp"]),
-            float(prefs["upper_limit_fp"]),
-        )
-        initial_row = np.array(
-            [
-                e_init,
-                float(prefs["initial_value_vp"]),
-                float(prefs["initial_value_fp"]),
-            ],
-            dtype=np.float32,
-        )
-        bounds_row = np.array(
-            [
-                e_lo,
-                e_hi,
-                float(prefs["lower_limit_vp"]),
-                float(prefs["upper_limit_vp"]),
-                float(prefs["lower_limit_fp"]),
-                float(prefs["upper_limit_fp"]),
-            ],
-            dtype=np.float32,
-        )
-    else:
-        # Accelerated 2CXM now fits E = Ktrans/Fp; kernel param order is [E, ve, vp, Fp].
-        # Recover Ktrans = E*Fp on output. E-space init/bounds mirror the python reference.
-        model_id_name = "TWO_COMPARTMENT_EXCHANGE"
-        e_init, e_lo, e_hi = _extraction_fraction_init_bounds(
-            float(prefs["initial_value_ktrans"]),
-            float(prefs["lower_limit_ktrans"]),
-            float(prefs["upper_limit_ktrans"]),
-            float(prefs["initial_value_fp"]),
-            float(prefs["lower_limit_fp"]),
-            float(prefs["upper_limit_fp"]),
-        )
-        initial_row = np.array(
-            [
-                e_init,
-                float(prefs["initial_value_ve"]),
-                float(prefs["initial_value_vp"]),
-                float(prefs["initial_value_fp"]),
-            ],
-            dtype=np.float32,
-        )
-        bounds_row = np.array(
-            [
-                e_lo,
-                e_hi,
-                float(prefs["lower_limit_ve"]),
-                float(prefs["upper_limit_ve"]),
-                float(prefs["lower_limit_vp"]),
-                float(prefs["upper_limit_vp"]),
-                float(prefs["lower_limit_fp"]),
-                float(prefs["upper_limit_fp"]),
-            ],
-            dtype=np.float32,
-        )
-
-    try:
-        model_id = int(getattr(fit_module.ModelID, model_id_name))
-    except AttributeError as exc:
-        raise RuntimeError(f"Acceleration backend does not expose ModelID.{model_id_name}") from exc
-
-    n_params = int(initial_row.size)
-    initial_parameters = np.ascontiguousarray(np.tile(initial_row[None, :], (n_fits, 1)), dtype=np.float32)
-    constraint_types = np.ascontiguousarray(
-        np.full((n_params,), int(fit_module.ConstraintType.LOWER_UPPER), dtype=np.int32)
-    )
-    tolerance = float(prefs.get("gpu_tolerance", 1e-6))
-    max_iterations = int(prefs.get("gpu_max_n_iterations", 200))
-
-    def _run_fit(init_params: np.ndarray, data_arr: np.ndarray, max_iter: int):
-        n = int(data_arr.shape[0])
-        parameters, states, chi_squares, _, _ = fit_module.fit_constrained(
-            data=data_arr,
-            weights=None,
-            model_id=model_id,
-            initial_parameters=np.ascontiguousarray(init_params, dtype=np.float32),
-            constraints=np.ascontiguousarray(np.tile(bounds_row[None, :], (n, 1)), dtype=np.float32),
-            constraint_types=constraint_types,
-            tolerance=tolerance,
-            max_number_iterations=int(max_iter),
-            parameters_to_fit=None,
-            estimator_id=int(fit_module.EstimatorID.LSE),
-            user_info=user_info,
-        )
-        return (
-            np.asarray(parameters, dtype=np.float64).reshape(n, -1),
-            np.asarray(states, dtype=np.int32).reshape(-1),
-            np.asarray(chi_squares, dtype=np.float64).reshape(-1),
-        )
-
-    # Backend-agnostic multi-start: fit once from the fixed start, then for the
-    # degeneracy-prone models explore random log-uniform starts (coarse fit -> refine
-    # from the best basin, keep the lowest chi-square). Applies identically to cpufit/gpufit.
-    params, states_arr, chi = _run_fit(initial_parameters, data, max_iterations)
-    if model_name in _ACCEL_MULTISTART_MODELS and bool(prefs.get("accel_multistart", True)):
-        params, states_arr, chi = _accel_multistart_refine(
-            run_fit=_run_fit,
-            data=data,
-            base_params=params,
-            base_states=states_arr,
-            base_chi=chi,
-            initial_row=initial_row,
-            bounds_row=bounds_row,
-            n_starts=int(prefs.get("accel_multistart_starts", _ACCEL_MULTISTART_STARTS)),
-            coarse_iters=int(prefs.get("accel_multistart_coarse_iters", _ACCEL_MULTISTART_COARSE_ITERS)),
-            refine_iters=max_iterations,
-            seed=int(prefs.get("accel_multistart_seed", 0)),
-        )
-
-    failed = states_arr != 0
-    if np.any(failed):
-        params[failed, :] = np.nan
-        chi[failed] = np.nan
-
-    if model_name == "tissue_uptake":
-        # Kernel params are [E, vp, Fp]; recover Ktrans = E * Fp.
-        ktrans = params[:, 0] * params[:, 2]
-        out = np.full((n_fits, len(MODEL_LAYOUTS["tissue_uptake"]["param_names"])), np.nan, dtype=np.float64)
-        out[:, 0] = ktrans
-        out[:, 1] = params[:, 2]
-        out[:, 2] = params[:, 1]
-        out[:, 3] = chi
-        out[:, 4] = ktrans
-        out[:, 5] = ktrans
-        out[:, 6] = params[:, 2]
-        out[:, 7] = params[:, 2]
-        out[:, 8] = params[:, 1]
-        out[:, 9] = params[:, 1]
-        return out
-
-    # 2cxm: kernel params are [E, ve, vp, Fp]; recover Ktrans = E * Fp.
-    ktrans = params[:, 0] * params[:, 3]
-    out = np.full((n_fits, len(MODEL_LAYOUTS["2cxm"]["param_names"])), np.nan, dtype=np.float64)
-    out[:, 0] = ktrans
-    out[:, 1] = params[:, 1]
-    out[:, 2] = params[:, 2]
-    out[:, 3] = params[:, 3]
-    out[:, 4] = chi
-    out[:, 5] = ktrans
-    out[:, 6] = ktrans
-    out[:, 7] = params[:, 1]
-    out[:, 8] = params[:, 1]
-    out[:, 9] = params[:, 2]
-    out[:, 10] = params[:, 2]
-    out[:, 11] = params[:, 3]
-    out[:, 12] = params[:, 3]
-    return out
+        return fit_tissue_uptake_stage_d(ct, cp_use, timer, prefs, backend=acceleration_backend)
+    return fit_2cxm_stage_d(ct, cp_use, timer, prefs, backend=acceleration_backend)
 
 
 def _fit_auc_matrix(

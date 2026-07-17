@@ -4,8 +4,9 @@ Full sweep of every OSIPI DRO case, gated on OSIPI's official acceptance toleran
 All accelerated Stage-D models pass: Tofts / extended Tofts / Patlak, plus the multi-
 compartment 2CUM (tissue uptake) and 2CXM. 2CUM/2CXM now fit the extraction fraction
 E=Ktrans/Fp with an O(N) exponential-recurrence convolution and analytic Jacobians (the
-Ktrans=Fp pole becomes the bound E->1), and use the backend-agnostic random multi-start
-(dce_pipeline._accel_multistart_refine) to pick the flow basin. The low-flow (Fp=5) cases
+Ktrans=Fp pole becomes the bound E->1), and use the shared candidate-assembly/multi-start
+machinery in dce_fit_backends.py (fixed default + random log-uniform draws, assembled
+once and shared by every backend) to pick the flow basin. The low-flow (Fp=5) cases
 that previously missed now pass once Fp can reach that regime (lower_limit_fp). Details:
 ``docs/project-management/projects/osipi-verification/STATUS.md``.
 """

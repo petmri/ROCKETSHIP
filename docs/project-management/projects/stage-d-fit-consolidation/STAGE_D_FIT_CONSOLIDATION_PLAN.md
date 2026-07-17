@@ -71,10 +71,23 @@ bounds, candidate initial values) and one consolidated multi-start process every
 funnels through, with per-model pluggable candidate-assembly strategies (log-uniform
 random draws, a closed-form linear-fit guess, a grid, or a single fixed value).
 
-## Status: patlak + tofts + ex_tofts migrated (2026-07-17)
+## Status: all five models migrated, cleanup done (2026-07-17)
 
-`python/dce_fit_backends.py` now holds the shared machinery, proven end-to-end on
-**patlak, tofts, and ex_tofts**:
+`python/dce_fit_backends.py` now holds the shared machinery for **every accelerated-
+eligible model**: patlak, tofts, ex_tofts, tissue_uptake, 2cxm. `dce_models.py`'s five
+`model_*_fit` functions are all thin single-voxel wrappers over the corresponding
+`fit_*_stage_d(..., backend="python")`; `dce_pipeline.py::_fit_stage_d_model_accelerated`
+is now just five one-line delegations (its entire old per-model `initial_row`/
+`bounds_row` construction, `_accel_multistart_refine`, `_extraction_fraction_init_bounds`,
+and `_ACCEL_MULTISTART_MODELS` are deleted -- nothing else called them). The duplicated
+tissue_uptake patlak-seed computation that used to live in
+`dce_pipeline._fit_model_curve` is gone too; `assemble_tissue_uptake_candidates` is now
+the single place that seed is computed. **Not deleted** (contrary to this doc's earlier
+assumption): `dce_models._best_fit_over_starts` and `_clip_start_to_bounds` are still used
+by `model_vp_fit` and `model_fxr_fit`, two non-accelerated models out of scope for this
+project -- they stay.
+
+Recap of the first three models migrated:
 
 - `FitInputs` -- dataclass bundling `ct`/`cp`/`timer`/`bounds_row`/`prefs` for N voxels.
 - `assemble_patlak_candidates(inputs) -> (n_starts, n_voxels, n_params)` -- the one place
@@ -141,46 +154,110 @@ perfect (corr=1.0). Full root-cause writeup, open questions, and the planned mit
 `docs/project-management/projects/batch-parity/batch_parity.md` and the
 `parity-whole-brain-roi-noise` memory note.
 
-## Remaining work (not started)
+## `tissue_uptake` and `2cxm`: what was built
 
-Extend the same three pieces -- assembler, backend runner, `fit_with_multistart` -- to
-the remaining two accelerated-eligible models, in this order (each is a candidate for
-its own pass, verified against the full local test/parity suite before moving to the next):
+Both models' CPU and accelerated solvers work in genuinely different internal
+parameterizations (CPU: Ktrans/Fp/Tp canonical-minutes for tissue_uptake, or a
+resampled-grid `curve_fit` in canonical-minutes for 2cxm; accelerated: E=Ktrans/Fp
+kernel space for both). The shared candidate space `assemble_*_candidates` produces is
+therefore the **physical/output space** ([Ktrans, Fp, Vp] for tissue_uptake; [Ktrans, ve,
+vp, Fp] for 2cxm) -- the one thing both backends' native parameterizations can be
+losslessly converted to/from -- and each backend's runner (`_run_tissue_uptake_python` /
+`_run_tissue_uptake_accelerated` / `_run_2cxm_python` / `_run_2cxm_accelerated`) converts
+that shared space into whatever its own solver actually needs:
 
-### 1. `tissue_uptake`
-- CPU (`dce_models.model_tissue_uptake_fit`): canonical-unit conversion
-  (`_canonical_time_context`/`_merge_prefs_in_canonical_units`, minutes + per-minute
-  rates) *before* candidate assembly, then 4 hand-tuned candidates plus a 5th seeded from
-  `model_patlak_linear` (computed a **third** time here, after patlak's own copy and
-  `dce_pipeline._fit_model_curve`'s tissue_uptake branch -- consolidating this seed
-  computation into one shared helper is a direct win from this migration).
-- Accelerated: already in `_ACCEL_MULTISTART_MODELS`, using `_accel_multistart_refine`'s
-  random log-uniform coarse-explore + refine in E-space (`_extraction_fraction_init_bounds`
-  maps Ktrans/Fp to E=Ktrans/Fp). The assembler for this model needs to support a
-  genuinely different candidate strategy (random draws, not fixed multipliers) plus the
-  canonical-unit/E-space transforms -- this is the first model to exercise that
-  flexibility in the new architecture, and the main design risk: confirm
-  `fit_with_multistart`'s generic "try every candidate, keep best" loop still gets the
-  coarse-then-refine performance benefit `_accel_multistart_refine` currently has for
-  large voxel counts, or accept the simpler "run every candidate at full cost" and
-  benchmark whether it matters in practice.
+- **CPU** derives a `Tp` (tissue_uptake) or re-embeds the candidate as `initial_value_*`
+  overrides into a settings copy passed straight into the existing, unmodified
+  `_fit_2cxm_osipi_canonical` (2cxm) -- the safest possible way to add multistart to the
+  model flagged as most numerically fragile, since none of its math is touched, only its
+  starting point.
+- **Accelerated** derives `E = Ktrans/Fp` (same formula `_extraction_fraction_init_bounds`
+  used, now inlined as `_e_space_bounds` + a per-candidate clip).
 
-### 2. `2cxm`
-- CPU: single-path OSIPI-canonical fit (`dce_models._fit_2cxm_osipi_canonical`), not
-  `_best_fit_over_starts`-based -- no multi-start on CPU today at all. Accelerated: same
-  E-space + random-log-uniform multistart as tissue_uptake. Migrate last since it's the
-  most structurally different CPU path (a single canonical fit function rather than a
-  residual+`least_squares` pair) and the most numerically fragile model per existing
-  parity notes ([[noisy-data-parity-philosophy]]: "2CXM unstable").
+Per-voxel/per-candidate `least_squares`/`curve_fit` exceptions are caught inside these two
+models' runners specifically (unlike the shared `_run_scipy_per_voxel` used by
+patlak/tofts/ex_tofts, which lets exceptions propagate) -- with random draws now in the
+mix, one numerically-bad candidate should not sink a voxel another candidate fits fine.
 
-### 3. Cleanup (only once both are migrated)
-- Delete `dce_models._best_fit_over_starts` and `dce_pipeline._accel_multistart_refine`,
-  `_extraction_fraction_init_bounds` (folded into the tissue_uptake/2cxm assemblers), and
-  the now-fully-dead `_fit_stage_d_model_accelerated` per-model `initial_row`/`bounds_row`
-  construction and `_ACCEL_MULTISTART_MODELS` set.
-- Remove the duplicated tissue_uptake patlak-seed computation in
-  `dce_pipeline._fit_model_curve` (lines ~3121-3151 as of this writing) once
-  `assemble_tissue_uptake_candidates` owns that seed.
+Candidate strategy: fixed prefs-default + (tissue_uptake only) a per-voxel linear-Patlak
+seed on Ktrans/Fp + N random log-uniform draws (4 for tissue_uptake, 5 for 2cxm) --
+replacing tissue_uptake's old 4 hand-tuned CPU-only candidates and both models'
+accelerated-only `_accel_multistart_refine` (coarse-explore-then-refine) with one shared
+mechanism used identically by both backends, per this project's original target
+architecture ("random log-uniform for 2cxm/tissue_uptake").
+
+**A real bug found and fixed during verification:** the OSIPI reliability gate
+(`test_osipi_2cum_reliability_delay0_against_reference_values`, a hard pass/fail gate on
+official tolerances) failed on a low-flow case (`Fp=5` per 100mL/min) after the initial
+tissue_uptake migration -- confirmed via `git stash` to be a genuine regression, not a
+pre-existing flake. Root cause: `dce_models.model_tissue_uptake_fit`'s original hardcoded
+fallback defaults (`initial_value_ktrans=2e-4`, `initial_value_fp=0.2`, used only when no
+caller prefs are given) were always canonical-per-minute values, used directly with no
+scaling. The new shared candidate space is raw/output-units (matching how the accelerated
+backend has always used these same prefs keys, unconverted) -- so the CPU runner's
+canonical-unit conversion (`* rate_in_to_min`) was applied a second, spurious time to the
+fixed-default candidate specifically, a 60x error for this test's seconds-scale synthetic
+data (real pipeline runs never hit this: Stage-D's timer is minutes-native in practice, so
+`rate_in_to_min == 1` and the bug is a no-op there). Fixed by having
+`assemble_tissue_uptake_candidates`/`assemble_2cxm_candidates` pre-divide the fixed
+default's Ktrans/Fp by `rate_in_to_min` before storing it in the shared candidate array, so
+the CPU runner's later multiplication recovers the original intended canonical value
+exactly. Worth remembering for any future model migration that mixes a "canonical-only"
+CPU convention with a "raw-only" accelerated convention under one shared candidate space.
+
+**Verification and honest trade-offs:**
+- All tissue_uptake/2cxm unit, OSIPI reliability, and OSIPI backend-consistency tests
+  pass, including the mock-based accelerated-outputs test (its `expected_init`/
+  `expected_bounds` for both models are unchanged, since they assert the *fixed* base
+  candidate specifically).
+- Full `pytest tests/python -q`: 195 passed, only the pre-existing tabled patlak failure
+  (unchanged from before this migration).
+- Real, measured runtime cost: the full local suite went from ~85s to ~136s, and
+  `-m osipi` from ~40s to ~87s -- running 5-6 full-cost candidates per voxel (patlak/
+  tofts/ex_tofts fixed-multiplier fits are cheap and few; tissue_uptake/2cxm's random
+  multistart is not) instead of the old accelerated-only coarse-then-refine trick, which
+  ran cheap coarse fits for every candidate and only one full-cost refine. This project
+  deliberately did not reimplement that coarse/refine optimization inside the shared
+  `fit_with_multistart` (real added complexity for an optimization that only matters at
+  much larger voxel counts than the local test fixtures use) -- if a real BIDS batch run
+  on GPU hardware turns out to be meaningfully slower, that optimization (or just fewer
+  random draws) is the first thing to try.
+- Before/after `git stash` comparison on `sub-10bbbdownsample`'s `-m parity
+  --parity-suite=allmodels` numbers (none of these are gated, only reported): tissue_uptake
+  moved by noise-level amounts in both directions (a wash). 2cxm moved more, and mixed:
+  the primary Ktrans correlation improved substantially everywhere it was checked (e.g.
+  `2cxm_ktrans_brain_auto_vs_cpu` 0.832 -> 0.980, `_auto_vs_matlab` 0.861 -> 0.942), but a
+  few GM/WM backend-consistency numbers on secondary params got worse (e.g.
+  `2cxm_ktrans_gm_auto_vs_cpu` 0.450 -> 0.167, `2cxm_ve_gm_auto_vs_matlab` 0.766 -> 0.406).
+  Not investigated further: 2cxm is the model already flagged as the most numerically
+  fragile in this project ([[noisy-data-parity-philosophy]]: "2CXM unstable") and these
+  are small-n (57-119 voxel), already-noisy correlations on secondary parameters, not
+  gated assertions -- but if 2cxm parity regressions matter later, start here.
+
+## Cleanup (done)
+
+- Deleted `dce_pipeline._accel_multistart_refine`, `_extraction_fraction_init_bounds`,
+  `_ACCEL_MULTISTART_MODELS`/`_ACCEL_MULTISTART_STARTS`/`_ACCEL_MULTISTART_COARSE_ITERS`,
+  and the now-fully-dead per-model `initial_row`/`bounds_row` construction inside
+  `_fit_stage_d_model_accelerated` (the function is now five one-line delegations).
+  Updated the two OSIPI test-file docstrings that referenced `_accel_multistart_refine`
+  by name.
+- Removed the duplicated tissue_uptake patlak-seed computation in
+  `dce_pipeline._fit_model_curve`; `assemble_tissue_uptake_candidates` is now the only
+  place that seed is computed (previously computed three times: there, in patlak's own
+  copy, and in `model_tissue_uptake_fit` itself).
+- **Not deleted, corrected from this doc's earlier assumption:**
+  `dce_models._best_fit_over_starts` and `_clip_start_to_bounds` are still used by
+  `model_vp_fit` and `model_fxr_fit` -- two models never in scope for this project (not in
+  `ACCELERATED_STAGE_D_MODELS`). They stay.
+
+## Possible follow-ups (not started, not blocking)
+
+- If real BIDS batch runtime on GPU hardware is measurably slower for tissue_uptake/2cxm,
+  consider a coarse-then-refine option inside `fit_with_multistart` (opt-in per model),
+  or simply reduce `multistart_starts` from the current defaults (4 / 5).
+- If 2cxm's GM/WM secondary-parameter backend-consistency numbers turn out to matter for
+  a real dataset (not just this noisy synthetic fixture), revisit here first.
 
 ## Verification checklist per model migration
 
