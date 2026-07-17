@@ -755,62 +755,23 @@ def model_tofts_fit(
 ) -> List[float]:
     """Python inverse-fit counterpart of `dce/model_tofts.m`.
 
+    Thin single-voxel wrapper over the shared Stage-D fit machinery in
+    `dce_fit_backends` (the same candidate-assembly/multi-start code path
+    used by the accelerated cpufit/gpufit backends for this model).
+
     Returns MATLAB-style 7-value output:
       [Ktrans, ve, sse, ktrans_ci_low, ktrans_ci_high, ve_ci_low, ve_ci_high]
-
-    Confidence interval values are approximated as the fit estimates for now.
-    This preserves output shape and keeps parity checks stable for synthetic data.
     """
-    ct_vec = [float(v) for v in ct]
-    cp_vec = [float(v) for v in cp]
-    t_vec = [float(v) for v in timer]
+    from dce_fit_backends import fit_tofts_stage_d  # local: avoids an import cycle
 
-    if not (len(ct_vec) == len(cp_vec) == len(t_vec)):
-        raise ValueError(
-            f"ct/cp/timer lengths differ: {len(ct_vec)} / {len(cp_vec)} / {len(t_vec)}"
-        )
-    if len(t_vec) == 0:
-        raise ValueError("ct/cp/timer must be non-empty")
-
-    # Defaults aligned with tests/matlab/helpers/default_dce_fit_prefs.m
-    settings = {
-        "lower_limit_ktrans": 1e-7,
-        "upper_limit_ktrans": 2.0,
-        "initial_value_ktrans": 2e-4,
-        "lower_limit_ve": 0.02,
-        "upper_limit_ve": 1.0,
-        "initial_value_ve": 0.2,
-        "max_nfev": 2000,
-        "tol_fun": 1e-12,
-        "tol_x": 1e-6,
-        "robust": "off",
-    }
-    if prefs:
-        settings.update(prefs)
-
-    def residual(params: List[float]) -> List[float]:
-        ktrans, ve = params
-        pred = model_tofts_cfit(ktrans, ve, cp_vec, t_vec)
-        return [pred[i] - ct_vec[i] for i in range(len(ct_vec))]
-
-    x0 = [float(settings["initial_value_ktrans"]), float(settings["initial_value_ve"])]
-    lb = [float(settings["lower_limit_ktrans"]), float(settings["lower_limit_ve"])]
-    ub = [float(settings["upper_limit_ktrans"]), float(settings["upper_limit_ve"])]
-    lsq_kwargs = _least_squares_kwargs(settings, default_max_nfev=2000)
-
-    fit = least_squares(
-        residual,
-        x0=x0,
-        bounds=(lb, ub),
-        **lsq_kwargs,
+    row = fit_tofts_stage_d(
+        np.asarray([float(v) for v in ct], dtype=np.float64),
+        np.asarray([float(v) for v in cp], dtype=np.float64),
+        np.asarray([float(v) for v in timer], dtype=np.float64),
+        prefs,
+        backend="python",
     )
-
-    ktrans = float(fit.x[0])
-    ve = float(fit.x[1])
-    sse = float(sum(v * v for v in fit.fun))
-
-    ci_lo, ci_hi = _ci_bounds_from_fit(fit)
-    return [ktrans, ve, sse, ci_lo[0], ci_hi[0], ci_lo[1], ci_hi[1]]
+    return [float(v) for v in row]
 
 
 def model_extended_tofts_fit(
@@ -819,88 +780,22 @@ def model_extended_tofts_fit(
     timer: Iterable[float],
     prefs: Optional[Dict[str, float]] = None,
 ) -> List[float]:
-    """Python inverse-fit counterpart of `dce/model_extended_tofts.m`."""
-    ct_vec = [float(v) for v in ct]
-    cp_vec = [float(v) for v in cp]
-    t_vec = [float(v) for v in timer]
+    """Python inverse-fit counterpart of `dce/model_extended_tofts.m`.
 
-    if not (len(ct_vec) == len(cp_vec) == len(t_vec)):
-        raise ValueError(
-            f"ct/cp/timer lengths differ: {len(ct_vec)} / {len(cp_vec)} / {len(t_vec)}"
-        )
-    if len(t_vec) == 0:
-        raise ValueError("ct/cp/timer must be non-empty")
+    Thin single-voxel wrapper over the shared Stage-D fit machinery in
+    `dce_fit_backends` (the same candidate-assembly/multi-start code path
+    used by the accelerated cpufit/gpufit backends for this model).
+    """
+    from dce_fit_backends import fit_ex_tofts_stage_d  # local: avoids an import cycle
 
-    settings = {
-        "lower_limit_ktrans": 1e-7,
-        "upper_limit_ktrans": 2.0,
-        "initial_value_ktrans": 2e-4,
-        "lower_limit_ve": 0.02,
-        "upper_limit_ve": 1.0,
-        "initial_value_ve": 0.2,
-        "lower_limit_vp": 1e-3,
-        "upper_limit_vp": 1.0,
-        "initial_value_vp": 0.02,
-        "max_nfev": 2000,
-        "tol_fun": 1e-12,
-        "tol_x": 1e-6,
-        "robust": "off",
-    }
-    if prefs:
-        settings.update(prefs)
-
-    def residual(params: List[float]) -> List[float]:
-        ktrans, ve, vp = params
-        pred = model_extended_tofts_cfit(ktrans, ve, vp, cp_vec, t_vec)
-        return [pred[i] - ct_vec[i] for i in range(len(ct_vec))]
-
-    lb = [
-        float(settings["lower_limit_ktrans"]),
-        float(settings["lower_limit_ve"]),
-        float(settings["lower_limit_vp"]),
-    ]
-    ub = [
-        float(settings["upper_limit_ktrans"]),
-        float(settings["upper_limit_ve"]),
-        float(settings["upper_limit_vp"]),
-    ]
-    starts = [
-        [
-            float(settings["initial_value_ktrans"]),
-            float(settings["initial_value_ve"]),
-            float(settings["initial_value_vp"]),
-        ],
-        [
-            float(settings["initial_value_ktrans"]) * 10.0,
-            float(settings["initial_value_ve"]),
-            float(settings["initial_value_vp"]),
-        ],
-        [
-            float(settings["initial_value_ktrans"]) * 100.0,
-            float(settings["initial_value_ve"]),
-            float(settings["initial_value_vp"]),
-        ],
-    ]
-
-    lsq_kwargs = _least_squares_kwargs(settings, default_max_nfev=2000)
-    fit, sse = _best_fit_over_starts(residual, starts, lb, ub, lsq_kwargs)
-    ktrans = float(fit.x[0])
-    ve = float(fit.x[1])
-    vp = float(fit.x[2])
-
-    ci_lo, ci_hi = _ci_bounds_from_fit(fit)
-    return [
-        ktrans,
-        ve,
-        vp,
-        sse,
-        ci_lo[0],
-        ci_hi[0],
-        ci_lo[1],
-        ci_hi[1],
-        ci_lo[2],
-        ci_hi[2],
-    ]
+    row = fit_ex_tofts_stage_d(
+        np.asarray([float(v) for v in ct], dtype=np.float64),
+        np.asarray([float(v) for v in cp], dtype=np.float64),
+        np.asarray([float(v) for v in timer], dtype=np.float64),
+        prefs,
+        backend="python",
+    )
+    return [float(v) for v in row]
 
 
 def _clip_start_to_bounds(start: List[float], lb: List[float], ub: List[float]) -> List[float]:

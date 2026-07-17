@@ -71,32 +71,60 @@ bounds, candidate initial values) and one consolidated multi-start process every
 funnels through, with per-model pluggable candidate-assembly strategies (log-uniform
 random draws, a closed-form linear-fit guess, a grid, or a single fixed value).
 
-## Status: patlak pilot complete (2026-07-17)
+## Status: patlak + tofts + ex_tofts migrated (2026-07-17)
 
 `python/dce_fit_backends.py` now holds the shared machinery, proven end-to-end on
-**patlak only**:
+**patlak, tofts, and ex_tofts**:
 
 - `FitInputs` -- dataclass bundling `ct`/`cp`/`timer`/`bounds_row`/`prefs` for N voxels.
 - `assemble_patlak_candidates(inputs) -> (n_starts, n_voxels, n_params)` -- the one place
   computing the linear-Patlak seed per voxel (`dce_models.model_patlak_linear`) and
   expanding it into patlak's existing x1/x10/x100 candidate rows.
+- `assemble_tofts_candidates(inputs) -> (1, n_voxels, n_params)` -- tofts' single fixed
+  prefs-default start, broadcast to every voxel (no per-voxel seeding for this model, on
+  either backend, matching prior behavior exactly).
+- `assemble_ex_tofts_candidates(inputs) -> (3, n_voxels, n_params)` -- ex_tofts' existing
+  x1/x10/x100-on-Ktrans candidates (ve/vp held at prefs defaults), broadcast to every
+  voxel -- the same fixed-multiplier strategy the CPU path has always used, now also
+  applied on the accelerated backend for the first time.
 - `run_backend_fit(backend, model_name, inputs, initial_parameters)` -- one signature for
   `"python"` (scipy `least_squares`, looped per voxel) and any accelerated backend string
-  (`fit_module.fit_constrained`, one call for the whole batch).
+  (`fit_module.fit_constrained`, one call for the whole batch), dispatching per model via
+  a small runner registry. The per-voxel scipy loop and the accelerated `fit_constrained`
+  call are each implemented once (`_run_scipy_per_voxel`, `_run_accelerated`) and shared
+  by all three models' thin per-model runners -- adding tofts and ex_tofts turned the
+  patlak-only runners into genuinely reusable helpers instead of just proving the pattern
+  once.
 - `fit_with_multistart(backend, model_name, inputs, candidates)` -- tries every candidate
   row, keeps the per-voxel best by chi-square/SSE. Replaces the "keep lower SSE"
   bookkeeping that both `_best_fit_over_starts` and `_accel_multistart_refine` implement
   separately, generalized to work whether the backend fits one voxel at a time (python)
   or the whole batch at once (cpufit/gpufit).
-- `fit_patlak_stage_d(ct, cp, timer, prefs, backend)` -- top-level entry point, single or
-  batched voxels, either backend.
+- `fit_patlak_stage_d(...)` / `fit_tofts_stage_d(...)` / `fit_ex_tofts_stage_d(...)` --
+  top-level entry points, single or batched voxels, either backend. Tofts and ex_tofts
+  keep the accelerated backend's original CI convention (CI columns repeat the point
+  estimate, since no Jacobian is available), distinct from patlak's -1.0 sentinel -- these
+  are preserved as per-model behavior in the shared architecture, not unified, since
+  unifying them would be an unrequested behavior change.
 
-`dce_models.model_patlak_fit` is now a thin single-voxel wrapper over
-`fit_patlak_stage_d(..., backend="python")`; `_fit_stage_d_model_accelerated`'s patlak
-branch is gone, replaced by a one-line delegation to `fit_patlak_stage_d(...,
-backend=acceleration_backend)`. Verified: all patlak unit/OSIPI/backend-consistency
-tests pass unchanged; the accelerated backend now gets real per-voxel seeding (previously
-a single fixed `initial_value_ktrans` for every voxel, regardless of the actual data).
+`dce_models.model_patlak_fit`, `model_tofts_fit`, and `model_extended_tofts_fit` are now
+thin single-voxel wrappers over the corresponding `fit_*_stage_d(..., backend="python")`;
+`_fit_stage_d_model_accelerated`'s patlak/tofts/ex_tofts branches are gone, replaced by
+one-line delegations. Verified: all patlak/tofts/ex_tofts unit/OSIPI/backend-consistency
+tests pass unchanged (tofts' and ex_tofts' accelerated fixed-value tests assert the exact
+same numbers as before their migrations, since the mock always returns the same canned
+result regardless of which multistart candidate is tried and `fit_with_multistart`'s
+strict less-than tie-break keeps the first candidate's result); the patlak accelerated
+backend now gets real per-voxel seeding (previously a single fixed
+`initial_value_ktrans` for every voxel, regardless of the actual data). For ex_tofts, the
+accelerated backend now gets the same x1/x10/x100 multistart the CPU path already had --
+a real behavior change, confirmed via a before/after `git stash` comparison on the
+`sub-10bbbdownsample` parity fixture's `-m parity --parity-suite=allmodels` numbers: all
+`ex_tofts_*_auto_vs_cpu`/`_auto_vs_matlab` corr/rmse values moved by noise-level amounts
+in both directions (largest shift ~0.01 in either corr or rmse), consistent with this
+fixture's ex_tofts fits already converging fine from the single fixed start -- i.e. no
+regression, and the added multistart is now available for fixtures/voxels where it would
+matter.
 
 **Known residual, tabled (not this consolidation's job to fix):**
 `patlak_ktrans_brain_auto_vs_cpu` on the `sub-10bbbdownsample` parity fixture still shows
@@ -116,29 +144,10 @@ perfect (corr=1.0). Full root-cause writeup, open questions, and the planned mit
 ## Remaining work (not started)
 
 Extend the same three pieces -- assembler, backend runner, `fit_with_multistart` -- to
-the other four accelerated-eligible models, in this order (each is a candidate for its
-own pass, verified against the full local test/parity suite before moving to the next):
+the remaining two accelerated-eligible models, in this order (each is a candidate for
+its own pass, verified against the full local test/parity suite before moving to the next):
 
-### 1. `tofts` (lowest risk -- no behavior change expected)
-- Single fixed candidate today on both backends (CPU: `model_tofts_fit`'s direct
-  `least_squares` call, no multi-start; accelerated: fixed `initial_value_ktrans`/`_ve`
-  from prefs). `assemble_tofts_candidates` just needs to produce a `(1, n_voxels, 2)`
-  array from the prefs defaults -- a mechanical move, not a new strategy. Good first
-  target to prove the pattern generalizes beyond patlak's linear-seeded case without any
-  numeric risk.
-
-### 2. `ex_tofts`
-- CPU (`dce_models.model_extended_tofts_fit`): 3 fixed-multiplier candidates
-  (`x1`/`x10`/`x100` on Ktrans, ve/vp held at defaults), via `_best_fit_over_starts` --
-  same pattern as patlak's old CPU path, no linear-regression seed. Port directly:
-  `assemble_ex_tofts_candidates` builds the same 3 rows (no per-voxel seed needed, unlike
-  patlak).
-- Accelerated: single fixed start today, not in `_ACCEL_MULTISTART_MODELS`. Migrating
-  will give it the same x1/x10/x100 multistart the CPU path already has -- a real
-  behavior change on the accelerated side, expected to only improve accuracy (same
-  direction as the patlak fix), but re-verify ex_tofts parity numbers specifically.
-
-### 3. `tissue_uptake`
+### 1. `tissue_uptake`
 - CPU (`dce_models.model_tissue_uptake_fit`): canonical-unit conversion
   (`_canonical_time_context`/`_merge_prefs_in_canonical_units`, minutes + per-minute
   rates) *before* candidate assembly, then 4 hand-tuned candidates plus a 5th seeded from
@@ -156,7 +165,7 @@ own pass, verified against the full local test/parity suite before moving to the
   large voxel counts, or accept the simpler "run every candidate at full cost" and
   benchmark whether it matters in practice.
 
-### 4. `2cxm`
+### 2. `2cxm`
 - CPU: single-path OSIPI-canonical fit (`dce_models._fit_2cxm_osipi_canonical`), not
   `_best_fit_over_starts`-based -- no multi-start on CPU today at all. Accelerated: same
   E-space + random-log-uniform multistart as tissue_uptake. Migrate last since it's the
@@ -164,7 +173,7 @@ own pass, verified against the full local test/parity suite before moving to the
   residual+`least_squares` pair) and the most numerically fragile model per existing
   parity notes ([[noisy-data-parity-philosophy]]: "2CXM unstable").
 
-### 5. Cleanup (only once all four are migrated)
+### 3. Cleanup (only once both are migrated)
 - Delete `dce_models._best_fit_over_starts` and `dce_pipeline._accel_multistart_refine`,
   `_extraction_fraction_init_bounds` (folded into the tissue_uptake/2cxm assemblers), and
   the now-fully-dead `_fit_stage_d_model_accelerated` per-model `initial_row`/`bounds_row`

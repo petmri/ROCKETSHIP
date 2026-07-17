@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 
 import numpy as np
 
-from dce_fit_backends import fit_patlak_stage_d
+from dce_fit_backends import fit_ex_tofts_stage_d, fit_patlak_stage_d, fit_tofts_stage_d
 from dce_models import (
     model_2cxm_cfit,
     model_2cxm_fit,
@@ -3538,6 +3538,10 @@ def _fit_stage_d_model_accelerated(
 
     if model_name == "patlak":
         return fit_patlak_stage_d(ct, cp_use, timer, prefs, backend=acceleration_backend)
+    if model_name == "tofts":
+        return fit_tofts_stage_d(ct, cp_use, timer, prefs, backend=acceleration_backend)
+    if model_name == "ex_tofts":
+        return fit_ex_tofts_stage_d(ct, cp_use, timer, prefs, backend=acceleration_backend)
 
     fit_module = _load_fit_module_for_acceleration(acceleration_backend)
     data = np.ascontiguousarray(np.asarray(ct.T, dtype=np.float32))
@@ -3545,46 +3549,7 @@ def _fit_stage_d_model_accelerated(
     cp_f32 = np.ascontiguousarray(np.asarray(cp_use, dtype=np.float32).reshape(-1))
     user_info = np.ascontiguousarray(np.concatenate([timer_f32, cp_f32], axis=0), dtype=np.float32)
 
-    if model_name == "tofts":
-        model_id_name = "TOFTS"
-        initial_row = np.array(
-            [
-                float(prefs["initial_value_ktrans"]),
-                float(prefs["initial_value_ve"]),
-            ],
-            dtype=np.float32,
-        )
-        bounds_row = np.array(
-            [
-                float(prefs["lower_limit_ktrans"]),
-                float(prefs["upper_limit_ktrans"]),
-                float(prefs["lower_limit_ve"]),
-                float(prefs["upper_limit_ve"]),
-            ],
-            dtype=np.float32,
-        )
-    elif model_name == "ex_tofts":
-        model_id_name = "TOFTS_EXTENDED"
-        initial_row = np.array(
-            [
-                float(prefs["initial_value_ktrans"]),
-                float(prefs["initial_value_ve"]),
-                float(prefs["initial_value_vp"]),
-            ],
-            dtype=np.float32,
-        )
-        bounds_row = np.array(
-            [
-                float(prefs["lower_limit_ktrans"]),
-                float(prefs["upper_limit_ktrans"]),
-                float(prefs["lower_limit_ve"]),
-                float(prefs["upper_limit_ve"]),
-                float(prefs["lower_limit_vp"]),
-                float(prefs["upper_limit_vp"]),
-            ],
-            dtype=np.float32,
-        )
-    elif model_name == "tissue_uptake":
+    if model_name == "tissue_uptake":
         # Accelerated 2CUM now fits E = Ktrans/Fp; kernel param order is [E, vp, Fp].
         # Recover Ktrans = E*Fp on output. E-space init/bounds mirror the python reference.
         model_id_name = "TISSUE_UPTAKE"
@@ -3707,31 +3672,6 @@ def _fit_stage_d_model_accelerated(
     if np.any(failed):
         params[failed, :] = np.nan
         chi[failed] = np.nan
-
-    if model_name == "tofts":
-        out = np.full((n_fits, len(MODEL_LAYOUTS["tofts"]["param_names"])), np.nan, dtype=np.float64)
-        out[:, 0] = params[:, 0]
-        out[:, 1] = params[:, 1]
-        out[:, 2] = chi
-        out[:, 3] = params[:, 0]
-        out[:, 4] = params[:, 0]
-        out[:, 5] = params[:, 1]
-        out[:, 6] = params[:, 1]
-        return out
-
-    if model_name == "ex_tofts":
-        out = np.full((n_fits, len(MODEL_LAYOUTS["ex_tofts"]["param_names"])), np.nan, dtype=np.float64)
-        out[:, 0] = params[:, 0]
-        out[:, 1] = params[:, 1]
-        out[:, 2] = params[:, 2]
-        out[:, 3] = chi
-        out[:, 4] = params[:, 0]
-        out[:, 5] = params[:, 0]
-        out[:, 6] = params[:, 1]
-        out[:, 7] = params[:, 1]
-        out[:, 8] = params[:, 2]
-        out[:, 9] = params[:, 2]
-        return out
 
     if model_name == "tissue_uptake":
         # Kernel params are [E, vp, Fp]; recover Ktrans = E * Fp.
