@@ -76,12 +76,13 @@ def _patlak_bounds_row(settings: Dict[str, Any]) -> np.ndarray:
 
 
 def assemble_patlak_candidates(inputs: FitInputs) -> np.ndarray:
-    """Per-voxel patlak candidate starts: linear-regression seed, then x10/x100.
+    """Per-voxel linear-regression seed, then the prefs default, then default x100.
 
-    Mirrors the seeding `dce_models.model_patlak_fit` has always used (the
-    closed-form linear Patlak estimate per voxel, falling back to the prefs
-    default when non-finite) expanded into the same 3 fixed-multiplier rows
-    it has always tried. Returns shape (3, n_voxels, 2), columns [ktrans, vp].
+    Row 0 is the closed-form linear Patlak estimate per voxel (falling back to
+    the prefs default when non-finite); rows 1-2 are the fixed prefs default
+    ktrans, unscaled and x100, same vp default on both -- a fixed rescue
+    candidate independent of the (occasionally bad) linear estimate. Returns
+    shape (3, n_voxels, 2), columns [ktrans, vp].
     """
     settings = inputs.prefs
     default_k = float(settings["initial_value_ktrans"])
@@ -103,11 +104,14 @@ def assemble_patlak_candidates(inputs: FitInputs) -> np.ndarray:
         except Exception:
             continue
 
+    default_k_row = np.full(n_voxels, default_k, dtype=np.float64)
+    default_vp_row = np.full(n_voxels, default_vp, dtype=np.float64)
+
     return np.stack(
         [
             np.stack([base_k, base_vp], axis=-1),
-            np.stack([base_k * 10.0, base_vp], axis=-1),
-            np.stack([base_k * 100.0, base_vp], axis=-1),
+            np.stack([default_k_row, default_vp_row], axis=-1),
+            np.stack([default_k_row * 100, default_vp_row], axis=-1),
         ],
         axis=0,
     )
@@ -237,6 +241,20 @@ def _log_uniform_candidates(
         log_lo[None, None, :] + rng.random((n_starts, n_voxels, n_params)) * (log_hi - log_lo)[None, None, :]
     )
     return np.clip(draws, lower[None, None, :], upper[None, None, :])
+
+
+def _clamp_to_bounds(candidates: np.ndarray, bounds_row: np.ndarray) -> np.ndarray:
+    """Clamp a (n_voxels, n_params) candidate array into `bounds_row`'s [lo, hi] pairs.
+
+    Applied once in `fit_with_multistart` so every backend -- python or
+    accelerated -- sees only in-bounds starting points, instead of each
+    runner having to (or, in the accelerated case, failing to) clamp its own
+    `initial_parameters` before use.
+    """
+    n_params = candidates.shape[-1]
+    lo = np.asarray([bounds_row[2 * j] for j in range(n_params)], dtype=np.float64)
+    hi = np.asarray([bounds_row[2 * j + 1] for j in range(n_params)], dtype=np.float64)
+    return np.clip(candidates, lo, hi)
 
 
 def _e_space_bounds(ktrans_lo: float, ktrans_hi: float, fp_lo: float, fp_hi: float) -> Tuple[float, float]:
@@ -460,7 +478,8 @@ def _run_scipy_per_voxel(
     dce_pipeline.py) call. `extra[i]` is a `(ci_lo, ci_hi)` tuple (or `None` on
     failure) -- the same format every model's runner uses, so the top-level
     `fit_*_stage_d` output assembly doesn't need to know whether a given
-    backend exposes a Jacobian.
+    backend exposes a Jacobian. `initial_parameters` arrives already clamped
+    to `inputs.bounds_row` by `fit_with_multistart`.
     """
     settings = inputs.prefs
     lb = [float(inputs.bounds_row[2 * j]) for j in range(n_params)]
@@ -482,7 +501,7 @@ def _run_scipy_per_voxel(
             pred = cfit_fn(params_vec, cp_vec, t_vec)
             return [pred[j] - ct_vec[j] for j in range(len(ct_vec))]
 
-        x0 = [min(max(float(initial_parameters[i, j]), lb[j]), ub[j]) for j in range(n_params)]
+        x0 = [float(v) for v in initial_parameters[i]]
         try:
             fit = least_squares(residual, x0=x0, bounds=(lb, ub), **lsq_kwargs)
         except Exception:
@@ -868,10 +887,11 @@ def fit_with_multistart(
     best_extra = np.empty(n_voxels, dtype=object)
 
     for s in range(n_starts):
+        start = _clamp_to_bounds(candidates[s], inputs.bounds_row)
         if backend == "python":
-            params, success, chi, extra = runner(inputs, candidates[s])
+            params, success, chi, extra = runner(inputs, start)
         else:
-            params, success, chi, extra = runner(backend, inputs, candidates[s])
+            params, success, chi, extra = runner(backend, inputs, start)
         with np.errstate(invalid="ignore"):
             improved = success & np.isfinite(chi) & (chi < best_chi)
         best_params[improved] = params[improved]

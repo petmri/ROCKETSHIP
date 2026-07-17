@@ -1079,7 +1079,12 @@ class TestDcePipeline:
             "gpu_max_n_iterations": 64,
         }
         expected_seed = model_patlak_linear(list(ct[:, 0]), list(cp), list(timer))
-        expected_init = [float(expected_seed[0]), float(expected_seed[1])]
+        # fit_with_multistart clamps every candidate to the model's bounds before
+        # handing it to any backend, so a seed outside [lower, upper] arrives clamped.
+        expected_init = [
+            min(max(float(expected_seed[0]), prefs["lower_limit_ktrans"]), prefs["upper_limit_ktrans"]),
+            min(max(float(expected_seed[1]), prefs["lower_limit_vp"]), prefs["upper_limit_vp"]),
+        ]
 
         _FakeAccelModule.last_call = None
         _FakeAccelModule.first_call = None
