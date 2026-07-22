@@ -7,6 +7,40 @@ Do not track open items in this file; active work belongs in `docs/project-manag
 
 Completed items moved from `TODO.md` on 2026-03-05 to keep the active backlog short.
 
+## Completed Recent Updates (2026-07-22)
+- [x] **Stage-D fit-backend consolidation, archived.** All five accelerated-eligible
+  models (`patlak`, `tofts`, `ex_tofts`, `tissue_uptake`, `2cxm`) migrated onto one shared
+  `python/dce_fit_backends.py` machinery (`FitInputs`, per-model `assemble_*_candidates`,
+  `fit_with_multistart`), replacing three separate, incompatible seeding/multi-start
+  implementations (CPU/python, accelerated, and per-model hand-rolled variants). Three
+  follow-up cleanup passes collapsed remaining duplication (`_stage_d_fit_funcs()`
+  registry, `_validate_stage_d_inputs`/`_assemble_stage_d_output` shared helpers,
+  `_ModelSpec`/`_fit_stage_d_batch`), fixed a real prefs-handling bug
+  (`_apply_model_specific_prefs` wasn't applied on the accelerated-attempt path, silently
+  ignoring 2cxm/tissue_uptake per-model override knobs whenever the accelerated backend
+  succeeded), and fixed a tissue_uptake candidate-unit-scaling bug caught by the OSIPI
+  gate. Verified throughout: full `pytest tests/python -q` (195 passed) and `-m osipi`
+  green after every pass. One known residual (patlak+brain-ROI non-identifiability at a
+  `vp` bound) was tabled, not fixed by this project -- folded into the ongoing
+  `docs/project-management/projects/batch-parity/batch_parity.md` tracking. Archived to
+  `docs/project-management/projects/archived/stage-d-fit-consolidation/`.
+- [x] **`tv` steady-state-end detector ported to MATLAB and made the default in both
+  languages** (`dce/find_end_ss_tv.m`, `python/dce_pipeline.py`'s `_resolve_baseline_window`
+  fallback, both config JSON defaults). Decision driven by a new on-demand diagnostic
+  (`tests/python/run_baseline_end_reliability.py`) run against 224 real AIFArtist-rated
+  sessions: `tv` ~88-93% accuracy vs. MATLAB's previous default (`piecewise_constant`)
+  ~0%. The MATLAB port is verified numerically identical to Python on 6 curves including
+  a real one (`tests/python/test_find_end_ss_tv_matlab_parity.py`). Found and fixed two
+  unrelated, pre-existing MATLAB bugs in `FXLfit_generic.m`'s Patlak/GPU branch along the
+  way (dead "ANIMAL study" ID-matching code; a `constraint_type`/`constraint_types`
+  typo), both confirmed independent of the steady-state change. **Not yet committed**:
+  flipping the default surfaced parity-gate failures (`patlak_ktrans_brain`,
+  `tofts`/`tissue_uptake` ROI-xls) -- root-cause hypothesis and next steps folded into
+  `docs/project-management/projects/batch-parity/batch_parity.md` (the brain-ROI one
+  looks like the same already-tabled non-identifiability issue from the Stage-D
+  consolidation above). Archived to
+  `docs/project-management/projects/archived/steady-state-tv-default/`.
+
 ## Completed Recent Updates (2026-07-13)
 - [x] **Unified accelerated-fit fix (`E=Ktrans/Fp` reparam + O(N) convolution + analytic Jacobians) — implemented and verified on cpufit.** Rewrote the compiled `2cxm`/`2cum` models so parameter[0] is the extraction fraction `E∈(0,1)` (recover `Ktrans=E·Fp`); `PS=Fp·E/(1−E)` is smooth, so the `Ktrans=Fp` pole and the `if(p0>=p3)PS=1e9` sentinel are deleted. The CPU backend (`~/code/Gpufit/Cpufit/lm_fit_cpp.cpp` — which has its *own* C++ models, not the `.cuh` files) now computes value + full Jacobian in a single **O(N) exponential-recurrence** pass (`G`/`G'`/`U`) for all four conv models, replacing the O(N²) per-point convolution and the 5-point numerical Jacobian. The CUDA `.cuh` kernels (`Gpufit/models/two-compartment_exchange.cuh`, `tissue_uptake.cuh`) got the same reparam + analytic Jacobian (host-verified analytic-vs-central L2 ~1e-9; **not yet built/run on CUDA hardware** — gpufit 2CXM stays `xfail(strict=False)`). Caller (`python/dce_pipeline.py`) maps `Ktrans`/`Fp` prefs → `E` init/bounds (`_extraction_fraction_init_bounds`, mirroring the float64 python reference) and `E→Ktrans=E·Fp` on output. **Also lowered the `Fp` floor `1e-3→1e-4`/s** (`2cxm`/`tissue_uptake`), the missing piece that lets low-flow `Fp=5` (≈8.3e-4/s) be represented. Result: **all 5 OSIPI cpufit sweeps pass, including all 24 2CXM cases** (was ~6/24 xfail — the earlier "weak-identifiability floor" reading was wrong; the float64 reference passes all 24), and the O(N²) cliff + numeric-Jac multiplier are gone (tofts 107→0.2, 2cum 3879→2.6, 2cxm 12325→4.1 ms/row). Multi-start still required (kept). Added `tests/python/test_reparam_jacobian.py` (Jacobian guard, L2<1e-6); un-xfailed cpufit 2CXM. Rebuilt `pyCpufit` into `.venv` (dylib md5 `4a56ad4f→0044e3df`). Full derivation/status in `docs/project-management/projects/osipi-verification/STATUS.md`.
 - [x] Rebuilt patched `pyCpufit 1.4.1` (Gpufit `dev` `3db5b4d` "Fix false CONVERGED on rejected step" + `607f127` global-convergence) verified in use, and added a **backend-agnostic random multi-start** (`python/dce_pipeline.py:_accel_multistart_refine`, adopted from the Gpufit `bug/experiments.py` harness): per voxel the accelerated Stage-D fit tries the fixed start plus 8 log-uniform draws with a cheap coarse fit, refines from the best basin, and keeps the lowest chi-square (never degrades a good fit; identical for cpufit/gpufit). This resolved `tissue_uptake` (2CUM) on the OSIPI sweep (1 failing case → 0) and promoted the cpufit/gpufit 2CUM sweep from `xfail` to passing. Residual `2cxm` misses are low-flow (`Fp=5`) weakly-identifiable-`vp` cases — the root cause is the `Fp` initial landing in a wrong basin, **not float32** (a `DOUBLE_PRECISION` build shows the same degenerate minima) — tracked in `TODO.md` + `docs/project-management/projects/osipi-verification/STATUS.md`, with an `E=Ktrans/Fp` compiled-model reparameterization planned.

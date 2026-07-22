@@ -484,7 +484,7 @@ class TestDcePipeline:
             assert info["method_requested"] == "glr"
             assert info["method_used"] == "glr"
 
-    def test_resolve_baseline_window_defaults_to_piecewise_constant_when_no_options_set(self) -> None:
+    def test_resolve_baseline_window_defaults_to_tv_when_no_options_set(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))
             config.stage_overrides = {
@@ -501,8 +501,8 @@ class TestDcePipeline:
             assert ss_start == 0
             assert 1 <= ss_end <= 12
             assert info["method_requested"] == "none"
-            assert info["method_used"] == "piecewise_constant"
-            assert info["source"] == "default_auto_method:piecewise_constant"
+            assert info["method_used"] == "tv"
+            assert info["source"] == "default_auto_method:tv"
 
     def test_resolve_baseline_window_uses_aif_sidecar_when_present(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

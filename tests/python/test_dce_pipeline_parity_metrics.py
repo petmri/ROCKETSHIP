@@ -108,7 +108,7 @@ def _make_config(
         "tr_ms": 8.29,
         "fa_deg": 15.0,
         "time_resolution_sec": 15.84,
-        "steady_state_auto_method": "piecewise_constant",
+        "steady_state_auto_method": "tv",
         "auto_find_injection": 1,
         "relaxivity": 3.6,
         "hematocrit": 0.42,

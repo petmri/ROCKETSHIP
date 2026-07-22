@@ -40,7 +40,7 @@
     "time_smoothing": "none",
     "time_smoothing_window": 0,
     "write_postfit_arrays": false,
-    "steady_state_auto_method": "piecewise_constant",
+    "steady_state_auto_method": "tv",
     "snr_filter": 0.0
   }
 }

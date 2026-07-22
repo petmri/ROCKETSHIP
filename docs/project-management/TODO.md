@@ -22,10 +22,13 @@ Keep strategic sequencing in `docs/project-management/ROADMAP.md` and current me
 - [ ] Improve `2cxm` and `tissue_uptake` stability/accuracy on real data.
 - [ ] Expand DSC support beyond current core (`DSC_convolution_oSVD` and broader workflow parity).
 - [ ] Decide final status of `nested` and `FXL_rr` (full support vs explicit non-support with cleanup).
-- [ ] Extend the Stage-D fit-backend consolidation (shared `FitInputs` + one multi-start
-      mechanism, currently proven on `patlak` only) to `tofts`/`ex_tofts`/`tissue_uptake`/
-      `2cxm` -- see `docs/project-management/projects/stage-d-fit-consolidation/STAGE_D_FIT_CONSOLIDATION_PLAN.md`.
-- [ ] Address the multiple end steady-state issues (see recent Patlak regression) with a unified approach. Short term: read end_ss from the AIF json sidecar; medium term: evaluate the 5 end_ss algorithms we have (unify with matlab); long term: implement a robust end_ss estimation method (update AutoAIF neural net) that is consistent across all models and datasets.
+- [ ] End steady-state, long term: implement a more robust end_ss estimation method
+      (update AutoAIF neural net) consistent across all models/datasets. Short term (AIF
+      sidecar) and medium term (evaluate the 4 algorithms, port the winner to MATLAB) are
+      done and archived (`docs/project-management/projects/archived/steady-state-tv-default/`);
+      the `tv`-default rollout (uncommitted) currently blocks `pytest -m parity` -- see
+      `docs/project-management/projects/batch-parity/batch_parity.md` for findings and
+      next steps before committing.
 
 ## External Accelerator Handoff (Open Items Only)
 

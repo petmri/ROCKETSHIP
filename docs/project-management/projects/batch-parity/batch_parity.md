@@ -4,7 +4,8 @@
 > injection-timing overhaul (Python now always auto-detects steady-state end, matching
 > MATLAB's `find_end_ss`, with a `SteadyStateEndTimeIndex` AIF-sidecar override for
 > fixed/reproducible runs -- see `docs/dce_options.md`) and the Stage-D fit-backend
-> consolidation (`docs/project-management/projects/stage-d-fit-consolidation/`). The
+> consolidation (`docs/project-management/projects/archived/stage-d-fit-consolidation/`,
+> archived 2026-07-22 -- all five models migrated, done). The
 > "Key Diagnostics and Artifacts" paths below are absolute macOS paths
 > (`/Users/samuelbarnes/...`) from a different dev machine and likely don't resolve
 > here. The specific Stage-A/B numeric snapshots ("Latest CPU-vs-MATLAB clean-reference
@@ -147,10 +148,12 @@ Interpretation:
 ## Tabled: Patlak/GPUfit non-identifiability at a parameter bound (2026-07-17)
 
 Found while building the Stage-D fit-backend consolidation
-(`docs/project-management/projects/stage-d-fit-consolidation/`); likely the same class
-of issue as "Regression on GPU-accelerated backend behavior observed in qualification
-test" above. **Tabled until after that refactor's remaining models
-(tofts/ex_tofts/tissue_uptake/2cxm) are migrated** -- documenting now so it isn't lost.
+(`docs/project-management/projects/archived/stage-d-fit-consolidation/`, archived
+2026-07-22 -- all five models, including tofts/ex_tofts/tissue_uptake/2cxm, finished
+migrating); likely the same class of issue as "Regression on GPU-accelerated backend
+behavior observed in qualification test" above. That migration is now fully done and
+this issue is still present (reconfirmed 2026-07-22, see the Update section below) --
+the mitigation below is the actual remaining work, not blocked on anything else anymore.
 
 **Symptom:** `patlak_ktrans_brain_auto_vs_cpu` / `_auto_vs_matlab`
 (`tests/python/test_dce_pipeline_parity_metrics.py::test_bbb_p19_region_parity`, model
@@ -208,6 +211,45 @@ patlak+`brain` in the parity test (matching the existing tofts+`gm` precedent al
 issue, not a fitter bug to chase further right now.
 
 See also: `parity-whole-brain-roi-noise` and `parity-backend-divergence` memory notes.
+
+## Update (2026-07-22): tv-default steady-state rollout re-triggers this, plus new residuals
+
+From the (now-archived) `steady-state-tv-default` initiative
+(`docs/project-management/projects/archived/steady-state-tv-default/STATUS.md`): a new
+on-demand diagnostic (`tests/python/run_baseline_end_reliability.py`) run against 224 real
+AIFArtist-rated sessions showed the `tv` steady-state-end detector far outperforming
+MATLAB's current default (`piecewise_constant`/`find_end_ss`): ~88-93% accuracy vs. ~0%.
+`tv` was ported to MATLAB (`dce/find_end_ss_tv.m`, verified numerically identical to
+Python's `_tv_baseline_end` on 6 curves including a real one -- permanent test
+`tests/python/test_find_end_ss_tv_matlab_parity.py`) and wired as both languages' default.
+Two unrelated, pre-existing MATLAB bugs in `FXLfit_generic.m`'s Patlak/GPU branch were
+found and fixed along the way (dead "ANIMAL study" ID-matching code referencing an
+undefined `ids` variable; a `constraint_type`/`constraint_types` typo) -- both confirmed
+independent of the steady-state change by reproducing them with the *old* algorithm first.
+
+**As of this note, none of the above is committed** (working-tree only, `dev` branch).
+
+Regenerating `sub-10bbbdownsample`'s matlabref maps under the new `tv` window and rerunning
+`pytest -m parity` surfaced:
+
+1. **`patlak_ktrans_brain` now fails on the *gated* `_cpu_vs_matlab` (corr=0.032) and
+   `_auto_vs_matlab` (corr=0.878) checks, not just the previously-known ungated
+   `_auto_vs_cpu` check documented above.** This is very likely the *same* tabled
+   single-voxel non-identifiability issue, just pushed over the gating threshold by the
+   window shift -- GM/WM still pass fine (as they always have, since they exclude the
+   problem voxel), and nothing above about root cause or mitigation needs revisiting.
+   **This is the fastest lead for whoever picks this up**: apply the already-decided GM/WM-
+   style gating exception for patlak+brain (still not implemented) and rerun.
+2. **New, not yet root-caused:** `tofts_roi_xls` (`mae=0.032908, max_abs_err=0.105665`,
+   limit `0.03`) and `tissue_uptake_roi_xls` (`mae=0.029032, max_abs_err=0.118740`, limit
+   `0.05`) now fail under `test_bbb_p19_roi_xls_parity`; `ex_tofts_roi_xls` and
+   `patlak_roi_xls` both still pass. No prior writeup covers these two -- start by checking
+   whether the `tv`-derived window shifted the ROI-mean baseline/injection timing enough to
+   matter for these two models specifically (both fit from an ROI-averaged curve, unlike
+   the per-voxel check above).
+
+Full repro commands (matlabref regeneration, the exact test invocations) are in the
+archived `steady-state-tv-default/STATUS.md`.
 
 ## Testing Gap Analysis
 The CPU-vs-CPUfit divergence and weighted-AIF side effects were not caught early because:

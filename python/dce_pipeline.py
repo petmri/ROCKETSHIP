@@ -1506,7 +1506,7 @@ def _resolve_baseline_window(
         used_method = "aif_sidecar"
         end_source = f"aif_sidecar:SteadyStateEndTimeIndex:{sidecar_path}"
     else:
-        auto_method = auto_method_requested if auto_method_requested != "none" else "piecewise_constant"
+        auto_method = auto_method_requested if auto_method_requested != "none" else "tv"
         if stlv is None:
             raise ValueError(
                 "stage_overrides.steady_state_auto_method requires Stage-A AIF signal data to estimate baseline end"
@@ -1522,7 +1522,7 @@ def _resolve_baseline_window(
         end_1b = int(auto_details["end_ss_1b"])
         used_method = auto_method
         if auto_method_requested == "none":
-            end_source = "default_auto_method:piecewise_constant"
+            end_source = "default_auto_method:tv"
         else:
             end_source = f"steady_state_auto_method:{auto_method}"
 
