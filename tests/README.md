@@ -136,6 +136,9 @@ python tests/python/run_dce_benchmark.py                       # benchmarks
 python tests/python/run_dce_postfit_analysis.py --analysis ftest --region roi \
   --result lower_model_fit_postfit_arrays.npz --result higher_model_fit_postfit_arrays.npz \
   --output-dir /tmp/dce_postfit_ftest --print-summary-json
+python tests/python/run_baseline_end_reliability.py \
+  --derivatives-root tests/data/BIDS_test/derivatives --raw-root tests/data/BIDS_test/rawdata \
+  --output-dir out/baseline_end_reliability   # end-baseline detector accuracy vs AIFArtist-rated GT
 ```
 
 Generate Part E NPZ inputs from Stage D with `stage_overrides.write_postfit_arrays=true`.
