@@ -29,6 +29,7 @@ import sys
 from typing import List, Tuple
 
 import numpy as np
+from scipy.stats import spearmanr
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_REFERENCE_ROOT = (
@@ -41,11 +42,15 @@ DEFAULT_REFERENCE_ROOT = (
 # to MATLAB release / OS / parfor worker count, occasionally blowing up to huge values in
 # a voxel or two even though the fit itself is unchanged (see dce_preferences.txt's tight
 # voxel_MaxIter=voxel_MaxFunEvals=50 budget, and existing 2CXM/ve non-identifiability
-# notes). A handful of such outliers can swing max-abs-diff to something enormous while
-# barely moving correlation over the other several thousand voxels. Gate on correlation
-# only (robust to a few outliers at this sample size); a genuine algorithm change (like
-# the steady-state window bug this guard exists to catch) collapses corr to ~0/negative,
-# far below this margin. Max-abs-diff is still reported for debugging, just not gated.
+# notes). Gate on rank (Spearman) correlation, not Pearson: a handful of such outliers
+# barely move ranks over several thousand voxels, but Pearson is a sum-of-products
+# statistic, so a single voxel a few orders of magnitude off the rest dominates it and
+# can collapse it even though every other voxel agrees almost exactly (observed: one
+# near-singular tofts ve CI voxel swung Pearson corr from ~1.0 to 0.21 on a platform
+# where MATLAB's Jacobian inversion landed on the unstable side for that voxel). A
+# genuine algorithm change (like the steady-state window bug this guard exists to catch)
+# still collapses Spearman corr to ~0/negative, far below this margin. Max-abs-diff is
+# still reported for debugging, just not gated.
 CORR_MIN = 0.9
 
 
@@ -65,7 +70,7 @@ def _compare_map(reference_path: Path, candidate_path: Path) -> Tuple[str, float
     if n < 2:
         return ("collapsed", float("nan"), float("nan"), n)
     x, y = ref[mask], cand[mask]
-    corr = float(np.corrcoef(x, y)[0, 1]) if np.std(x) > 0 and np.std(y) > 0 else float("nan")
+    corr = float(spearmanr(x, y).correlation) if np.std(x) > 0 and np.std(y) > 0 else float("nan")
     max_abs_diff = float(np.max(np.abs(x - y)))
     return ("ok", corr, max_abs_diff, n)
 
