@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DATASET = REPO_ROOT / "tests/data" / "ci_fixtures" / "dce" / "downsample_x2_bids"
+DEFAULT_DATASET = REPO_ROOT / "tests/data" / "BIDS_test"
 ALL_MODELS = ["tofts", "ex_tofts", "patlak", "tissue_uptake", "two_cxm", "fxr", "auc", "nested", "FXL_rr"]
 ALL_CONFIGS = ["matlab_cpu", "matlab_gpufit", "python_cpu", "python_cpufit", "python_gpufit"]
 
@@ -41,7 +41,7 @@ def _parse_args() -> argparse.Namespace:
         default=DEFAULT_DATASET,
         help=f"BIDS-style dataset root (default: {DEFAULT_DATASET})",
     )
-    parser.add_argument("--subject", default="sub-01", help="Subject ID within dataset root (default: sub-01)")
+    parser.add_argument("--subject", default="sub-02downsample", help="Subject ID within dataset root (default: sub-02downsample)")
     parser.add_argument("--session", default="ses-01", help="Session ID within dataset root (default: ses-01)")
     parser.add_argument(
         "--models",
@@ -298,8 +298,6 @@ def _python_config_payload(
             "aif_curve_mode": "fitted",
             "time_smoothing": "none",
             "time_smoothing_window": 0,
-            "steady_state_start": 1,
-            "steady_state_end": 2,
             "snr_filter": 0.0,
         },
     }

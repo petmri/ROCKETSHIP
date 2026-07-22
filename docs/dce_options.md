@@ -49,7 +49,7 @@ For options in `stage_overrides`:
 - `write_postfit_arrays`: bool for optional Part E array export (`*_postfit_arrays.npz`)
 
 ### Preferences bridging
-- `use_dce_preferences`: bool to enable `dce_preferences.txt` defaults
+- `use_dce_preferences`: bool to enable `dce_preferences.txt` defaults (default: `false` — Python workflows use JSON defaults/config only; enable this to opt into the legacy MATLAB-style preference bridge). There is no CLI flag for the preference file; set `use_dce_preferences`/`dce_preferences_path` via `stage_overrides` (or `--set`).
 - `dce_preferences_path`: explicit path override
 - `force_cpu`: when backend is `auto`, force CPU path if non-zero
 
@@ -65,15 +65,26 @@ For options in `stage_overrides`:
   - Partial manual override with metadata JSON present is rejected (set all three or none).
 - `time_vector_path`, `timevectpath`, `timer_path`
 - MATLAB script toggle: `timevectyn` controls whether legacy `timevectpath` is used
-- `steady_state_start`, `steady_state_end`
-- `steady_state_auto_method`: explicit automatic baseline-end detector (used only when `steady_state_end` is not set)
+- `steady_state_start`, `steady_state_end`: manual pin, highest priority. Prefer the AIF
+  sidecar mechanism below for fixed/predictable runs instead of setting these directly;
+  this remains available as a low-level escape hatch.
+- AIF JSON sidecar `SteadyStateEndTimeIndex`: a `<file>.json` sidecar next to
+  `aif_files[0]` (same discovery convention as the DCE metadata sidecar: swap
+  `.nii`/`.nii.gz` for `.json`) may set a 1-based `SteadyStateEndTimeIndex` field to pin
+  a fixed, predictable baseline end (e.g. `{"SteadyStateEndTimeIndex": 3}`). This is the
+  documented way to get a fixed/reproducible run without disabling auto-detection for
+  everyone else; used when `steady_state_end` is not set, and takes precedence over
+  `steady_state_auto_method`.
+- `steady_state_auto_method`: automatic baseline-end detector, used only when neither
+  `steady_state_end` nor the AIF sidecar's `SteadyStateEndTimeIndex` is set
   - `legacy_sobel`: MATLAB `dce_auto_aif`-style global-signal Sobel/line-fit heuristic
   - `piecewise_constant`: MATLAB `find_end_ss`-style two-constant brute-force split with local-min backtrack
   - `glr`: GLR-like one-sided change-in-mean detector (ported from `synthetic_dce` `ismrm_submit/end_baseline_detect.py`)
   - `tv`: total-variation/fused-lasso style denoise + first significant upward jump detector (same source)
   - Aliases accepted: `legacy`, `dce_auto_aif`, `sobel`, `piecewise`, `find_end_ss`, `edge`, `find_end_ss_edge`, `tv`, `find_end_ss_tv`
-  - Manual `steady_state_end` takes precedence over `steady_state_auto_method`
-  - If neither `steady_state_end` nor `steady_state_auto_method` is set, Python defaults to `legacy_sobel`
+  - Precedence overall: `steady_state_end` > AIF sidecar `SteadyStateEndTimeIndex` > `steady_state_auto_method`
+  - If none of the above is set, Python defaults to `piecewise_constant` (MATLAB's own
+    default via `A_make_R1maps_func`'s `steadyStateTime=-2` → `find_end_ss`)
 - `start_time`, `end_time`, `start_time_min`, `end_time_min`
 - `start_injection_min`, `end_injection_min`
 - MATLAB script aliases: `start_injection`, `end_injection` (min)
@@ -99,6 +110,12 @@ For options in `stage_overrides`:
 ### Stage D fit controls
 - `time_smoothing`, `time_smoothing_window`
 - `fxr_fw`
+- `write_param_maps`: bool (default `true`) — write per-voxel parameter map NIfTIs.
+- `fit_voxels`: bool (default `true`). Set `false` for **ROI-only mode**: skip the per-voxel fit and
+  fit only each ROI's averaged concentration curve (average-then-fit, matching MATLAB). Much faster,
+  and for nonlinear models the pre-fit averaging reduces noise. Requires `roi_files`; parameter maps
+  are not written. Each ROI is averaged over its intersection with the primary fit region
+  (`roi_files[0]`), so make `roi_files[0]` the encompassing ROI (e.g. the whole-brain mask).
 - `time_unit` / `timer_unit` (optional direct-fit hint): `minutes|seconds`
   - No implicit or runtime-selectable algorithm switching.
   - `model_2cxm_fit` uses the OSIPI LEK-style resampled fit path.

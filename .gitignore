@@ -209,3 +209,12 @@ external_programs/ModelID.m
 external_programs/libCpufit.*
 external_programs/libGpufit.*
 
+
+# CI drift-guard: freshly regenerated baseline candidate (never committed)
+_ci_baseline_candidate/
+
+# Local runner scratch output (never committed)
+RUNNER_DATA/
+
+# Reference papers (copyrighted PDFs; cited by DOI, not committed)
+tests/data/osipi/reference/*.pdf

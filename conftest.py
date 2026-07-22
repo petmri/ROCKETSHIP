@@ -9,20 +9,6 @@ import pytest
 def pytest_addoption(parser: pytest.Parser) -> None:
     group = parser.getgroup("rocketship parity")
     group.addoption(
-        "--run-parity",
-        "--parity",
-        action="store_true",
-        default=False,
-        help="Enable dataset-backed parity tests. Alias: --parity",
-    )
-    group.addoption(
-        "--run-full-parity",
-        "--full-parity",
-        action="store_true",
-        default=False,
-        help="Enable full-volume parity tests (slow). Alias: --full-parity",
-    )
-    group.addoption(
         "--run-multi-model-backend-parity",
         "--mm-parity",
         action="store_true",
@@ -80,17 +66,29 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     group.addoption("--parity-cpu-optional-models", "--cpu-opt-models", action="store", default="patlak")
     group.addoption("--parity-require-all-models", "--all-models", action="store_true", default=False)
     group.addoption(
-        "--run-osipi-slow",
-        "--osipi-slow",
-        action="store_true",
-        default=False,
-        help="Enable long-running OSIPI reliability fits. Alias: --osipi-slow",
-    )
-    group.addoption(
         "--run-qualification",
         action="store_true",
         default=False,
         help="Enable dataset-level BIDS qualification tests.",
+    )
+    group.addoption(
+        "--parity-suite",
+        action="store",
+        default="standard",
+        help=(
+            "Comma-set of parity suites to run: standard (default, gated tofts/patlak Ktrans), "
+            "allmodels (adds reported-only ex_tofts/tissue_uptake/2cxm), or all."
+        ),
+    )
+    group.addoption(
+        "--parity-thresholds",
+        action="store",
+        default="",
+        help=(
+            "Optional path to a JSON file overriding parity gate thresholds "
+            "(keys as in tests/python/parity_thresholds_default.json). "
+            "Preferred over the individual --parity-*-corr-min/-mse-max flags."
+        ),
     )
     group.addoption(
         "--run-runtime-parity",
@@ -145,23 +143,21 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 
 
 @pytest.fixture(scope="session")
-def run_parity(request: pytest.FixtureRequest) -> bool:
-    return bool(request.config.getoption("--run-parity"))
-
-
-@pytest.fixture(scope="session")
-def run_full_parity(request: pytest.FixtureRequest) -> bool:
-    return bool(request.config.getoption("--run-full-parity"))
-
-
-@pytest.fixture(scope="session")
 def run_multi_model_backend_parity(request: pytest.FixtureRequest) -> bool:
     return bool(request.config.getoption("--run-multi-model-backend-parity"))
 
 
 @pytest.fixture(scope="session")
-def run_osipi_slow(request: pytest.FixtureRequest) -> bool:
-    return bool(request.config.getoption("--run-osipi-slow"))
+def parity_suite(request: pytest.FixtureRequest) -> set[str]:
+    raw = str(request.config.getoption("--parity-suite") or "standard")
+    tokens = {t.strip().lower() for t in raw.split(",") if t.strip()}
+    if "all" in tokens:
+        tokens |= {"standard", "allmodels"}
+    # Back-compat: the deprecated multi-model flag implies the allmodels suite.
+    if request.config.getoption("--run-multi-model-backend-parity"):
+        tokens |= {"allmodels"}
+    tokens.add("standard")  # the gated standard suite is always part of a parity run
+    return tokens
 
 
 @pytest.fixture(scope="session")
@@ -232,7 +228,7 @@ def parity_summary_dir(request: pytest.FixtureRequest, repo_root: Path) -> Path 
 @pytest.fixture(scope="session")
 def parity_thresholds(request: pytest.FixtureRequest) -> dict:
     cfg = request.config
-    return {
+    values = {
         "ve_ktrans_min": float(cfg.getoption("--parity-ve-ktrans-min")),
         "downsample_ktrans_corr_min": float(cfg.getoption("--parity-downsample-ktrans-corr-min")),
         "downsample_ktrans_mse_max": float(cfg.getoption("--parity-downsample-ktrans-mse-max")),
@@ -256,3 +252,20 @@ def parity_thresholds(request: pytest.FixtureRequest) -> dict:
         "cpu_optional_models_raw": str(cfg.getoption("--parity-cpu-optional-models") or "").strip(),
         "require_all_models": bool(cfg.getoption("--parity-require-all-models")),
     }
+    # Optional JSON override (preferred single-file surface). Overlays only the keys present.
+    thresholds_path = str(cfg.getoption("--parity-thresholds") or "").strip()
+    if thresholds_path:
+        import json
+
+        path = Path(thresholds_path).expanduser()
+        if not path.is_absolute():
+            path = (Path(__file__).resolve().parent / path).resolve()
+        overrides = json.loads(path.read_text(encoding="utf-8"))
+        for key, val in overrides.items():
+            if key.startswith("_"):
+                continue
+            if key in values and isinstance(values[key], float):
+                values[key] = float(val)
+            else:
+                values[key] = val
+    return values

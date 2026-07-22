@@ -8,6 +8,7 @@ from typing import Dict, Iterable, List, Optional
 import numpy as np
 from scipy.interpolate import interp1d
 from scipy.optimize import curve_fit, least_squares
+from scipy.stats import t as _student_t
 
 
 def _safe_float_setting(settings: Dict[str, object], key: str, default: float) -> float:
@@ -147,6 +148,70 @@ def _least_squares_kwargs(settings: Dict[str, object], default_max_nfev: int) ->
     if loss != "linear":
         kwargs["loss"] = loss
     return kwargs
+
+
+def _ci_stderrs_from_covariance(cov: np.ndarray) -> np.ndarray:
+    """Standard errors from a parameter covariance matrix (NaN where undefined)."""
+    var = np.asarray(np.diag(cov), dtype=float)
+    return np.sqrt(np.where(np.isfinite(var) & (var >= 0.0), var, np.nan))
+
+
+def _ci_from_stderrs(
+    estimates: np.ndarray,
+    stderrs: np.ndarray,
+    dof: int,
+    *,
+    level: float = 0.95,
+) -> tuple[List[float], List[float]]:
+    """Two-sided CI bounds: estimate +/- t(1-alpha/2, dof) * stderr.
+
+    Returns (lows, highs) in the estimates' own units. NaN entries where the
+    standard error is undefined, mirroring MATLAB confint on a degenerate fit.
+    """
+    est = np.asarray(estimates, dtype=float)
+    se = np.asarray(stderrs, dtype=float)
+    if dof <= 0:
+        nan = [float("nan")] * est.size
+        return nan, nan
+    tval = float(_student_t.ppf(1.0 - (1.0 - level) / 2.0, dof))
+    lows: List[float] = []
+    highs: List[float] = []
+    for i in range(est.size):
+        s = float(se[i])
+        if not math.isfinite(s):
+            lows.append(float("nan"))
+            highs.append(float("nan"))
+        else:
+            lows.append(float(est[i] - tval * s))
+            highs.append(float(est[i] + tval * s))
+    return lows, highs
+
+
+def _ci_bounds_from_fit(fit, *, level: float = 0.95) -> tuple[List[float], List[float]]:
+    """95% CIs for a scipy ``least_squares`` result, matching MATLAB confint/nlparci.
+
+    Covariance = MSE * inv(J^T J) with MSE = SSE / (n_obs - n_params); the CI half
+    width is t(1-alpha/2, dof) * sqrt(diag(cov)). Returns (lows, highs) in the fit's
+    own parameter units, or all-NaN where the covariance is undefined (dof <= 0,
+    singular normal matrix, or non-finite variance).
+    """
+    x = np.asarray(fit.x, dtype=float)
+    p = int(x.size)
+    res = np.asarray(fit.fun, dtype=float).reshape(-1)
+    n_obs = int(res.size)
+    nan = [float("nan")] * p
+    dof = n_obs - p
+    if dof <= 0:
+        return nan, nan
+    jac = np.asarray(fit.jac, dtype=float)
+    if jac.ndim != 2 or jac.shape[0] != n_obs or jac.shape[1] != p:
+        return nan, nan
+    mse = float(np.dot(res, res)) / dof
+    try:
+        cov = mse * np.linalg.inv(jac.T @ jac)
+    except np.linalg.LinAlgError:
+        return nan, nan
+    return _ci_from_stderrs(x, _ci_stderrs_from_covariance(cov), dof, level=level)
 
 
 def _cumulative_trapz_values(y: List[float], t: List[float]) -> List[float]:
@@ -303,7 +368,7 @@ def _fit_2cxm_osipi_canonical(
     maxfev = int(_safe_float_setting(settings, "max_nfev", 4000.0))
 
     try:
-        fit, _ = curve_fit(
+        fit, pcov = curve_fit(
             lambda _t, vp, ve, fp, e: _two_cxm_curve_osipi(vp, ve, fp, e, cp_interp, t_interp),
             t_interp,
             ct_interp,
@@ -323,20 +388,59 @@ def _fit_2cxm_osipi_canonical(
     pred = _two_cxm_curve_osipi(vp, ve, fp_per_min_ml_per_ml, e, cp_interp, t_interp)
     sse = float(np.sum((pred - ct_interp) ** 2))
 
+    # CIs from curve_fit's covariance (fit coefficients are [vp, ve, fp, e]).
+    # Ktrans = E * Fp is derived, so its variance comes from the delta method.
+    #
+    # curve_fit (absolute_sigma=False) internally scales pcov by
+    # sse / (len(ct_interp) - n_params) -- i.e. by the *interpolated* grid's
+    # point count, not the number of actually acquired, independent DCE time
+    # points. ct_interp is a dense quadratic-resampled curve (OSIPI LEK
+    # convention, ~0.1s steps) that carries no more real information than the
+    # original samples it was interpolated from, so using its length as dof
+    # systematically understates the variance (and hence CI width). Rescale
+    # pcov to the real dof: cov_real = pcov * dof_interp / dof_real.
+    cov = np.asarray(pcov, dtype=float)
+    dof_interp = int(len(ct_interp)) - 4
+    dof = int(len(t_min_vec)) - 4
+    if dof > 0 and dof_interp > 0:
+        cov = cov * (float(dof_interp) / float(dof))
+    else:
+        cov = np.full_like(cov, np.nan)
+
+    def _safe_se(value: float) -> float:
+        return math.sqrt(value) if (math.isfinite(value) and value >= 0.0) else float("nan")
+
+    var_ktrans = (
+        (e * e) * float(cov[2, 2])
+        + (fp_per_min_ml_per_ml ** 2) * float(cov[3, 3])
+        + 2.0 * e * fp_per_min_ml_per_ml * float(cov[2, 3])
+    )
+    estimates = np.array([ktrans_per_min, ve, vp, fp_per_min_ml_per_ml], dtype=float)
+    stderrs = np.array(
+        [
+            _safe_se(var_ktrans),
+            _safe_se(float(cov[1, 1])),
+            _safe_se(float(cov[0, 0])),
+            _safe_se(float(cov[2, 2])),
+        ],
+        dtype=float,
+    )
+    ci_lo, ci_hi = _ci_from_stderrs(estimates, stderrs, dof)
+
     return [
         ktrans_per_min,
         ve,
         vp,
         fp_per_min_ml_per_ml,
         sse,
-        ktrans_per_min,
-        ktrans_per_min,
-        ve,
-        ve,
-        vp,
-        vp,
-        fp_per_min_ml_per_ml,
-        fp_per_min_ml_per_ml,
+        ci_lo[0],
+        ci_hi[0],
+        ci_lo[1],
+        ci_hi[1],
+        ci_lo[2],
+        ci_hi[2],
+        ci_lo[3],
+        ci_hi[3],
     ]
 
 
@@ -641,82 +745,20 @@ def model_patlak_fit(
 ) -> List[float]:
     """Python inverse-fit counterpart of `dce/model_patlak.m`.
 
-    Mirrors MATLAB CPU behavior: linear Patlak estimate for start-point,
-    then nonlinear least-squares on the forward Patlak model.
+    Thin single-voxel wrapper over the shared Stage-D fit machinery in
+    `dce_fit_backends` (the same candidate-assembly/multi-start code path
+    used by the accelerated cpufit/gpufit backends for this model).
     """
-    ct_vec = [float(v) for v in ct]
-    cp_vec = [float(v) for v in cp]
-    t_vec = [float(v) for v in timer]
+    from dce_fit_backends import fit_patlak_stage_d  # local: avoids an import cycle
 
-    if not (len(ct_vec) == len(cp_vec) == len(t_vec)):
-        raise ValueError(
-            f"ct/cp/timer lengths differ: {len(ct_vec)} / {len(cp_vec)} / {len(t_vec)}"
-        )
-    if len(t_vec) == 0:
-        raise ValueError("ct/cp/timer must be non-empty")
-
-    settings = {
-        "lower_limit_ktrans": 1e-7,
-        "upper_limit_ktrans": 2.0,
-        "initial_value_ktrans": 2e-4,
-        "lower_limit_vp": 1e-3,
-        "upper_limit_vp": 1.0,
-        "initial_value_vp": 0.02,
-        "max_nfev": 2000,
-        "tol_fun": 1e-12,
-        "tol_x": 1e-6,
-        "robust": "off",
-    }
-    if prefs:
-        settings.update(prefs)
-
-    # Match MATLAB path: use linear Patlak estimate as nonlinear start point.
-    try:
-        estimate = model_patlak_linear(ct_vec, cp_vec, t_vec)
-        ktrans_start = float(estimate[0])
-        vp_start = float(estimate[1])
-        if math.isfinite(ktrans_start):
-            settings["initial_value_ktrans"] = ktrans_start
-        if math.isfinite(vp_start):
-            settings["initial_value_vp"] = vp_start
-    except Exception:
-        pass
-
-    def residual(params: List[float]) -> List[float]:
-        ktrans, vp = params
-        pred = model_patlak_cfit(ktrans, vp, cp_vec, t_vec)
-        return [pred[i] - ct_vec[i] for i in range(len(ct_vec))]
-
-    lb = [
-        float(settings["lower_limit_ktrans"]),
-        float(settings["lower_limit_vp"]),
-    ]
-    ub = [
-        float(settings["upper_limit_ktrans"]),
-        float(settings["upper_limit_vp"]),
-    ]
-
-    starts = [
-        [
-            float(settings["initial_value_ktrans"]),
-            float(settings["initial_value_vp"]),
-        ],
-        [
-            float(settings["initial_value_ktrans"]) * 10.0,
-            float(settings["initial_value_vp"]),
-        ],
-        [
-            float(settings["initial_value_ktrans"]) * 100.0,
-            float(settings["initial_value_vp"]),
-        ],
-    ]
-
-    lsq_kwargs = _least_squares_kwargs(settings, default_max_nfev=2000)
-    fit, sse = _best_fit_over_starts(residual, starts, lb, ub, lsq_kwargs)
-    ktrans = float(fit.x[0])
-    vp = float(fit.x[1])
-
-    return [ktrans, vp, sse, ktrans, ktrans, vp, vp]
+    row = fit_patlak_stage_d(
+        np.asarray([float(v) for v in ct], dtype=np.float64),
+        np.asarray([float(v) for v in cp], dtype=np.float64),
+        np.asarray([float(v) for v in timer], dtype=np.float64),
+        prefs,
+        backend="python",
+    )
+    return [float(v) for v in row]
 
 
 def model_tofts_fit(
@@ -727,62 +769,23 @@ def model_tofts_fit(
 ) -> List[float]:
     """Python inverse-fit counterpart of `dce/model_tofts.m`.
 
+    Thin single-voxel wrapper over the shared Stage-D fit machinery in
+    `dce_fit_backends` (the same candidate-assembly/multi-start code path
+    used by the accelerated cpufit/gpufit backends for this model).
+
     Returns MATLAB-style 7-value output:
       [Ktrans, ve, sse, ktrans_ci_low, ktrans_ci_high, ve_ci_low, ve_ci_high]
-
-    Confidence interval values are approximated as the fit estimates for now.
-    This preserves output shape and keeps parity checks stable for synthetic data.
     """
-    ct_vec = [float(v) for v in ct]
-    cp_vec = [float(v) for v in cp]
-    t_vec = [float(v) for v in timer]
+    from dce_fit_backends import fit_tofts_stage_d  # local: avoids an import cycle
 
-    if not (len(ct_vec) == len(cp_vec) == len(t_vec)):
-        raise ValueError(
-            f"ct/cp/timer lengths differ: {len(ct_vec)} / {len(cp_vec)} / {len(t_vec)}"
-        )
-    if len(t_vec) == 0:
-        raise ValueError("ct/cp/timer must be non-empty")
-
-    # Defaults aligned with tests/matlab/helpers/default_dce_fit_prefs.m
-    settings = {
-        "lower_limit_ktrans": 1e-7,
-        "upper_limit_ktrans": 2.0,
-        "initial_value_ktrans": 2e-4,
-        "lower_limit_ve": 0.02,
-        "upper_limit_ve": 1.0,
-        "initial_value_ve": 0.2,
-        "max_nfev": 2000,
-        "tol_fun": 1e-12,
-        "tol_x": 1e-6,
-        "robust": "off",
-    }
-    if prefs:
-        settings.update(prefs)
-
-    def residual(params: List[float]) -> List[float]:
-        ktrans, ve = params
-        pred = model_tofts_cfit(ktrans, ve, cp_vec, t_vec)
-        return [pred[i] - ct_vec[i] for i in range(len(ct_vec))]
-
-    x0 = [float(settings["initial_value_ktrans"]), float(settings["initial_value_ve"])]
-    lb = [float(settings["lower_limit_ktrans"]), float(settings["lower_limit_ve"])]
-    ub = [float(settings["upper_limit_ktrans"]), float(settings["upper_limit_ve"])]
-    lsq_kwargs = _least_squares_kwargs(settings, default_max_nfev=2000)
-
-    fit = least_squares(
-        residual,
-        x0=x0,
-        bounds=(lb, ub),
-        **lsq_kwargs,
+    row = fit_tofts_stage_d(
+        np.asarray([float(v) for v in ct], dtype=np.float64),
+        np.asarray([float(v) for v in cp], dtype=np.float64),
+        np.asarray([float(v) for v in timer], dtype=np.float64),
+        prefs,
+        backend="python",
     )
-
-    ktrans = float(fit.x[0])
-    ve = float(fit.x[1])
-    sse = float(sum(v * v for v in fit.fun))
-
-    # Placeholder CI values: match output shape expected by parity contracts.
-    return [ktrans, ve, sse, ktrans, ktrans, ve, ve]
+    return [float(v) for v in row]
 
 
 def model_extended_tofts_fit(
@@ -791,77 +794,22 @@ def model_extended_tofts_fit(
     timer: Iterable[float],
     prefs: Optional[Dict[str, float]] = None,
 ) -> List[float]:
-    """Python inverse-fit counterpart of `dce/model_extended_tofts.m`."""
-    ct_vec = [float(v) for v in ct]
-    cp_vec = [float(v) for v in cp]
-    t_vec = [float(v) for v in timer]
+    """Python inverse-fit counterpart of `dce/model_extended_tofts.m`.
 
-    if not (len(ct_vec) == len(cp_vec) == len(t_vec)):
-        raise ValueError(
-            f"ct/cp/timer lengths differ: {len(ct_vec)} / {len(cp_vec)} / {len(t_vec)}"
-        )
-    if len(t_vec) == 0:
-        raise ValueError("ct/cp/timer must be non-empty")
+    Thin single-voxel wrapper over the shared Stage-D fit machinery in
+    `dce_fit_backends` (the same candidate-assembly/multi-start code path
+    used by the accelerated cpufit/gpufit backends for this model).
+    """
+    from dce_fit_backends import fit_ex_tofts_stage_d  # local: avoids an import cycle
 
-    settings = {
-        "lower_limit_ktrans": 1e-7,
-        "upper_limit_ktrans": 2.0,
-        "initial_value_ktrans": 2e-4,
-        "lower_limit_ve": 0.02,
-        "upper_limit_ve": 1.0,
-        "initial_value_ve": 0.2,
-        "lower_limit_vp": 1e-3,
-        "upper_limit_vp": 1.0,
-        "initial_value_vp": 0.02,
-        "max_nfev": 2000,
-        "tol_fun": 1e-12,
-        "tol_x": 1e-6,
-        "robust": "off",
-    }
-    if prefs:
-        settings.update(prefs)
-
-    def residual(params: List[float]) -> List[float]:
-        ktrans, ve, vp = params
-        pred = model_extended_tofts_cfit(ktrans, ve, vp, cp_vec, t_vec)
-        return [pred[i] - ct_vec[i] for i in range(len(ct_vec))]
-
-    lb = [
-        float(settings["lower_limit_ktrans"]),
-        float(settings["lower_limit_ve"]),
-        float(settings["lower_limit_vp"]),
-    ]
-    ub = [
-        float(settings["upper_limit_ktrans"]),
-        float(settings["upper_limit_ve"]),
-        float(settings["upper_limit_vp"]),
-    ]
-    starts = [
-        [
-            float(settings["initial_value_ktrans"]),
-            float(settings["initial_value_ve"]),
-            float(settings["initial_value_vp"]),
-        ],
-        [
-            float(settings["initial_value_ktrans"]) * 10.0,
-            float(settings["initial_value_ve"]),
-            float(settings["initial_value_vp"]),
-        ],
-        [
-            float(settings["initial_value_ktrans"]) * 100.0,
-            float(settings["initial_value_ve"]),
-            float(settings["initial_value_vp"]),
-        ],
-    ]
-
-    lsq_kwargs = _least_squares_kwargs(settings, default_max_nfev=2000)
-    fit, sse = _best_fit_over_starts(residual, starts, lb, ub, lsq_kwargs)
-    ktrans = float(fit.x[0])
-    ve = float(fit.x[1])
-    vp = float(fit.x[2])
-
-    # Placeholder CI values: match MATLAB output shape.
-    return [ktrans, ve, vp, sse, ktrans, ktrans, ve, ve, vp, vp]
+    row = fit_ex_tofts_stage_d(
+        np.asarray([float(v) for v in ct], dtype=np.float64),
+        np.asarray([float(v) for v in cp], dtype=np.float64),
+        np.asarray([float(v) for v in timer], dtype=np.float64),
+        prefs,
+        backend="python",
+    )
+    return [float(v) for v in row]
 
 
 def _clip_start_to_bounds(start: List[float], lb: List[float], ub: List[float]) -> List[float]:
@@ -940,8 +888,8 @@ def model_vp_fit(
     fit, sse = _best_fit_over_starts(residual, starts, lb, ub, lsq_kwargs)
     vp = float(fit.x[0])
 
-    # Placeholder CI values: match MATLAB output shape.
-    return [vp, sse, vp, vp]
+    ci_lo, ci_hi = _ci_bounds_from_fit(fit)
+    return [vp, sse, ci_lo[0], ci_hi[0]]
 
 
 def model_tissue_uptake_fit(
@@ -952,147 +900,21 @@ def model_tissue_uptake_fit(
 ) -> List[float]:
     """Python inverse-fit counterpart of `dce/model_tissue_uptake.m`.
 
-    Internal canonical units:
-      - time in minutes
-      - ktrans/fp in per-minute
-
-    Returned ktrans/fp values are converted back to match input timer units.
+    Thin single-voxel wrapper over the shared Stage-D fit machinery in
+    `dce_fit_backends` (the same candidate-assembly/multi-start code path
+    used by the accelerated cpufit/gpufit backends for this model).
     """
-    ct_vec = [float(v) for v in ct]
-    cp_vec = [float(v) for v in cp]
-    t_vec = [float(v) for v in timer]
-
-    if not (len(ct_vec) == len(cp_vec) == len(t_vec)):
-        raise ValueError(
-            f"ct/cp/timer lengths differ: {len(ct_vec)} / {len(cp_vec)} / {len(t_vec)}"
-        )
-    if len(t_vec) == 0:
-        raise ValueError("ct/cp/timer must be non-empty")
-
     _reject_algorithm_override(prefs, "tissue_uptake")
-    timer_min, _, rate_in_to_min, rate_min_to_output = _canonical_time_context(
-        t_vec,
+    from dce_fit_backends import fit_tissue_uptake_stage_d  # local: avoids an import cycle
+
+    row = fit_tissue_uptake_stage_d(
+        np.asarray([float(v) for v in ct], dtype=np.float64),
+        np.asarray([float(v) for v in cp], dtype=np.float64),
+        np.asarray([float(v) for v in timer], dtype=np.float64),
         prefs,
+        backend="python",
     )
-
-    defaults = {
-        "lower_limit_ktrans": 1e-7,
-        "upper_limit_ktrans": 2.0,
-        "initial_value_ktrans": 2e-4,
-        "lower_limit_fp": 1e-3,
-        "upper_limit_fp": 100.0,
-        "initial_value_fp": 0.2,
-        "lower_limit_tp": 0.0,
-        "upper_limit_tp": 1e6,
-        "initial_value_tp": 0.05,
-        "max_nfev": 2000,
-        "tol_fun": 1e-12,
-        "tol_x": 1e-6,
-        "robust": "off",
-    }
-    settings = _merge_prefs_in_canonical_units(
-        defaults,
-        prefs,
-        rate_keys=[
-            "lower_limit_ktrans",
-            "upper_limit_ktrans",
-            "initial_value_ktrans",
-            "lower_limit_fp",
-            "upper_limit_fp",
-            "initial_value_fp",
-        ],
-        time_constant_keys=[
-            "lower_limit_tp",
-            "upper_limit_tp",
-            "initial_value_tp",
-        ],
-        rate_in_to_min=rate_in_to_min,
-    )
-
-    def residual(params: List[float]) -> List[float]:
-        ktrans, fp, tp = params
-        pred = model_tissue_uptake_cfit(ktrans, fp, tp, cp_vec, timer_min)
-        return [pred[i] - ct_vec[i] for i in range(len(ct_vec))]
-
-    lb = [
-        float(settings["lower_limit_ktrans"]),
-        float(settings["lower_limit_fp"]),
-        float(settings["lower_limit_tp"]),
-    ]
-    ub = [
-        float(settings["upper_limit_ktrans"]),
-        float(settings["upper_limit_fp"]),
-        float(settings["upper_limit_tp"]),
-    ]
-    k_seed = float(settings["initial_value_ktrans"])
-    fp_seed = max(float(settings["initial_value_fp"]), k_seed * 1.25)
-    tp_seed = float(settings["initial_value_tp"])
-
-    starts = [
-        [
-            k_seed,
-            fp_seed,
-            tp_seed,
-        ],
-        [
-            k_seed * 2.0,
-            max(fp_seed * 1.5, k_seed * 1.6),
-            tp_seed,
-        ],
-        [
-            max(k_seed * 0.5, float(settings["lower_limit_ktrans"])),
-            max(fp_seed * 0.8, k_seed * 1.25),
-            min(tp_seed * 2.0, float(settings["upper_limit_tp"])),
-        ],
-        [
-            min(k_seed * 4.0, float(settings["upper_limit_ktrans"])),
-            max(fp_seed * 2.0, k_seed * 2.5),
-            tp_seed,
-        ],
-    ]
-
-    try:
-        patlak = model_patlak_linear(ct_vec, cp_vec, timer_min)
-        patlak_k = float(patlak[0])
-        if math.isfinite(patlak_k):
-            patlak_k = min(max(patlak_k, lb[0]), ub[0])
-            starts.append(
-                [
-                    patlak_k,
-                    min(max(max(fp_seed, patlak_k * 1.25), lb[1]), ub[1]),
-                    min(max(tp_seed, lb[2]), ub[2]),
-                ]
-            )
-    except Exception:
-        pass
-
-    lsq_kwargs = _least_squares_kwargs(settings, default_max_nfev=2000)
-    fit, sse = _best_fit_over_starts(residual, starts, lb, ub, lsq_kwargs)
-    ktrans = float(fit.x[0])
-    fp = float(fit.x[1])
-    tp = float(fit.x[2])
-
-    if abs(fp - ktrans) < 1e-12:
-        ps = 1e8
-    else:
-        ps = ktrans * fp / (fp - ktrans)
-    vp = (fp + ps) * tp
-    ktrans_out = ktrans * rate_min_to_output
-    fp_out = fp * rate_min_to_output
-
-    # Placeholder CI values: match MATLAB output shape.
-    return [
-        ktrans_out,
-        fp_out,
-        vp,
-        sse,
-        ktrans_out,
-        ktrans_out,
-        fp_out,
-        fp_out,
-        vp,
-        vp,
-    ]
+    return [float(v) for v in row]
 
 
 def model_2cxm_fit(
@@ -1103,64 +925,23 @@ def model_2cxm_fit(
 ) -> List[float]:
     """Python inverse-fit counterpart of `dce/model_2cxm.m`.
 
-    Uses a single OSIPI LEK-style fit path with canonical internal units:
-      - time in minutes
-      - ktrans/fp in per-minute
-
-    Returned ktrans/fp values are converted back to match input timer units.
+    Thin single-voxel wrapper over the shared Stage-D fit machinery in
+    `dce_fit_backends` (the same candidate-assembly/multi-start code path
+    used by the accelerated cpufit/gpufit backends for this model).
     """
-    ct_vec = [float(v) for v in ct]
-    cp_vec = [float(v) for v in cp]
-    t_vec = [float(v) for v in timer]
-
-    if not (len(ct_vec) == len(cp_vec) == len(t_vec)):
-        raise ValueError(
-            f"ct/cp/timer lengths differ: {len(ct_vec)} / {len(cp_vec)} / {len(t_vec)}"
-        )
-    if len(t_vec) == 0:
-        raise ValueError("ct/cp/timer must be non-empty")
-
     _reject_algorithm_override(prefs, "2cxm")
-    timer_min, _, rate_in_to_min, rate_min_to_output = _canonical_time_context(
-        t_vec,
-        prefs,
-    )
+    from dce_fit_backends import fit_2cxm_stage_d  # local: avoids an import cycle
 
-    defaults = {
-        "lower_limit_ktrans": 1e-7,
-        "upper_limit_ktrans": 2.0,
-        "initial_value_ktrans": 2e-4,
-        "lower_limit_ve": 0.02,
-        "upper_limit_ve": 1.0,
-        "initial_value_ve": 0.2,
-        "lower_limit_vp": 1e-3,
-        "upper_limit_vp": 1.0,
-        "initial_value_vp": 0.02,
-        "lower_limit_fp": 1e-3,
-        "upper_limit_fp": 2.0,
-        "initial_value_fp": 20.0 / 100.0,
-        "max_nfev": 4000,
-    }
-    settings = _merge_prefs_in_canonical_units(
-        defaults,
+    row = fit_2cxm_stage_d(
+        np.asarray([float(v) for v in ct], dtype=np.float64),
+        np.asarray([float(v) for v in cp], dtype=np.float64),
+        np.asarray([float(v) for v in timer], dtype=np.float64),
         prefs,
-        rate_keys=[
-            "lower_limit_ktrans",
-            "upper_limit_ktrans",
-            "initial_value_ktrans",
-            "lower_limit_fp",
-            "upper_limit_fp",
-            "initial_value_fp",
-        ],
-        rate_in_to_min=rate_in_to_min,
+        backend="python",
     )
-
-    quick = _fit_2cxm_osipi_canonical(ct_vec, cp_vec, timer_min, settings=settings)
-    if quick is None:
+    if not math.isfinite(float(row[0])):
         raise ValueError("2cxm fit failed (requires >=3 strictly increasing time points).")
-    for idx in (0, 3, 5, 6, 11, 12):
-        quick[idx] = float(quick[idx]) * rate_min_to_output
-    return quick
+    return [float(v) for v in row]
 
 
 def model_fxr_fit(
@@ -1243,5 +1024,16 @@ def model_fxr_fit(
     tau = float(fit.x[2])
     sse = float(sum(v * v for v in fit.fun))
 
-    # Placeholder CI values: match output shape expected by parity contracts.
-    return [ktrans, ve, tau, sse, ktrans, ktrans, ve, ve, tau, tau]
+    ci_lo, ci_hi = _ci_bounds_from_fit(fit)
+    return [
+        ktrans,
+        ve,
+        tau,
+        sse,
+        ci_lo[0],
+        ci_hi[0],
+        ci_lo[1],
+        ci_hi[1],
+        ci_lo[2],
+        ci_hi[2],
+    ]

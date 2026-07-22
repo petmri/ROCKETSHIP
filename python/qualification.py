@@ -167,6 +167,23 @@ def _infer_vfa_frame_count(path: Path) -> int:
     raise ValueError(f"Unsupported VFA rank for frame counting: shape={arr.shape}")
 
 
+def _session_has_preprocessing_signature(session: BidsSession, run_t1: bool, run_dce: bool) -> bool:
+    """Whether a session carries any of the preprocessed derivatives the requested stages consume.
+
+    Dataset-level qualification runs only on preprocessed subjects. A session with none of the
+    signature derivatives (a raw-only subject, or a fit-only test fixture such as
+    ``sub-10bbbdownsample`` / ``sub-11tiny`` whose derivatives are reference maps rather than
+    pipeline inputs) is not a qualification subject and is skipped rather than failed. A subject
+    that *does* carry the signature but is missing a downstream output still fails, so genuine
+    preprocessing breakage is not masked.
+    """
+    if run_t1 and _find_one(session.derivatives_path / "anat", "*desc-bfczunified_VFA.nii*") is not None:
+        return True
+    if run_dce and _find_one(session.derivatives_path / "dce", "*desc-AIF_T1map.nii*") is not None:
+        return True
+    return False
+
+
 def _session_t1_inputs(session: BidsSession) -> Dict[str, Any]:
     anat_deriv = session.derivatives_path / "anat"
     anat_raw = session.rawdata_path / "anat"
@@ -464,6 +481,7 @@ def run_bids_qualification(config: QualificationRunConfig) -> Dict[str, Any]:
     warning_count = 0
     passed = 0
     failed = 0
+    skipped = 0
 
     for session in sessions:
         session_start = time.perf_counter()
@@ -479,6 +497,14 @@ def run_bids_qualification(config: QualificationRunConfig) -> Dict[str, Any]:
             "blockers": [],
             "warnings": [],
         }
+
+        if not _session_has_preprocessing_signature(session, config.run_t1, config.run_dce):
+            run["status"] = "skipped"
+            run["skipped_reason"] = "no preprocessed derivative inputs (not a qualification subject)"
+            run["duration_sec"] = float(time.perf_counter() - session_start)
+            skipped += 1
+            session_reports.append(run)
+            continue
 
         if config.run_t1:
             t1_report = _run_t1_for_session(session, session_dir / "t1")
@@ -518,6 +544,7 @@ def run_bids_qualification(config: QualificationRunConfig) -> Dict[str, Any]:
             "sessions_discovered": len(sessions),
             "sessions_passed": passed,
             "sessions_failed": failed,
+            "sessions_skipped": skipped,
             "blocker_count": blocker_count,
             "warning_count": warning_count,
             "run_t1": bool(config.run_t1),

@@ -1,38 +1,192 @@
 # OSIPI Accuracy Summary
 
-Computed from ROCKETSHIP fits against imported OSIPI datasets and compared to OSIPI posted peer-result aggregates.
+ROCKETSHIP DCE/T1 fits against the OSIPI digital reference objects, per fitting backend, gated on OSIPI's own published acceptance tolerances. Regenerate with `.venv/bin/python tests/data/osipi/reference/generate_osipi_summary.py`.
 
-- ROCKETSHIP datasets: `tests/data/osipi/...`
-- Peer reference summary: `tests/data/osipi/reference/osipi_peer_error_summary.json`
-- Peer source: https://github.com/OSIPI/DCE-DSC-MRI_TestResults (commit `23d3714797045d8103d5b5fa4f4c016840094dc0`)
-- Figures:
-  - `tests/data/osipi/reference/figures/osipi_accuracy_dros.png`
-  - `tests/data/osipi/reference/figures/osipi_accuracy_patlak_delay.png`
-  - `tests/data/osipi/reference/figures/osipi_accuracy_t1.png`
+## Fitting backends verified
 
-| Model | Dataset slice | Param | N | Our MAE | Our P95 | Our Max | Peer MAE | Peer P95 | Peer Max | MAE Ratio (Our/Peer) | Max Ratio (Our/Peer) | Within Peer Max | Notes |
-| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :---: | --- |
-| tofts | OSIPI Tofts DRO | Ktrans | 25 | 0.000791678 | 0.00174196 | 0.00223753 | 0.000965054 | 0.00248998 | 0.00368751 | 0.820 | 0.607 | yes |  |
-| tofts | OSIPI Tofts DRO | ve | 25 | 0.000722405 | 0.00190286 | 0.00424664 | 0.000849338 | 0.00211409 | 0.0042476 | 0.851 | 1.000 | yes |  |
-| etofts | OSIPI Extended Tofts DRO | Ktrans | 15 | 0.000307117 | 0.00128792 | 0.00183079 | 0.000367743 | 0.00156536 | 0.00351224 | 0.835 | 0.521 | yes |  |
-| etofts | OSIPI Extended Tofts DRO | ve | 15 | 0.000620012 | 0.00163846 | 0.00197435 | 0.00113827 | 0.00396572 | 0.00751087 | 0.545 | 0.263 | yes |  |
-| etofts | OSIPI Extended Tofts DRO | vp | 15 | 0.000270511 | 0.000956455 | 0.00130541 | 0.000400594 | 0.0013412 | 0.0022194 | 0.675 | 0.588 | yes |  |
-| patlak | OSIPI Patlak delay=0 | ps | 9 | 0.0001523 | 0.000352332 | 0.000378913 | 0.000164531 | 0.000378913 | 0.000479072 | 0.926 | 0.791 | yes |  |
-| patlak | OSIPI Patlak delay=0 | vp | 9 | 0.000612282 | 0.00138231 | 0.00176804 | 0.000539772 | 0.00176798 | 0.00197796 | 1.134 | 0.894 | yes |  |
-| patlak | OSIPI Patlak delay=5 | ps | 9 | 0.0210436 | 0.0400774 | 0.0402299 | 0.000164531 | 0.000378913 | 0.000479072 | 127.901 | 83.975 | no | delay fitting not implemented yet; run shown for gap visibility |
-| patlak | OSIPI Patlak delay=5 | vp | 9 | 0.0894346 | 0.166622 | 0.169393 | 0.000539772 | 0.00176798 | 0.00197796 | 165.690 | 85.640 | no | delay fitting not implemented yet; run shown for gap visibility |
-| 2cxm | OSIPI 2CXM delay=0 | ve | 24 | 0.0762075 | 0.0956351 | 0.8 | 0.00136397 | 0.00553435 | 0.0158681 | 55.872 | 50.416 | no | nonfinite fit failures=3 |
-| 2cxm | OSIPI 2CXM delay=0 | vp | 24 | 0.0712617 | 0.164448 | 0.235699 | 0.00132148 | 0.00617296 | 0.0185702 | 53.926 | 12.692 | no | nonfinite fit failures=3 |
-| 2cxm | OSIPI 2CXM delay=0 | fp | 24 | 38.7517 | 65.5378 | 123.782 | 0.21838 | 1.0296 | 1.94074 | 177.451 | 63.781 | no | nonfinite fit failures=3 |
-| 2cxm | OSIPI 2CXM delay=0 | ps | 24 | 0.0516094 | 0.109517 | 0.110708 | 0.002023 | 0.0140723 | 0.0186095 | 25.511 | 5.949 | no | nonfinite fit failures=3 |
-| 2cxm | OSIPI 2CXM delay=5 | ve | 24 | 0.039351 | 0.100049 | 0.108512 | 0.00136397 | 0.00553435 | 0.0158681 | 28.850 | 6.838 | no | delay fitting not implemented yet; run shown for gap visibility |
-| 2cxm | OSIPI 2CXM delay=5 | vp | 24 | 0.0834619 | 0.0989807 | 0.7151 | 0.00132148 | 0.00617296 | 0.0185702 | 63.158 | 38.508 | no | delay fitting not implemented yet; run shown for gap visibility |
-| 2cxm | OSIPI 2CXM delay=5 | fp | 24 | 86.5947 | 152.959 | 745.664 | 0.21838 | 1.0296 | 1.94074 | 396.533 | 384.217 | no | delay fitting not implemented yet; run shown for gap visibility |
-| 2cxm | OSIPI 2CXM delay=5 | ps | 24 | 0.0544201 | 0.11743 | 0.176333 | 0.002023 | 0.0140723 | 0.0186095 | 26.901 | 9.475 | no | delay fitting not implemented yet; run shown for gap visibility |
-| 2cum | OSIPI 2CUM delay=0 | vp | 27 | 0.00249536 | 0.00403755 | 0.00420339 | 0.000584325 | 0.0018815 | 0.00340002 | 4.270 | 1.236 | no | nonfinite fit failures=8 |
-| 2cum | OSIPI 2CUM delay=0 | fp | 27 | 30.6815 | 39.5714 | 39.5723 | 0.359035 | 1.45653 | 4.49326 | 85.455 | 8.807 | no | nonfinite fit failures=8 |
-| 2cum | OSIPI 2CUM delay=0 | ps | 27 | 0.000565754 | 0.00168419 | 0.00177583 | 0.000528323 | 0.00140357 | 0.00173558 | 1.071 | 1.023 | no | nonfinite fit failures=8 |
-| 2cum | OSIPI 2CUM delay=5 | vp | 27 | 0.0145501 | 0.032752 | 0.13611 | 0.000584325 | 0.0018815 | 0.00340002 | 24.901 | 40.032 | no | delay fitting not implemented yet; run shown for gap visibility; nonfinite fit failures=9 |
-| 2cum | OSIPI 2CUM delay=5 | fp | 27 | 95.3876 | 213.126 | 1195 | 0.359035 | 1.45653 | 4.49326 | 265.677 | 265.954 | no | delay fitting not implemented yet; run shown for gap visibility; nonfinite fit failures=9 |
-| 2cum | OSIPI 2CUM delay=5 | ps | 27 | 0.00124911 | 0.00326032 | 0.00488162 | 0.000528323 | 0.00140357 | 0.00173558 | 2.364 | 2.813 | no | delay fitting not implemented yet; run shown for gap visibility; nonfinite fit failures=9 |
-| t1_linear | OSIPI T1 (brain+quiba+prostate) | r1 | 171 | 0.0184068 | 0.0558289 | 0.428272 | 0.0184068 | 0.0564628 | 0.428272 | 1.000 | 1.000 | yes |  |
+ROCKETSHIP has four fitting routines (MATLAB, python, cpufit, gpufit). This report verifies the three non-MATLAB backends against OSIPI. Backends run for this report: `python`, `cpufit`.
+
+> gpufit: pyGpufit is installed but no CUDA GPU backend was available on the machine that generated this report, so gpufit was not run.
+
+- **python** — the pure-CPU scipy fit (`model_*_fit`), the DCE reference the reliability tests gate on, and the only backend for T1 mapping.
+- **cpufit / gpufit** — the accelerated (float32) Stage-D fit for the five DCE models. Reliable for `tofts`/`etofts`/`patlak` and, via a backend-agnostic random multi-start that escapes the wrong-Fp-basin degenerate minimum, for `2cum`. The stiff `2cxm` fit still misses a few low-flow (Fp=5) cases where vp is weakly identifiable (see the FAIL cells below) -- not a precision issue; the float64 python backend, which fits the extraction fraction E=Ktrans/Fp, is the reference for `2cxm`.
+
+## Where these numbers come from
+
+**Ground-truth data (fully verified).** The DCE digital reference objects under `tests/data/osipi/dce_models/` are byte-identical (MD5) to the OSIPI source at [`23d3714797`](https://github.com/OSIPI/DCE-DSC-MRI_TestResults/tree/23d3714797045d8103d5b5fa4f4c016840094dc0) (`test/DCEmodels/data/`). Per the source docstrings the concentration curves were generated by M. Thrippleton with [mjt320/DCE-functions](https://github.com/mjt320/DCE-functions); each row's `vp/ve/fp/ps` (or `Ktrans/ve/vp`) are the *true parameters used to generate the data*. Published in **Manning et al., Magnetic Resonance in Medicine, 2021** ([doi:10.1002/mrm.28833](https://doi.org/10.1002/mrm.28833)).
+
+**OSIPI official acceptance tolerances (the gate).** `osipi_official_tolerances.json` is transcribed verbatim from the OSIPI test suite (`test/DCEmodels/DCEmodels_data.py`). Per the OSIPI paper these tolerances are deliberately *wide validity checks* -- "not intended to indicate an acceptable level of accuracy" -- so passing them means a backend has no gross/unit errors.
+
+**Peer-implementation spread (reproducible; context).** `osipi_peer_error_summary.json` pools the deviations of every published contributor implementation in the OSIPI DCE-DSC-MRI testing framework (**van Houdt et al., MRM 2023**, [doi:10.1002/mrm.29826](https://doi.org/10.1002/mrm.29826)); `generate_peer_error_summary.py` recomputes it from the committed result CSVs. Reported for context, not gated: the pool includes the LEK/Edinburgh implementation ROCKETSHIP's python `2cxm`/`tissue_uptake` fits reproduce, so `peer max` tracks the python error there.
+
+## Accuracy by backend
+
+Each backend cell is `max |GT − fit|` over all cases and its worst-case error as a % of the OSIPI tolerance (`a_tol + r_tol·|ref|`); `ok` if every case is within tolerance, `FAIL` otherwise. `peer max` is the published-implementation spread (context only). T1 mapping is python-only.
+
+| Model | Param | python | cpufit | peer max |
+| --- | --- | --- | --- | ---: |
+| tofts | Ktrans | 0.00224 · 22% ok | 0.00224 · 22% ok | 0.003688 |
+| tofts | ve | 0.00425 · 8% ok | 0.00425 · 8% ok | 0.004248 |
+| etofts | Ktrans | 0.00183 · 15% ok | 0.00183 · 15% ok | 0.003512 |
+| etofts | ve | 0.00197 · 4% ok | 0.00197 · 4% ok | 0.007511 |
+| etofts | vp | 0.00131 · 5% ok | 0.00131 · 5% ok | 0.002219 |
+| patlak | ps | 0.000379 · 4% ok | 0.000379 · 4% ok | 0.0004791 |
+| patlak | vp | 0.00177 · 7% ok | 0.00177 · 7% ok | 0.001978 |
+| 2cxm | ve | 0.0159 · 32% ok | 0.0837 · 167% **FAIL** | 0.01587 |
+| 2cxm | vp | 0.0186 · 74% ok | 0.0891 · 357% **FAIL** | 0.01857 |
+| 2cxm | fp | 1.94 · 22% ok | 1 · 18% ok | 1.941 |
+| 2cxm | ps | 0.0164 · 82% ok | 0.0689 · 689% **FAIL** | 0.01861 |
+| 2cum | vp | 0.00183 · 7% ok | 0.0158 · 63% ok | 0.0034 |
+| 2cum | fp | 0.761 · 10% ok | 1 · 18% ok | 4.493 |
+| 2cum | ps | 0.00143 · 19% ok | 0.00473 · 95% ok | 0.001736 |
+| t1_linear | r1 | 0.428 · peer-ref | — | 0.4283 |
+
+### Delay=5 (arterial-delay fitting not implemented — python, gap visibility, not gated)
+
+| Model | Param | N | python max | peer max |
+| --- | --- | ---: | ---: | ---: |
+| patlak | ps | 9 | 0.04023 | 0.0004791 |
+| patlak | vp | 9 | 0.1694 | 0.001978 |
+| 2cxm | ve | 24 | 0.9 | 0.01587 |
+| 2cxm | vp | 24 | 0.1939 | 0.01857 |
+| 2cxm | fp | 24 | 27.98 | 1.941 |
+| 2cxm | ps | 24 | 4.247e+06 | 0.01861 |
+| 2cum | vp | 27 | 0.04171 | 0.0034 |
+| 2cum | fp | 27 | 27.09 | 4.493 |
+| 2cum | ps | 27 | 0.009359 | 0.001736 |
+
+## Figures
+
+- `tests/data/osipi/reference/figures/osipi_accuracy_dros.png`
+- `tests/data/osipi/reference/figures/osipi_accuracy_patlak_delay.png`
+- `tests/data/osipi/reference/figures/osipi_accuracy_t1.png`
+
+## Per-case ground truth vs fit — python (delay=0)
+
+Each row is one DRO case. `GT` = generating parameter, `fit` = ROCKETSHIP **python** fit, `Δ` = |GT − fit|. Units: v_e, v_p fractional; K^trans, PS per min; F_p mL/100mL/min.
+
+### tofts
+
+| case | Ktrans GT | Ktrans fit | Ktrans Δ | ve GT | ve fit | ve Δ |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| test_vox_T1_highSNR | 0.3500 | 0.3496 | 4.1e-04 | 0.5000 | 0.4995 | 4.5e-04 |
+| test_vox_T2_highSNR | 0.2000 | 0.1997 | 2.5e-04 | 0.2000 | 0.1998 | 1.8e-04 |
+| test_vox_T3_highSNR | 0.2000 | 0.1998 | 2.3e-04 | 0.5000 | 0.4996 | 4.4e-04 |
+| test_vox_T4_highSNR | 0.1000 | 0.0999 | 1.2e-04 | 0.1000 | 0.0999 | 9.0e-05 |
+| test_vox_T5_highSNR | 0.0500 | 0.0499 | 6.1e-05 | 0.1000 | 0.0999 | 8.6e-05 |
+| test_vox_T1_20 | 0.3500 | 0.3506 | 5.9e-04 | 0.5000 | 0.5042 | 0.0042 |
+| test_vox_T2_20 | 0.2000 | 0.2012 | 0.0012 | 0.2000 | 0.1987 | 0.0013 |
+| test_vox_T3_20 | 0.2000 | 0.1995 | 4.8e-04 | 0.5000 | 0.5009 | 8.7e-04 |
+| test_vox_T4_20 | 0.1000 | 0.0982 | 0.0018 | 0.1000 | 0.1020 | 0.0020 |
+| test_vox_T5_20 | 0.0500 | 0.0522 | 0.0022 | 0.1000 | 0.1009 | 9.3e-04 |
+| test_vox_T1_30 | 0.3500 | 0.3487 | 0.0013 | 0.5000 | 0.5001 | 1.4e-04 |
+| test_vox_T2_30 | 0.2000 | 0.2005 | 4.5e-04 | 0.2000 | 0.2008 | 7.8e-04 |
+| test_vox_T3_30 | 0.2000 | 0.2011 | 0.0011 | 0.5000 | 0.5001 | 1.3e-04 |
+| test_vox_T4_30 | 0.1000 | 0.0987 | 0.0013 | 0.1000 | 0.0997 | 3.1e-04 |
+| test_vox_T5_30 | 0.0500 | 0.0488 | 0.0012 | 0.1000 | 0.0993 | 7.2e-04 |
+| test_vox_T1_50 | 0.3500 | 0.3510 | 9.8e-04 | 0.5000 | 0.4993 | 7.2e-04 |
+| test_vox_T2_50 | 0.2000 | 0.2008 | 7.5e-04 | 0.2000 | 0.1996 | 4.2e-04 |
+| test_vox_T3_50 | 0.2000 | 0.1995 | 4.6e-04 | 0.5000 | 0.5004 | 4.0e-04 |
+| test_vox_T4_50 | 0.1000 | 0.1012 | 0.0012 | 0.1000 | 0.0990 | 0.0010 |
+| test_vox_T5_50 | 0.0500 | 0.0500 | 4.6e-05 | 0.1000 | 0.0997 | 3.3e-04 |
+| test_vox_T1_100 | 0.3500 | 0.3488 | 0.0012 | 0.5000 | 0.4994 | 5.6e-04 |
+| test_vox_T2_100 | 0.2000 | 0.1985 | 0.0015 | 0.2000 | 0.1996 | 3.9e-04 |
+| test_vox_T3_100 | 0.2000 | 0.1999 | 1.2e-04 | 0.5000 | 0.4991 | 8.9e-04 |
+| test_vox_T4_100 | 0.1000 | 0.0994 | 6.4e-04 | 0.1000 | 0.1002 | 1.5e-04 |
+| test_vox_T5_100 | 0.0500 | 0.0498 | 2.0e-04 | 0.1000 | 0.0996 | 4.1e-04 |
+
+### etofts
+
+| case | Ktrans GT | Ktrans fit | Ktrans Δ | ve GT | ve fit | ve Δ | vp GT | vp fit | vp Δ |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| test_vox_T1_highSNR | 0.0635 | 0.0635 | 3.5e-05 | 0.1752 | 0.1751 | 1.5e-04 | 0.0218 | 0.0218 | 1.1e-05 |
+| test_vox_T2_highSNR | 0.0755 | 0.0755 | 2.5e-05 | 0.1488 | 0.1486 | 1.6e-04 | 0.0241 | 0.0241 | 1.3e-05 |
+| test_vox_T3_highSNR | 0.0508 | 0.0508 | 4.1e-05 | 0.2070 | 0.2069 | 1.5e-04 | 0.0050 | 0.0050 | 1.7e-06 |
+| test_vox_T1_20 | 0.0635 | 0.0632 | 3.4e-04 | 0.1752 | 0.1767 | 0.0015 | 0.0218 | 0.0209 | 8.1e-04 |
+| test_vox_T2_20 | 0.0755 | 0.0773 | 0.0018 | 0.1488 | 0.1485 | 2.4e-04 | 0.0241 | 0.0228 | 0.0013 |
+| test_vox_T3_20 | 0.0508 | 0.0511 | 2.5e-04 | 0.2070 | 0.2050 | 0.0020 | 0.0050 | 0.0056 | 6.0e-04 |
+| test_vox_T1_30 | 0.0635 | 0.0634 | 1.7e-04 | 0.1752 | 0.1761 | 9.1e-04 | 0.0218 | 0.0222 | 4.7e-04 |
+| test_vox_T2_30 | 0.0755 | 0.0757 | 1.9e-04 | 0.1488 | 0.1491 | 3.4e-04 | 0.0241 | 0.0239 | 1.5e-04 |
+| test_vox_T3_30 | 0.0508 | 0.0498 | 0.0011 | 0.2070 | 0.2058 | 0.0012 | 0.0050 | 0.0050 | 2.1e-06 |
+| test_vox_T1_50 | 0.0635 | 0.0633 | 2.2e-04 | 0.1752 | 0.1746 | 6.3e-04 | 0.0218 | 0.0217 | 9.0e-06 |
+| test_vox_T2_50 | 0.0755 | 0.0755 | 3.5e-05 | 0.1488 | 0.1482 | 5.7e-04 | 0.0241 | 0.0241 | 7.4e-05 |
+| test_vox_T3_50 | 0.0508 | 0.0508 | 9.9e-06 | 0.2070 | 0.2068 | 2.1e-04 | 0.0050 | 0.0050 | 4.5e-05 |
+| test_vox_T1_100 | 0.0635 | 0.0635 | 1.9e-05 | 0.1752 | 0.1752 | 5.0e-05 | 0.0218 | 0.0220 | 2.1e-04 |
+| test_vox_T2_100 | 0.0755 | 0.0753 | 1.9e-04 | 0.1488 | 0.1487 | 1.0e-04 | 0.0241 | 0.0243 | 2.2e-04 |
+| test_vox_T3_100 | 0.0508 | 0.0506 | 1.9e-04 | 0.2070 | 0.2081 | 0.0011 | 0.0050 | 0.0051 | 1.4e-04 |
+
+### patlak
+
+| case | ps GT | ps fit | ps Δ | vp GT | vp fit | vp Δ |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| #1 | 0.0000 | 2.19e-05 | 2.2e-05 | 0.1000 | 0.0995 | 5.0e-04 |
+| #2 | 0.0500 | 0.0504 | 3.8e-04 | 0.1000 | 0.0982 | 0.0018 |
+| #3 | 0.1500 | 0.1498 | 2.1e-04 | 0.1000 | 0.1008 | 8.0e-04 |
+| #4 | 0.0000 | 1.20e-04 | 1.2e-04 | 0.2000 | 0.1999 | 6.3e-05 |
+| #5 | 0.0500 | 0.0500 | 1.2e-05 | 0.2000 | 0.2007 | 6.9e-04 |
+| #6 | 0.1500 | 0.1503 | 3.1e-04 | 0.2000 | 0.1994 | 6.4e-04 |
+| #7 | 0.0000 | 2.97e-05 | 3.0e-05 | 0.5000 | 0.5001 | 9.3e-05 |
+| #8 | 0.0500 | 0.0501 | 5.5e-05 | 0.5000 | 0.5006 | 6.1e-04 |
+| #9 | 0.1500 | 0.1498 | 2.3e-04 | 0.5000 | 0.5003 | 3.3e-04 |
+
+### 2cxm
+
+| case | ve GT | ve fit | ve Δ | vp GT | vp fit | vp Δ | fp GT | fp fit | fp Δ | ps GT | ps fit | ps Δ |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| #1 | 0.1000 | 0.0993 | 7.4e-04 | 0.0200 | 0.0209 | 8.6e-04 | 5.000 | 4.912 | 0.0879 | 0.0500 | 0.0502 | 2.0e-04 |
+| #2 | 0.1000 | 0.0949 | 0.0051 | 0.0200 | 0.0251 | 0.0051 | 5.000 | 4.849 | 0.1513 | 0.1500 | 0.1557 | 0.0057 |
+| #3 | 0.1000 | 0.0999 | 6.7e-05 | 0.0200 | 0.0201 | 5.9e-05 | 25.000 | 24.253 | 0.7470 | 0.0500 | 0.0500 | 2.9e-05 |
+| #4 | 0.1000 | 0.0995 | 5.2e-04 | 0.0200 | 0.0203 | 3.1e-04 | 25.000 | 24.206 | 0.7940 | 0.1500 | 0.1522 | 0.0022 |
+| #5 | 0.1000 | 0.1000 | 3.8e-05 | 0.0200 | 0.0198 | 2.3e-04 | 40.000 | 38.749 | 1.25 | 0.0500 | 0.0502 | 2.0e-04 |
+| #6 | 0.1000 | 0.0994 | 6.2e-04 | 0.0200 | 0.0203 | 2.9e-04 | 40.000 | 38.059 | 1.94 | 0.1500 | 0.1518 | 0.0018 |
+| #7 | 0.2000 | 0.2024 | 0.0024 | 0.0200 | 0.0210 | 9.6e-04 | 5.000 | 4.899 | 0.1008 | 0.0500 | 0.0504 | 4.0e-04 |
+| #8 | 0.2000 | 0.1975 | 0.0025 | 0.0200 | 0.0220 | 0.0020 | 5.000 | 4.896 | 0.1035 | 0.1500 | 0.1594 | 0.0094 |
+| #9 | 0.2000 | 0.2005 | 5.0e-04 | 0.0200 | 0.0200 | 2.8e-05 | 25.000 | 24.416 | 0.5842 | 0.0500 | 0.0501 | 6.7e-05 |
+| #10 | 0.2000 | 0.1992 | 7.9e-04 | 0.0200 | 0.0207 | 6.7e-04 | 25.000 | 23.931 | 1.07 | 0.1500 | 0.1533 | 0.0033 |
+| #11 | 0.2000 | 0.2003 | 3.4e-04 | 0.0200 | 0.0198 | 1.6e-04 | 40.000 | 38.622 | 1.38 | 0.0500 | 0.0501 | 7.7e-05 |
+| #12 | 0.2000 | 0.1997 | 3.0e-04 | 0.0200 | 0.0200 | 2.3e-06 | 40.000 | 38.616 | 1.38 | 0.1500 | 0.1517 | 0.0017 |
+| #13 | 0.1000 | 0.0996 | 4.4e-04 | 0.1000 | 0.1036 | 0.0036 | 5.000 | 4.984 | 0.0157 | 0.0500 | 0.0454 | 0.0046 |
+| #14 | 0.1000 | 0.0982 | 0.0018 | 0.1000 | 0.1010 | 9.8e-04 | 5.000 | 4.983 | 0.0166 | 0.1500 | 0.1573 | 0.0073 |
+| #15 | 0.1000 | 0.0997 | 2.7e-04 | 0.1000 | 0.1004 | 4.0e-04 | 25.000 | 24.782 | 0.2179 | 0.0500 | 0.0494 | 5.8e-04 |
+| #16 | 0.1000 | 0.0982 | 0.0018 | 0.1000 | 0.1016 | 0.0016 | 25.000 | 24.784 | 0.2158 | 0.1500 | 0.1468 | 0.0032 |
+| #17 | 0.1000 | 0.0999 | 7.6e-05 | 0.1000 | 0.1000 | 4.7e-05 | 40.000 | 39.685 | 0.3152 | 0.0500 | 0.0498 | 2.5e-04 |
+| #18 | 0.1000 | 0.0988 | 0.0012 | 0.1000 | 0.1009 | 8.8e-04 | 40.000 | 39.569 | 0.4311 | 0.1500 | 0.1483 | 0.0017 |
+| #19 | 0.2000 | 0.1963 | 0.0037 | 0.1000 | 0.1028 | 0.0028 | 5.000 | 4.962 | 0.0377 | 0.0500 | 0.0494 | 6.0e-04 |
+| #20 | 0.2000 | 0.1841 | 0.0159 | 0.1000 | 0.1186 | 0.0186 | 5.000 | 4.924 | 0.0762 | 0.1500 | 0.1336 | 0.0164 |
+| #21 | 0.2000 | 0.1991 | 8.6e-04 | 0.1000 | 0.0999 | 1.4e-04 | 25.000 | 24.889 | 0.1108 | 0.0500 | 0.0502 | 2.4e-04 |
+| #22 | 0.2000 | 0.1989 | 0.0011 | 0.1000 | 0.1011 | 0.0011 | 25.000 | 24.776 | 0.2242 | 0.1500 | 0.1493 | 6.9e-04 |
+| #23 | 0.2000 | 0.2004 | 4.0e-04 | 0.1000 | 0.0999 | 1.3e-04 | 40.000 | 39.671 | 0.3291 | 0.0500 | 0.0499 | 8.3e-05 |
+| #24 | 0.2000 | 0.1991 | 9.0e-04 | 0.1000 | 0.1008 | 7.7e-04 | 40.000 | 39.590 | 0.4105 | 0.1500 | 0.1489 | 0.0011 |
+
+### 2cum
+
+| case | vp GT | vp fit | vp Δ | fp GT | fp fit | fp Δ | ps GT | ps fit | ps Δ |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| #1 | 0.0200 | 0.0201 | 9.0e-05 | 5.000 | 5.002 | 0.0024 | 1.00e-05 | 1.00e-07 | 9.9e-06 |
+| #2 | 0.0200 | 0.0202 | 1.9e-04 | 5.000 | 4.986 | 0.0142 | 0.0100 | 0.0098 | 2.1e-04 |
+| #3 | 0.0200 | 0.0218 | 0.0018 | 5.000 | 4.833 | 0.1673 | 0.0250 | 0.0240 | 0.0010 |
+| #4 | 0.0200 | 0.0198 | 1.8e-04 | 25.000 | 25.147 | 0.1468 | 1.00e-05 | 4.70e-05 | 3.7e-05 |
+| #5 | 0.0200 | 0.0201 | 1.4e-04 | 25.000 | 25.115 | 0.1146 | 0.0100 | 0.0098 | 2.2e-04 |
+| #6 | 0.0200 | 0.0209 | 8.7e-04 | 25.000 | 24.239 | 0.7611 | 0.0250 | 0.0237 | 0.0013 |
+| #7 | 0.0200 | 0.0199 | 8.1e-05 | 40.000 | 40.195 | 0.1954 | 1.00e-05 | 1.65e-05 | 6.5e-06 |
+| #8 | 0.0200 | 0.0202 | 2.2e-04 | 40.000 | 39.508 | 0.4917 | 0.0100 | 0.0097 | 2.9e-04 |
+| #9 | 0.0200 | 0.0207 | 6.5e-04 | 40.000 | 39.433 | 0.5668 | 0.0250 | 0.0236 | 0.0014 |
+| #10 | 0.0500 | 0.0500 | 1.3e-05 | 5.000 | 4.987 | 0.0130 | 1.00e-05 | 1.00e-07 | 9.9e-06 |
+| #11 | 0.0500 | 0.0505 | 5.2e-04 | 5.000 | 4.958 | 0.0415 | 0.0100 | 0.0098 | 1.9e-04 |
+| #12 | 0.0500 | 0.0518 | 0.0018 | 5.000 | 4.934 | 0.0663 | 0.0250 | 0.0236 | 0.0014 |
+| #13 | 0.0500 | 0.0501 | 6.5e-05 | 25.000 | 25.081 | 0.0807 | 1.00e-05 | 1.00e-07 | 9.9e-06 |
+| #14 | 0.0500 | 0.0501 | 8.5e-05 | 25.000 | 25.000 | 6.2e-06 | 0.0100 | 0.0098 | 1.9e-04 |
+| #15 | 0.0500 | 0.0512 | 0.0012 | 25.000 | 24.567 | 0.4326 | 0.0250 | 0.0236 | 0.0014 |
+| #16 | 0.0500 | 0.0500 | 4.1e-05 | 40.000 | 39.902 | 0.0980 | 1.00e-05 | 9.92e-06 | 7.5e-08 |
+| #17 | 0.0500 | 0.0503 | 3.2e-04 | 40.000 | 39.892 | 0.1083 | 0.0100 | 0.0097 | 2.8e-04 |
+| #18 | 0.0500 | 0.0508 | 8.2e-04 | 40.000 | 39.569 | 0.4308 | 0.0250 | 0.0236 | 0.0014 |
+| #19 | 0.1000 | 0.1002 | 1.5e-04 | 5.000 | 4.982 | 0.0176 | 1.00e-05 | 1.00e-07 | 9.9e-06 |
+| #20 | 0.1000 | 0.0995 | 5.0e-04 | 5.000 | 5.003 | 0.0026 | 0.0100 | 0.0102 | 1.9e-04 |
+| #21 | 0.1000 | 0.1011 | 0.0011 | 5.000 | 4.990 | 0.0097 | 0.0250 | 0.0238 | 0.0012 |
+| #22 | 0.1000 | 0.0999 | 7.9e-05 | 25.000 | 25.002 | 0.0019 | 1.00e-05 | 1.00e-07 | 9.9e-06 |
+| #23 | 0.1000 | 0.1003 | 2.9e-04 | 25.000 | 24.966 | 0.0337 | 0.0100 | 0.0097 | 2.6e-04 |
+| #24 | 0.1000 | 0.1013 | 0.0013 | 25.000 | 24.838 | 0.1617 | 0.0250 | 0.0236 | 0.0014 |
+| #25 | 0.1000 | 0.1000 | 2.9e-05 | 40.000 | 40.001 | 8.5e-04 | 1.00e-05 | 1.00e-07 | 9.9e-06 |
+| #26 | 0.1000 | 0.1001 | 1.1e-04 | 40.000 | 39.897 | 0.1035 | 0.0100 | 0.0098 | 2.0e-04 |
+| #27 | 0.1000 | 0.1009 | 9.4e-04 | 40.000 | 39.733 | 0.2674 | 0.0250 | 0.0236 | 0.0014 |
+

@@ -1,25 +1,25 @@
 {
-  "subject_source_path": "./tests/data/ci_fixtures/dce/tiny_settings_case",
-  "subject_tp_path": "./tests/data/ci_fixtures/dce/tiny_settings_case/processed",
+  "subject_source_path": "./tests/data/BIDS_test/rawdata/sub-11tiny/ses-01",
+  "subject_tp_path": "./tests/data/BIDS_test/derivatives/sub-11tiny/ses-01",
   "output_dir": "./out/dce_gui_tiny",
   "checkpoint_dir": "./out/dce_gui_tiny/checkpoints",
   "backend": "cpu",
   "write_xls": true,
   "aif_mode": "auto",
   "dynamic_files": [
-    "./tests/data/ci_fixtures/dce/tiny_settings_case/Dynamic_t1w.nii"
+    "./tests/data/BIDS_test/rawdata/sub-11tiny/ses-01/dce/sub-11tiny_ses-01_DCE.nii"
   ],
   "aif_files": [
-    "./tests/data/ci_fixtures/dce/tiny_settings_case/processed/T1_AIF_roi.nii"
+    "./tests/data/BIDS_test/derivatives/sub-11tiny/ses-01/dce/sub-11tiny_ses-01_desc-AIFroi_mask.nii"
   ],
   "roi_files": [
-    "./tests/data/ci_fixtures/dce/tiny_settings_case/processed/T1_brain_roi.nii"
+    "./tests/data/BIDS_test/derivatives/sub-11tiny/ses-01/anat/sub-11tiny_ses-01_desc-brain_mask.nii"
   ],
   "t1map_files": [
-    "./tests/data/ci_fixtures/dce/tiny_settings_case/processed/T1_map_t1_fa_fit_fa10.nii"
+    "./tests/data/BIDS_test/derivatives/sub-11tiny/ses-01/dce/sub-11tiny_ses-01_space-DCEref_T1map.nii"
   ],
   "noise_files": [
-    "./tests/data/ci_fixtures/dce/tiny_settings_case/processed/T1_noise_roi.nii"
+    "./tests/data/BIDS_test/derivatives/sub-11tiny/ses-01/anat/sub-11tiny_ses-01_desc-noise_mask.nii"
   ],
   "drift_files": [],
   "model_flags": {
@@ -41,7 +41,7 @@
     "stage_d_mode": "real",
     "aif_curve_mode": "fitted",
     "rootname": "Dyn-1",
-    "dce_metadata_path": "./tests/data/ci_fixtures/dce/tiny_settings_case/manifest.json",
+    "dce_metadata_path": "./tests/data/BIDS_test/derivatives/sub-11tiny/ses-01/dce/sub-11tiny_ses-01_desc-tinymeta.json",
     "tr_sec": null,
     "tr_ms": null,
     "fa_deg": null,
@@ -49,7 +49,7 @@
     "time_resolution_min": null,
     "steady_state_start": 1,
     "steady_state_end": null,
-    "steady_state_auto_method": "legacy_sobel",
+    "steady_state_auto_method": "piecewise_constant",
     "noise_pixsize": 5,
     "snr_filter": 0.0,
     "blood_t1_ms": null,
@@ -94,7 +94,7 @@
     "voxel_lower_limit_vp": 0.001,
     "voxel_upper_limit_vp": 1,
     "voxel_initial_value_vp": 0.02,
-    "voxel_lower_limit_fp": 0.001,
+    "voxel_lower_limit_fp": 0.0001,
     "voxel_upper_limit_fp": 100,
     "voxel_initial_value_fp": 0.2,
     "voxel_lower_limit_tp": 0,

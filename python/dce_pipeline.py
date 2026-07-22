@@ -14,20 +14,21 @@ from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 
 import numpy as np
 
+from dce_fit_backends import (
+    fit_2cxm_stage_d,
+    fit_ex_tofts_stage_d,
+    fit_patlak_stage_d,
+    fit_tissue_uptake_stage_d,
+    fit_tofts_stage_d,
+)
 from dce_models import (
     model_2cxm_cfit,
-    model_2cxm_fit,
     model_extended_tofts_cfit,
-    model_extended_tofts_fit,
     model_fxr_cfit,
     model_fxr_fit,
     model_patlak_cfit,
-    model_patlak_fit,
-    model_patlak_linear,
     model_tissue_uptake_cfit,
-    model_tissue_uptake_fit,
     model_tofts_cfit,
-    model_tofts_fit,
 )
 
 
@@ -206,7 +207,6 @@ MODEL_LAYOUTS: Dict[str, Dict[str, Any]] = {
 }
 
 SUPPORTED_STAGE_D_MODELS = {"tofts", "ex_tofts", "patlak", "tissue_uptake", "2cxm", "fxr", "auc"}
-ACCELERATED_STAGE_D_MODELS = {"tofts", "ex_tofts", "patlak", "tissue_uptake", "2cxm"}
 PREFERENCE_NUMERIC_CHARS = set("0123456789eE.+-*/^() ")
 
 
@@ -936,20 +936,6 @@ def _resolve_dynamic_metadata(
     }
 
 
-def _baseline_window(config: DcePipelineConfig, n_timepoints: int) -> Tuple[int, int]:
-    start_raw = _stage_override(config, "steady_state_start", 1)
-    end_raw = _stage_override(config, "steady_state_end", min(2, n_timepoints))
-    if not _override_value_is_set(start_raw):
-        start_raw = 1
-    if not _override_value_is_set(end_raw):
-        end_raw = min(2, n_timepoints)
-    start_1b = int(start_raw)
-    end_1b = int(end_raw)
-    start_1b = max(1, min(start_1b, n_timepoints))
-    end_1b = max(start_1b, min(end_1b, n_timepoints))
-    return start_1b - 1, end_1b
-
-
 def _resolve_timepoint_window(
     config: DcePipelineConfig,
     n_timepoints: int,
@@ -1464,6 +1450,35 @@ def _piecewise_constant_baseline_end(stlv: np.ndarray) -> Dict[str, Any]:
     }
 
 
+def _resolve_aif_sidecar_steady_state_end(config: DcePipelineConfig) -> Tuple[Optional[int], Optional[str]]:
+    """Look up a manually-pinned baseline end from the AIF file's JSON sidecar.
+
+    Mirrors the DCE dynamic-file sidecar discovery in `_resolve_dynamic_metadata`: same
+    basename as `config.aif_files[0]` with `.nii`/`.nii.gz` swapped for `.json`. This is
+    the documented mechanism for fixed/predictable runs (e.g. phantom ground-truth
+    alignment, benchmark determinism) — used in place of ad hoc stage_overrides pins.
+    Returns (end_1b, sidecar_path), or (None, None) when no sidecar or key is present.
+    """
+    if not config.aif_files:
+        return None, None
+    aif_path = Path(config.aif_files[0])
+    aif_text = str(aif_path)
+    if aif_text.endswith(".nii.gz"):
+        sidecar_path = Path(aif_text[: -len(".nii.gz")] + ".json")
+    elif aif_path.suffix.lower() == ".nii":
+        sidecar_path = aif_path.with_suffix(".json")
+    else:
+        return None, None
+
+    if not sidecar_path.exists():
+        return None, None
+
+    payload = _load_json(sidecar_path)
+    if "SteadyStateEndTimeIndex" not in payload:
+        return None, None
+    return int(payload["SteadyStateEndTimeIndex"]), str(sidecar_path)
+
+
 def _resolve_baseline_window(
     config: DcePipelineConfig,
     n_timepoints: int,
@@ -1482,11 +1497,16 @@ def _resolve_baseline_window(
     used_method = "manual" if end_is_set else "default"
     auto_details: Optional[Dict[str, Any]] = None
     end_source: str
+    sidecar_end_1b, sidecar_path = (None, None) if end_is_set else _resolve_aif_sidecar_steady_state_end(config)
     if end_is_set:
         end_1b = int(end_raw)
         end_source = "steady_state_end"
+    elif sidecar_end_1b is not None:
+        end_1b = int(sidecar_end_1b)
+        used_method = "aif_sidecar"
+        end_source = f"aif_sidecar:SteadyStateEndTimeIndex:{sidecar_path}"
     else:
-        auto_method = auto_method_requested if auto_method_requested != "none" else "legacy_sobel"
+        auto_method = auto_method_requested if auto_method_requested != "none" else "piecewise_constant"
         if stlv is None:
             raise ValueError(
                 "stage_overrides.steady_state_auto_method requires Stage-A AIF signal data to estimate baseline end"
@@ -1502,7 +1522,7 @@ def _resolve_baseline_window(
         end_1b = int(auto_details["end_ss_1b"])
         used_method = auto_method
         if auto_method_requested == "none":
-            end_source = "default_auto_method:legacy_sobel"
+            end_source = "default_auto_method:piecewise_constant"
         else:
             end_source = f"steady_state_auto_method:{auto_method}"
 
@@ -2879,7 +2899,9 @@ def _stage_d_fit_prefs(config: DcePipelineConfig) -> Dict[str, Any]:
         "lower_limit_vp": _safe_float(_stage_override(config, "voxel_lower_limit_vp", 1e-3), 1e-3),
         "upper_limit_vp": _safe_float(_stage_override(config, "voxel_upper_limit_vp", 1.0), 1.0),
         "initial_value_vp": _safe_float(_stage_override(config, "voxel_initial_value_vp", 0.02), 0.02),
-        "lower_limit_fp": _safe_float(_stage_override(config, "voxel_lower_limit_fp", 1e-3), 1e-3),
+        # 1e-4/s (~0.6 mL/100mL/min) so low-flow tissue (OSIPI DRO fp=5 mL/100mL/min ~= 8.3e-4/s)
+        # is representable; the prior 1e-3/s (~6 mL/100mL/min) excluded it.
+        "lower_limit_fp": _safe_float(_stage_override(config, "voxel_lower_limit_fp", 1e-4), 1e-4),
         "upper_limit_fp": _safe_float(_stage_override(config, "voxel_upper_limit_fp", 100.0), 100.0),
         "initial_value_fp": _safe_float(_stage_override(config, "voxel_initial_value_fp", 0.2), 0.2),
         "lower_limit_tp": _safe_float(_stage_override(config, "voxel_lower_limit_tp", 0.0), 0.0),
@@ -2914,7 +2936,9 @@ def _stage_d_fit_prefs(config: DcePipelineConfig) -> Dict[str, Any]:
         "2cxm_lower_limit_vp": _stage_override(config, "voxel_lower_limit_vp_2cxm", 1e-3),
         "2cxm_upper_limit_vp": _stage_override(config, "voxel_upper_limit_vp_2cxm", 1.0),
         "2cxm_initial_value_vp": _stage_override(config, "voxel_initial_value_vp_2cxm", 0.02),
-        "2cxm_lower_limit_fp": _stage_override(config, "voxel_lower_limit_fp_2cxm", 1e-3),
+        # Matches the shared "lower_limit_fp" default (see above); kept as its own override
+        # key so 2cxm can still be tuned independently of other models if needed.
+        "2cxm_lower_limit_fp": _stage_override(config, "voxel_lower_limit_fp_2cxm", 1e-4),
         "2cxm_upper_limit_fp": _stage_override(config, "voxel_upper_limit_fp_2cxm", 20.0),
         "2cxm_initial_value_fp": _stage_override(config, "voxel_initial_value_fp_2cxm", 0.35),
         "2cxm_max_nfev": _stage_override(config, "voxel_MaxFunEvals_2cxm", 140),
@@ -2926,7 +2950,8 @@ def _stage_d_fit_prefs(config: DcePipelineConfig) -> Dict[str, Any]:
         "tissue_uptake_lower_limit_vp": _stage_override(config, "voxel_lower_limit_vp_tissue_uptake", 1e-3),
         "tissue_uptake_upper_limit_vp": _stage_override(config, "voxel_upper_limit_vp_tissue_uptake", 1.0),
         "tissue_uptake_initial_value_vp": _stage_override(config, "voxel_initial_value_vp_tissue_uptake", 0.02),
-        "tissue_uptake_lower_limit_fp": _stage_override(config, "voxel_lower_limit_fp_tissue_uptake", 1e-3),
+        # Matches the shared "lower_limit_fp" default; see 2cxm_lower_limit_fp above.
+        "tissue_uptake_lower_limit_fp": _stage_override(config, "voxel_lower_limit_fp_tissue_uptake", 1e-4),
         "tissue_uptake_upper_limit_fp": _stage_override(config, "voxel_upper_limit_fp_tissue_uptake", 20.0),
         "tissue_uptake_initial_value_fp": _stage_override(config, "voxel_initial_value_fp_tissue_uptake", 0.35),
         "tissue_uptake_lower_limit_tp": _stage_override(config, "voxel_lower_limit_tp_tissue_uptake", 0.0),
@@ -3070,7 +3095,7 @@ def _write_param_maps(
     return paths
 
 
-def _fit_model_curve(
+def _fit_fxr_curve(
     model_name: str,
     ct: np.ndarray,
     cp: np.ndarray,
@@ -3080,71 +3105,35 @@ def _fit_model_curve(
     relaxivity: float,
     fw: float,
 ) -> np.ndarray:
+    """Per-voxel fxr fit -- the one model outside the shared batched Stage-D architecture.
+
+    fxr's per-voxel R1 baseline (`r1o`) can't be batched the way the five
+    models in `_stage_d_fit_funcs()` are, so it keeps the older
+    one-voxel-at-a-time calling convention. `model_name` is still checked
+    (rather than assumed) so a future model accidentally routed here -- e.g.
+    because it wasn't added to `_MODEL_SPECS` -- fails loudly instead of
+    silently mis-fitting.
+    """
+    if model_name != "fxr":
+        raise ValueError(f"Unsupported model '{model_name}'")
+    if r1o is None:
+        raise ValueError("FXR fitting requires R1 baseline values")
     ct_list = [float(v) for v in ct]
     cp_list = [float(v) for v in cp]
     timer_list = [float(v) for v in timer]
-
-    if model_name == "tofts":
-        prefs_local = _apply_model_specific_prefs(prefs, "tofts")
-        return np.asarray(model_tofts_fit(ct_list, cp_list, timer_list, prefs_local), dtype=np.float64)
-    if model_name == "ex_tofts":
-        prefs_local = _apply_model_specific_prefs(prefs, "ex_tofts")
-        return np.asarray(model_extended_tofts_fit(ct_list, cp_list, timer_list, prefs_local), dtype=np.float64)
-    if model_name == "patlak":
-        prefs_local = _apply_model_specific_prefs(prefs, "patlak")
-        return np.asarray(model_patlak_fit(ct_list, cp_list, timer_list, prefs_local), dtype=np.float64)
-    if model_name == "tissue_uptake":
-        prefs_local = _apply_model_specific_prefs(prefs, "tissue_uptake")
-        # MATLAB CPU path seeds tissue-uptake fits with a quick Patlak estimate per voxel.
-        try:
-            patlak_estimate = model_patlak_linear(ct_list, cp_list, timer_list)
-            ktrans_guess = float(patlak_estimate[0])
-            vp_guess = float(patlak_estimate[1])
-            if math.isfinite(ktrans_guess):
-                lo = float(prefs_local.get("lower_limit_ktrans", 1e-7))
-                hi = float(prefs_local.get("upper_limit_ktrans", 2.0))
-                prefs_local["initial_value_ktrans"] = min(max(ktrans_guess, lo), hi)
-            if math.isfinite(vp_guess):
-                lo_vp = float(prefs_local.get("lower_limit_vp", 1e-3))
-                hi_vp = float(prefs_local.get("upper_limit_vp", 1.0))
-                prefs_local["initial_value_vp"] = min(max(vp_guess, lo_vp), hi_vp)
-                # Use Patlak vp together with seeded ktrans/fp to initialize Tp.
-                k_seed = float(prefs_local.get("initial_value_ktrans", ktrans_guess))
-                fp_seed = float(prefs_local.get("initial_value_fp", 0.2))
-                fp_seed = max(fp_seed, k_seed * 1.25)
-                denom = fp_seed
-                if abs(fp_seed - k_seed) > 1e-12:
-                    ps_seed = (k_seed * fp_seed) / (fp_seed - k_seed)
-                    denom = fp_seed + ps_seed
-                if math.isfinite(denom) and abs(denom) > 1e-12:
-                    tp_guess = vp_guess / denom
-                    if math.isfinite(tp_guess) and tp_guess > 0.0:
-                        lo_tp = float(prefs_local.get("lower_limit_tp", 0.0))
-                        hi_tp = float(prefs_local.get("upper_limit_tp", 1e6))
-                        prefs_local["initial_value_tp"] = min(max(tp_guess, lo_tp), hi_tp)
-        except Exception:
-            pass
-        return np.asarray(model_tissue_uptake_fit(ct_list, cp_list, timer_list, prefs_local), dtype=np.float64)
-    if model_name == "2cxm":
-        prefs_local = _apply_model_specific_prefs(prefs, "2cxm")
-        return np.asarray(model_2cxm_fit(ct_list, cp_list, timer_list, prefs_local), dtype=np.float64)
-    if model_name == "fxr":
-        if r1o is None:
-            raise ValueError("FXR fitting requires R1 baseline values")
-        return np.asarray(
-            model_fxr_fit(
-                ct_list,
-                cp_list,
-                timer_list,
-                float(r1o),
-                float(r1o),
-                float(relaxivity),
-                float(fw),
-                prefs,
-            ),
-            dtype=np.float64,
-        )
-    raise ValueError(f"Unsupported model '{model_name}'")
+    return np.asarray(
+        model_fxr_fit(
+            ct_list,
+            cp_list,
+            timer_list,
+            float(r1o),
+            float(r1o),
+            float(relaxivity),
+            float(fw),
+            prefs,
+        ),
+        dtype=np.float64,
+    )
 
 
 def _predict_curve_from_fit_row(
@@ -3396,6 +3385,20 @@ def _accelerated_output_has_usable_primary_params(model_name: str, output: np.nd
     return bool(np.any(finite_rows))
 
 
+# Registry of the shared fit_*_stage_d(ct, cp, timer, prefs, backend) entry points,
+# rebuilt on every call (not a module-level dict) so patching e.g. dce_pipeline.fit_tofts_stage_d
+# in tests takes effect -- a dict literal built once at import time would capture the
+# original function objects and never see the patch.
+def _stage_d_fit_funcs() -> Dict[str, Callable[..., np.ndarray]]:
+    return {
+        "patlak": fit_patlak_stage_d,
+        "tofts": fit_tofts_stage_d,
+        "ex_tofts": fit_ex_tofts_stage_d,
+        "tissue_uptake": fit_tissue_uptake_stage_d,
+        "2cxm": fit_2cxm_stage_d,
+    }
+
+
 def _fit_stage_d_model_accelerated(
     model_name: str,
     ct: np.ndarray,
@@ -3406,220 +3409,15 @@ def _fit_stage_d_model_accelerated(
 ) -> Optional[np.ndarray]:
     if acceleration_backend == "none":
         return None
-    if model_name not in ACCELERATED_STAGE_D_MODELS:
+    fit_func = _stage_d_fit_funcs().get(model_name)
+    if fit_func is None:
         return None
 
-    fit_module = _load_fit_module_for_acceleration(acceleration_backend)
     n_fits = int(ct.shape[1])
     if n_fits == 0:
         return np.zeros((0, len(MODEL_LAYOUTS[model_name]["param_names"])), dtype=np.float64)
 
-    data = np.ascontiguousarray(np.asarray(ct.T, dtype=np.float32))
-    timer_f32 = np.ascontiguousarray(np.asarray(timer, dtype=np.float32).reshape(-1))
-    cp_f32 = np.ascontiguousarray(np.asarray(cp_use, dtype=np.float32).reshape(-1))
-    user_info = np.ascontiguousarray(np.concatenate([timer_f32, cp_f32], axis=0), dtype=np.float32)
-
-    if model_name == "tofts":
-        model_id_name = "TOFTS"
-        initial_row = np.array(
-            [
-                float(prefs["initial_value_ktrans"]),
-                float(prefs["initial_value_ve"]),
-            ],
-            dtype=np.float32,
-        )
-        bounds_row = np.array(
-            [
-                float(prefs["lower_limit_ktrans"]),
-                float(prefs["upper_limit_ktrans"]),
-                float(prefs["lower_limit_ve"]),
-                float(prefs["upper_limit_ve"]),
-            ],
-            dtype=np.float32,
-        )
-    elif model_name == "ex_tofts":
-        model_id_name = "TOFTS_EXTENDED"
-        initial_row = np.array(
-            [
-                float(prefs["initial_value_ktrans"]),
-                float(prefs["initial_value_ve"]),
-                float(prefs["initial_value_vp"]),
-            ],
-            dtype=np.float32,
-        )
-        bounds_row = np.array(
-            [
-                float(prefs["lower_limit_ktrans"]),
-                float(prefs["upper_limit_ktrans"]),
-                float(prefs["lower_limit_ve"]),
-                float(prefs["upper_limit_ve"]),
-                float(prefs["lower_limit_vp"]),
-                float(prefs["upper_limit_vp"]),
-            ],
-            dtype=np.float32,
-        )
-    elif model_name == "patlak":
-        model_id_name = "PATLAK"
-        initial_row = np.array(
-            [
-                float(prefs["initial_value_ktrans"]),
-                float(prefs["initial_value_vp"]),
-            ],
-            dtype=np.float32,
-        )
-        bounds_row = np.array(
-            [
-                float(prefs["lower_limit_ktrans"]),
-                float(prefs["upper_limit_ktrans"]),
-                float(prefs["lower_limit_vp"]),
-                float(prefs["upper_limit_vp"]),
-            ],
-            dtype=np.float32,
-        )
-    elif model_name == "tissue_uptake":
-        # GpuFit/CpuFit tissue uptake parameter order is [Ktrans, vp, fp].
-        model_id_name = "TISSUE_UPTAKE"
-        initial_row = np.array(
-            [
-                float(prefs["initial_value_ktrans"]),
-                float(prefs["initial_value_vp"]),
-                float(prefs["initial_value_fp"]),
-            ],
-            dtype=np.float32,
-        )
-        bounds_row = np.array(
-            [
-                float(prefs["lower_limit_ktrans"]),
-                float(prefs["upper_limit_ktrans"]),
-                float(prefs["lower_limit_vp"]),
-                float(prefs["upper_limit_vp"]),
-                float(prefs["lower_limit_fp"]),
-                float(prefs["upper_limit_fp"]),
-            ],
-            dtype=np.float32,
-        )
-    else:
-        model_id_name = "TWO_COMPARTMENT_EXCHANGE"
-        initial_row = np.array(
-            [
-                float(prefs["initial_value_ktrans"]),
-                float(prefs["initial_value_ve"]),
-                float(prefs["initial_value_vp"]),
-                float(prefs["initial_value_fp"]),
-            ],
-            dtype=np.float32,
-        )
-        bounds_row = np.array(
-            [
-                float(prefs["lower_limit_ktrans"]),
-                float(prefs["upper_limit_ktrans"]),
-                float(prefs["lower_limit_ve"]),
-                float(prefs["upper_limit_ve"]),
-                float(prefs["lower_limit_vp"]),
-                float(prefs["upper_limit_vp"]),
-                float(prefs["lower_limit_fp"]),
-                float(prefs["upper_limit_fp"]),
-            ],
-            dtype=np.float32,
-        )
-
-    try:
-        model_id = int(getattr(fit_module.ModelID, model_id_name))
-    except AttributeError as exc:
-        raise RuntimeError(f"Acceleration backend does not expose ModelID.{model_id_name}") from exc
-
-    n_params = int(initial_row.size)
-    initial_parameters = np.ascontiguousarray(np.tile(initial_row[None, :], (n_fits, 1)), dtype=np.float32)
-    constraints = np.ascontiguousarray(np.tile(bounds_row[None, :], (n_fits, 1)), dtype=np.float32)
-    constraint_types = np.ascontiguousarray(
-        np.full((n_params,), int(fit_module.ConstraintType.LOWER_UPPER), dtype=np.int32)
-    )
-    tolerance = float(prefs.get("gpu_tolerance", 1e-6))
-    max_iterations = int(prefs.get("gpu_max_n_iterations", 200))
-
-    parameters, states, chi_squares, _, _ = fit_module.fit_constrained(
-        data=data,
-        weights=None,
-        model_id=model_id,
-        initial_parameters=initial_parameters,
-        constraints=constraints,
-        constraint_types=constraint_types,
-        tolerance=tolerance,
-        max_number_iterations=max_iterations,
-        parameters_to_fit=None,
-        estimator_id=int(fit_module.EstimatorID.LSE),
-        user_info=user_info,
-    )
-
-    params = np.asarray(parameters, dtype=np.float64)
-    states_arr = np.asarray(states, dtype=np.int32).reshape(-1)
-    chi = np.asarray(chi_squares, dtype=np.float64).reshape(-1)
-    failed = states_arr != 0
-    if np.any(failed):
-        params[failed, :] = np.nan
-        chi[failed] = np.nan
-
-    if model_name == "tofts":
-        out = np.full((n_fits, len(MODEL_LAYOUTS["tofts"]["param_names"])), np.nan, dtype=np.float64)
-        out[:, 0] = params[:, 0]
-        out[:, 1] = params[:, 1]
-        out[:, 2] = chi
-        out[:, 3] = params[:, 0]
-        out[:, 4] = params[:, 0]
-        out[:, 5] = params[:, 1]
-        out[:, 6] = params[:, 1]
-        return out
-
-    if model_name == "ex_tofts":
-        out = np.full((n_fits, len(MODEL_LAYOUTS["ex_tofts"]["param_names"])), np.nan, dtype=np.float64)
-        out[:, 0] = params[:, 0]
-        out[:, 1] = params[:, 1]
-        out[:, 2] = params[:, 2]
-        out[:, 3] = chi
-        out[:, 4] = params[:, 0]
-        out[:, 5] = params[:, 0]
-        out[:, 6] = params[:, 1]
-        out[:, 7] = params[:, 1]
-        out[:, 8] = params[:, 2]
-        out[:, 9] = params[:, 2]
-        return out
-
-    if model_name == "patlak":
-        out = np.full((n_fits, len(MODEL_LAYOUTS["patlak"]["param_names"])), -1.0, dtype=np.float64)
-        out[:, 0] = params[:, 0]
-        out[:, 1] = params[:, 1]
-        out[:, 2] = chi
-        return out
-
-    if model_name == "tissue_uptake":
-        out = np.full((n_fits, len(MODEL_LAYOUTS["tissue_uptake"]["param_names"])), np.nan, dtype=np.float64)
-        out[:, 0] = params[:, 0]
-        out[:, 1] = params[:, 2]
-        out[:, 2] = params[:, 1]
-        out[:, 3] = chi
-        out[:, 4] = params[:, 0]
-        out[:, 5] = params[:, 0]
-        out[:, 6] = params[:, 2]
-        out[:, 7] = params[:, 2]
-        out[:, 8] = params[:, 1]
-        out[:, 9] = params[:, 1]
-        return out
-
-    out = np.full((n_fits, len(MODEL_LAYOUTS["2cxm"]["param_names"])), np.nan, dtype=np.float64)
-    out[:, 0] = params[:, 0]
-    out[:, 1] = params[:, 1]
-    out[:, 2] = params[:, 2]
-    out[:, 3] = params[:, 3]
-    out[:, 4] = chi
-    out[:, 5] = params[:, 0]
-    out[:, 6] = params[:, 0]
-    out[:, 7] = params[:, 1]
-    out[:, 8] = params[:, 1]
-    out[:, 9] = params[:, 2]
-    out[:, 10] = params[:, 2]
-    out[:, 11] = params[:, 3]
-    out[:, 12] = params[:, 3]
-    return out
+    return fit_func(ct, cp_use, timer, prefs, backend=acceleration_backend)
 
 
 def _fit_auc_matrix(
@@ -3717,60 +3515,69 @@ def _fit_stage_d_model(
             raise ValueError("AUC fitting requires Stlv_use and Sttum arrays")
         return _fit_auc_matrix(timer, cp_use, ct, stlv_use, sttum, start_injection_min, sss, ssstum)
 
-    if acceleration_backend != "none" and model_name in ACCELERATED_STAGE_D_MODELS:
-        candidates = _acceleration_backend_attempt_order(acceleration_backend)
+    fit_func = _stage_d_fit_funcs().get(model_name)
+    if fit_func is not None:
+        # "python" is just the final, always-available candidate in the same fallback
+        # chain (acceleration_backend="none" -> chain is just ["python"]). Prefs are
+        # resolved once so every candidate -- accelerated or not -- sees the same
+        # model-specific overrides (e.g. voxel_lower_limit_fp_2cxm).
+        prefs_local = _apply_model_specific_prefs(prefs, model_name)
+        candidates = _acceleration_backend_attempt_order(acceleration_backend) + ["python"]
         for idx, backend_candidate in enumerate(candidates):
+            next_candidate = candidates[idx + 1] if idx + 1 < len(candidates) else None
             try:
-                accelerated = _fit_stage_d_model_accelerated(
+                result = _fit_stage_d_model_accelerated(
                     model_name=model_name,
                     ct=ct,
                     cp_use=cp_use,
                     timer=timer,
-                    prefs=prefs,
+                    prefs=prefs_local,
                     acceleration_backend=backend_candidate,
                 )
-                if accelerated is not None:
-                    if _accelerated_output_has_usable_primary_params(model_name, accelerated):
-                        return accelerated
-                    if idx + 1 < len(candidates):
+                if result is not None:
+                    if _accelerated_output_has_usable_primary_params(model_name, result):
+                        return result
+                    if next_candidate is not None:
                         print(
-                            f"[DCE] Stage-D {model_name}: acceleration backend '{backend_candidate}' produced "
-                            "non-finite core parameter output; trying fallback acceleration backend "
-                            f"'{candidates[idx + 1]}'.",
+                            f"[DCE] Stage-D {model_name}: backend '{backend_candidate}' produced non-finite "
+                            f"core parameter output; trying fallback backend '{next_candidate}'.",
                             flush=True,
                         )
                     else:
                         print(
-                            f"[DCE] Stage-D {model_name}: acceleration backend '{backend_candidate}' produced "
-                            "non-finite core parameter output; falling back to pure CPU.",
+                            f"[DCE] Stage-D {model_name}: backend '{backend_candidate}' produced non-finite "
+                            "core parameter output; no fallback remains.",
                             flush=True,
                         )
                     continue
-                if idx + 1 < len(candidates):
+                if next_candidate is not None:
                     print(
-                        f"[DCE] Stage-D {model_name}: acceleration backend '{backend_candidate}' returned no result; "
-                        f"trying fallback acceleration backend '{candidates[idx + 1]}'.",
+                        f"[DCE] Stage-D {model_name}: backend '{backend_candidate}' returned no result; "
+                        f"trying fallback backend '{next_candidate}'.",
                         flush=True,
                     )
             except Exception as exc:
-                if idx + 1 < len(candidates):
+                if next_candidate is not None:
                     print(
-                        f"[DCE] Stage-D {model_name}: acceleration backend '{backend_candidate}' unavailable "
-                        f"({exc}); trying fallback acceleration backend '{candidates[idx + 1]}'.",
+                        f"[DCE] Stage-D {model_name}: backend '{backend_candidate}' unavailable "
+                        f"({exc}); trying fallback backend '{next_candidate}'.",
                         flush=True,
                     )
                 else:
                     print(
-                        f"[DCE] Stage-D {model_name}: acceleration backend '{backend_candidate}' unavailable "
-                        f"({exc}); falling back to pure CPU.",
+                        f"[DCE] Stage-D {model_name}: backend '{backend_candidate}' unavailable ({exc}); "
+                        "no fallback remains.",
                         flush=True,
                     )
+        return np.full((ct.shape[1], row_len), np.nan, dtype=np.float64)
 
+    # fxr (and any other model outside the shared batched architecture, e.g. because its
+    # per-voxel R1 baseline can't be batched): per-voxel loop through _fit_fxr_curve.
     out = np.full((ct.shape[1], row_len), np.nan, dtype=np.float64)
     for i in range(ct.shape[1]):
         try:
             r1o_val = float(r1o[i]) if r1o is not None and i < r1o.size else None
-            row = _fit_model_curve(model_name, ct[:, i], cp_use, timer, prefs, r1o_val, relaxivity, fw)
+            row = _fit_fxr_curve(model_name, ct[:, i], cp_use, timer, prefs, r1o_val, relaxivity, fw)
             n_copy = min(row_len, row.shape[0])
             out[i, :n_copy] = row[:n_copy]
         except Exception:
@@ -3835,6 +3642,10 @@ def _run_stage_d_real(
 
     roi_paths, roi_names, roi_columns = _load_roi_columns(config, tumind, spatial_shape)
     selected_models, skipped_models = _stage_d_selected_models(config)
+    # ROI-only mode (`fit_voxels=0`): skip the per-voxel Stage-D fit and only fit each ROI's
+    # averaged concentration curve (average-then-fit, matching MATLAB). Much faster, and for
+    # nonlinear models the pre-fit averaging reduces noise. Parameter maps are not written.
+    fit_voxels = _to_bool(_stage_override(config, "fit_voxels", True), True)
 
     rootname = str(stage_a.get("rootname", _stage_override(config, "rootname", "python_dce")))
     start_injection_min = float(stage_b.get("start_injection_min", timer[0]))
@@ -3869,24 +3680,29 @@ def _run_stage_d_real(
                 raise ValueError("T1TUM size mismatch for FXR")
             r1o = 1.0 / t1tum
 
-        voxel_results = _fit_stage_d_model(
-            model_name=model_name,
-            ct=ct_source,
-            cp_use=cp_use,
-            timer=timer,
-            prefs=prefs,
-            r1o=r1o,
-            relaxivity=relaxivity,
-            fw=fw,
-            stlv_use=stlv_use,
-            sttum=sttum,
-            start_injection_min=start_injection_min,
-            sss=sss,
-            ssstum=ssstum,
-            acceleration_backend=acceleration_backend,
-        )
+        n_params = len(param_names)
+        if fit_voxels:
+            voxel_results = _fit_stage_d_model(
+                model_name=model_name,
+                ct=ct_source,
+                cp_use=cp_use,
+                timer=timer,
+                prefs=prefs,
+                r1o=r1o,
+                relaxivity=relaxivity,
+                fw=fw,
+                stlv_use=stlv_use,
+                sttum=sttum,
+                start_injection_min=start_injection_min,
+                sss=sss,
+                ssstum=ssstum,
+                acceleration_backend=acceleration_backend,
+            )
+        else:
+            # Placeholder so shapes stay consistent; no maps are written in ROI-only mode.
+            voxel_results = np.full((ct_source.shape[1], n_params), np.nan, dtype=np.float64)
 
-        roi_results = np.empty((0, voxel_results.shape[1]), dtype=np.float64)
+        roi_results = np.empty((0, n_params), dtype=np.float64)
         roi_curve: Optional[np.ndarray] = None
         roi_r1o: Optional[np.ndarray] = None
         if roi_columns:
@@ -3915,14 +3731,18 @@ def _run_stage_d_real(
                 acceleration_backend=acceleration_backend,
             )
 
-        map_paths = _write_param_maps(
-            config=config,
-            rootname=rootname,
-            model_name=model_name,
-            param_names=param_names,
-            fit_values=voxel_results,
-            tumind=tumind,
-            spatial_shape=spatial_shape,
+        map_paths = (
+            _write_param_maps(
+                config=config,
+                rootname=rootname,
+                model_name=model_name,
+                param_names=param_names,
+                fit_values=voxel_results,
+                tumind=tumind,
+                spatial_shape=spatial_shape,
+            )
+            if fit_voxels
+            else {}
         )
 
         xls_path: Optional[str] = None

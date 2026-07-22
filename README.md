@@ -116,7 +116,7 @@ Default template location:
 
 - `/path/to/ROCKETSHIP/python/dce_default.json`
 - This default is prewired to the tiny fixture:
-  - `/path/to/ROCKETSHIP/tests/data/ci_fixtures/dce/tiny_settings_case`
+  - `/path/to/ROCKETSHIP/tests/data/BIDS_test` (subject `sub-11tiny`, session `ses-01`)
   - outputs to `/path/to/ROCKETSHIP/out/dce_gui_tiny`
 
 Optional runtime overrides:
@@ -124,7 +124,6 @@ Optional runtime overrides:
 ```bash
 python run_dce_python_cli.py \
   --config tests/python/dce_cli_config.example.json \
-  --dce-preferences /path/to/ROCKETSHIP/dce/dce_preferences.txt \
   --set voxel_MaxFunEvals=100 \
   --set blood_t1_ms=1600
 ```

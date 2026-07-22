@@ -18,17 +18,38 @@ sys.path.insert(0, str(REPO_ROOT / "python"))
 from dce_pipeline import DcePipelineConfig, _run_stage_a_real, _run_stage_b_real, _run_stage_d_real  # noqa: E402
 
 
+TINY_SUBJECT = "sub-11tiny"
+TINY_SESSION = "ses-01"
+
+
 def _tiny_root() -> Path:
     return Path(
         os.environ.get(
             "ROCKETSHIP_TINY_SETTINGS_ROOT",
-            str(REPO_ROOT / "tests/data" / "ci_fixtures" / "dce" / "tiny_settings_case"),
+            str(REPO_ROOT / "tests/data" / "BIDS_test"),
         )
     ).expanduser().resolve()
 
 
+def _tiny_paths(root: Path) -> dict:
+    """Resolve the tiny DCE fixture inputs within the BIDS_test sub-11tiny subject."""
+    raw = root / "rawdata" / TINY_SUBJECT / TINY_SESSION
+    der = root / "derivatives" / TINY_SUBJECT / TINY_SESSION
+    stem = f"{TINY_SUBJECT}_{TINY_SESSION}"
+    return {
+        "source": raw / "dce",
+        "tp": der,
+        "dynamic": raw / "dce" / f"{stem}_DCE.nii",
+        "aif": der / "dce" / f"{stem}_desc-AIFroi_mask.nii",
+        "roi": der / "anat" / f"{stem}_desc-brain_mask.nii",
+        "t1map": der / "dce" / f"{stem}_space-DCEref_T1map.nii",
+        "noise": der / "anat" / f"{stem}_desc-noise_mask.nii",
+        "meta": der / "dce" / f"{stem}_desc-tinymeta.json",
+    }
+
+
 def _load_meta(root: Path) -> dict:
-    return json.loads((root / "processed" / "tiny_fixture_meta.json").read_text())
+    return json.loads(_tiny_paths(root)["meta"].read_text())
 
 
 def _make_config(root: Path, output_dir: Path, extra_overrides: dict | None = None) -> DcePipelineConfig:
@@ -44,8 +65,6 @@ def _make_config(root: Path, output_dir: Path, extra_overrides: dict | None = No
         "time_resolution_sec": float(meta["time_resolution_sec"]),
         "start_injection_min": float(meta["start_injection_min"]),
         "end_injection_min": float(meta["end_injection_min"]),
-        "steady_state_start": 1,
-        "steady_state_end": 3,
         "relaxivity": float(meta["relaxivity"]),
         "hematocrit": float(meta["hematocrit"]),
         "snr_filter": 0.0,
@@ -56,18 +75,19 @@ def _make_config(root: Path, output_dir: Path, extra_overrides: dict | None = No
     if extra_overrides:
         overrides.update(extra_overrides)
 
+    paths = _tiny_paths(root)
     return DcePipelineConfig(
-        subject_source_path=root,
-        subject_tp_path=root / "processed",
+        subject_source_path=paths["source"],
+        subject_tp_path=paths["tp"],
         output_dir=output_dir,
         backend="cpu",
         checkpoint_dir=output_dir / "checkpoints",
         write_xls=False,
-        dynamic_files=[root / "Dynamic_t1w.nii"],
-        aif_files=[root / "processed" / "T1_AIF_roi.nii"],
-        roi_files=[root / "processed" / "T1_brain_roi.nii"],
-        t1map_files=[root / "processed" / "T1_map_t1_fa_fit_fa10.nii"],
-        noise_files=[root / "processed" / "T1_noise_roi.nii"],
+        dynamic_files=[paths["dynamic"]],
+        aif_files=[paths["aif"]],
+        roi_files=[paths["roi"]],
+        t1map_files=[paths["t1map"]],
+        noise_files=[paths["noise"]],
         model_flags={
             "tofts": 1,
             "ex_tofts": 0,
@@ -98,8 +118,8 @@ def _drop_stage_overrides(config: DcePipelineConfig, *keys: str) -> None:
 @pytest.fixture(scope="module")
 def tiny_root() -> Path:
     root = _tiny_root()
-    if not root.exists():
-        pytest.skip(f"Missing tiny settings fixture: {root}", allow_module_level=True)
+    if not _tiny_paths(root)["dynamic"].exists():
+        pytest.skip(f"Missing tiny settings fixture under: {root}", allow_module_level=True)
     return root
 
 

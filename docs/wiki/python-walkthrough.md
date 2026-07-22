@@ -55,13 +55,12 @@ cd /path/to/ROCKETSHIP
 .venv/bin/python run_dce_python_cli.py --config tests/python/dce_cli_config.example.json
 ```
 
-Run with preference file + runtime overrides:
+Run with runtime overrides:
 
 ```bash
 cd /path/to/ROCKETSHIP
 .venv/bin/python run_dce_python_cli.py \
   --config tests/python/dce_cli_config.example.json \
-  --dce-preferences /path/to/ROCKETSHIP/dce/dce_preferences.txt \
   --set voxel_MaxFunEvals=100 \
   --set blood_t1_ms=1600
 ```

@@ -50,6 +50,9 @@ class _FakeAccelModule:
         LSE = 0
 
     last_call = None
+    # first_call captures the base (fixed-start) fit; multi-start may issue further
+    # refine calls with perturbed initials, which land in last_call.
+    first_call = None
 
     @classmethod
     def fit_constrained(
@@ -74,6 +77,8 @@ class _FakeAccelModule:
             "constraints": np.asarray(constraints, dtype=np.float32),
             "constraint_types": np.asarray(constraint_types, dtype=np.int32),
         }
+        if cls.first_call is None:
+            cls.first_call = cls.last_call
         n_fits = int(np.asarray(data).shape[0])
         n_params = int(np.asarray(initial_parameters).shape[1])
         params = np.tile(np.arange(1, n_params + 1, dtype=np.float32), (n_fits, 1))
@@ -479,7 +484,7 @@ class TestDcePipeline:
             assert info["method_requested"] == "glr"
             assert info["method_used"] == "glr"
 
-    def test_resolve_baseline_window_defaults_to_legacy_sobel_when_no_options_set(self) -> None:
+    def test_resolve_baseline_window_defaults_to_piecewise_constant_when_no_options_set(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))
             config.stage_overrides = {
@@ -496,8 +501,60 @@ class TestDcePipeline:
             assert ss_start == 0
             assert 1 <= ss_end <= 12
             assert info["method_requested"] == "none"
-            assert info["method_used"] == "legacy_sobel"
-            assert info["source"] == "default_auto_method:legacy_sobel"
+            assert info["method_used"] == "piecewise_constant"
+            assert info["source"] == "default_auto_method:piecewise_constant"
+
+    def test_resolve_baseline_window_uses_aif_sidecar_when_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            aif_path = Path(config.aif_files[0])
+            sidecar_path = Path(str(aif_path)[: -len(".nii.gz")] + ".json")
+            sidecar_path.write_text(json.dumps({"SteadyStateEndTimeIndex": 5}))
+            config.stage_overrides = {"stage_a_mode": "scaffold"}
+            stlv = np.full((12, 2), 100.0, dtype=np.float64)
+
+            ss_start, ss_end, info = _resolve_baseline_window(config, n_timepoints=12, stlv=stlv)
+
+            assert (ss_start, ss_end) == (0, 5)
+            assert info["method_used"] == "aif_sidecar"
+            assert info["source"] == f"aif_sidecar:SteadyStateEndTimeIndex:{sidecar_path}"
+
+    def test_resolve_baseline_window_falls_back_to_auto_when_sidecar_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            config.stage_overrides = {
+                "stage_a_mode": "scaffold",
+                "steady_state_auto_method": "piecewise_constant",
+            }
+            mean_curve = np.full(24, 100.0, dtype=np.float64)
+            mean_curve[4:7] = np.array([99.5, 99.0, 99.3], dtype=np.float64)
+            mean_curve[7:] = 140.0
+            stlv = np.tile(mean_curve[:, np.newaxis], (1, 3))
+
+            ss_start, ss_end, info = _resolve_baseline_window(config, n_timepoints=24, stlv=stlv)
+
+            assert ss_start == 0
+            assert info["method_used"] == "piecewise_constant"
+            assert info["source"] == "steady_state_auto_method:piecewise_constant"
+
+    def test_resolve_baseline_window_manual_end_overrides_aif_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            aif_path = Path(config.aif_files[0])
+            sidecar_path = Path(str(aif_path)[: -len(".nii.gz")] + ".json")
+            sidecar_path.write_text(json.dumps({"SteadyStateEndTimeIndex": 5}))
+            config.stage_overrides = {
+                "stage_a_mode": "scaffold",
+                "steady_state_start": 1,
+                "steady_state_end": 3,
+            }
+            stlv = np.full((12, 2), 100.0, dtype=np.float64)
+
+            ss_start, ss_end, info = _resolve_baseline_window(config, n_timepoints=12, stlv=stlv)
+
+            assert (ss_start, ss_end) == (0, 3)
+            assert info["method_used"] == "manual"
+            assert info["source"] == "steady_state_end"
 
     def test_resolve_timepoint_window_defaults_to_full_range(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -697,40 +754,41 @@ class TestDcePipeline:
         cp = np.asarray([0.8, 0.9, 1.0, 1.1, 1.2], dtype=np.float64)
         timer = np.asarray([0.0, 0.1, 0.2, 0.3, 0.4], dtype=np.float64)
 
-        accel_calls: list[str] = []
-        cpu_calls: list[int] = []
+        calls: list[str] = []
 
         def fake_accel(**kwargs):
-            accel_calls.append(str(kwargs["acceleration_backend"]))
-            raise RuntimeError("the provided PTX was compiled with an unsupported toolchain")
-
-        def fake_cpu_fit(*args, **kwargs):
-            del args, kwargs
-            cpu_calls.append(1)
-            return np.asarray([0.2, 0.3, 0.4, 0.2, 0.2, 0.3, 0.3], dtype=np.float64)
+            backend = str(kwargs["acceleration_backend"])
+            calls.append(backend)
+            if backend == "gpufit_cuda":
+                raise RuntimeError("the provided PTX was compiled with an unsupported toolchain")
+            if backend == "python":
+                return np.tile(
+                    np.asarray([0.2, 0.3, 0.4, 0.2, 0.2, 0.3, 0.3], dtype=np.float64), (ct.shape[1], 1)
+                )
+            return None
 
         with patch("dce_pipeline._cpufit_import_available", return_value=False):
             with patch("dce_pipeline._fit_stage_d_model_accelerated", side_effect=fake_accel):
-                with patch("dce_pipeline._fit_model_curve", side_effect=fake_cpu_fit):
-                    out = _fit_stage_d_model(
-                        model_name="tofts",
-                        ct=ct,
-                        cp_use=cp,
-                        timer=timer,
-                        prefs={},
-                        r1o=None,
-                        relaxivity=3.6,
-                        fw=0.8,
-                        stlv_use=None,
-                        sttum=None,
-                        start_injection_min=0.0,
-                        sss=None,
-                        ssstum=None,
-                        acceleration_backend="gpufit_cuda",
-                    )
+                out = _fit_stage_d_model(
+                    model_name="tofts",
+                    ct=ct,
+                    cp_use=cp,
+                    timer=timer,
+                    prefs={},
+                    r1o=None,
+                    relaxivity=3.6,
+                    fw=0.8,
+                    stlv_use=None,
+                    sttum=None,
+                    start_injection_min=0.0,
+                    sss=None,
+                    ssstum=None,
+                    acceleration_backend="gpufit_cuda",
+                )
 
-        assert accel_calls == ["gpufit_cuda"]
-        assert len(cpu_calls) == ct.shape[1]
+        # "python" is now just the final candidate in the same fallback chain
+        # (no cpufit_cpu available here), not a separate code path.
+        assert calls == ["gpufit_cuda", "python"]
         assert out.shape == (ct.shape[1], 7)
         assert np.allclose(out[:, 0], 0.2)
         assert np.allclose(out[:, 1], 0.3)
@@ -799,34 +857,37 @@ class TestDcePipeline:
         row_len = len(MODEL_LAYOUTS["ex_tofts"]["param_names"])
         accel_nan = np.full((ct.shape[1], row_len), np.nan, dtype=np.float64)
         cpu_row = np.asarray([0.2, 0.3, 0.1, 0.05, 0.2, 0.2, 0.3, 0.3, 0.1, 0.1], dtype=np.float64)
-        cpu_calls: list[int] = []
+        calls: list[str] = []
 
-        def fake_cpu_fit(*args, **kwargs):
-            del args, kwargs
-            cpu_calls.append(1)
-            return cpu_row
+        def fake_accel(**kwargs):
+            backend = str(kwargs["acceleration_backend"])
+            calls.append(backend)
+            if backend == "python":
+                return np.tile(cpu_row, (ct.shape[1], 1))
+            return accel_nan
 
         with patch("dce_pipeline._gpufit_import_available", return_value=False):
-            with patch("dce_pipeline._fit_stage_d_model_accelerated", return_value=accel_nan):
-                with patch("dce_pipeline._fit_model_curve", side_effect=fake_cpu_fit):
-                    out = _fit_stage_d_model(
-                        model_name="ex_tofts",
-                        ct=ct,
-                        cp_use=cp,
-                        timer=timer,
-                        prefs={},
-                        r1o=None,
-                        relaxivity=3.6,
-                        fw=0.8,
-                        stlv_use=None,
-                        sttum=None,
-                        start_injection_min=0.0,
-                        sss=None,
-                        ssstum=None,
-                        acceleration_backend="cpufit_cpu",
-                    )
+            with patch("dce_pipeline._fit_stage_d_model_accelerated", side_effect=fake_accel):
+                out = _fit_stage_d_model(
+                    model_name="ex_tofts",
+                    ct=ct,
+                    cp_use=cp,
+                    timer=timer,
+                    prefs={},
+                    r1o=None,
+                    relaxivity=3.6,
+                    fw=0.8,
+                    stlv_use=None,
+                    sttum=None,
+                    start_injection_min=0.0,
+                    sss=None,
+                    ssstum=None,
+                    acceleration_backend="cpufit_cpu",
+                )
 
-        assert len(cpu_calls) == ct.shape[1]
+        # "python" is now just the final candidate in the same fallback chain
+        # (no gpufit fallback available here), not a separate code path.
+        assert calls == ["cpufit_cpu", "python"]
         assert out.shape == (ct.shape[1], row_len)
         assert np.all(np.isfinite(out[:, :3]))
         assert np.allclose(out[0, :], cpu_row)
@@ -905,25 +966,22 @@ class TestDcePipeline:
                 [1.0, 2.0, 3.0, 0.1, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0],
             ),
             (
-                "patlak",
-                _FakeAccelModule.ModelID.PATLAK,
-                [0.11, 0.33],
-                [0.01, 1.01, 0.03, 1.03],
-                [1.0, 2.0, 0.1, -1.0, -1.0, -1.0, -1.0],
-            ),
-            (
                 "tissue_uptake",
                 _FakeAccelModule.ModelID.TISSUE_UPTAKE,
-                [0.11, 0.33, 0.44],
-                [0.01, 1.01, 0.03, 1.03, 0.04, 1.04],
-                [1.0, 3.0, 2.0, 0.1, 1.0, 1.0, 3.0, 3.0, 2.0, 2.0],
+                # param[0] is now E = Ktrans/Fp = 0.11/0.44 = 0.25; bounds[0] = [ktrans_lo/fp_hi, ~1].
+                [0.25, 0.33, 0.44],
+                [0.01 / 1.04, 1.0 - 1e-8, 0.03, 1.03, 0.04, 1.04],
+                # mock returns [E=1, vp=2, Fp=3]; recovered Ktrans = E*Fp = 3.
+                [3.0, 3.0, 2.0, 0.1, 3.0, 3.0, 3.0, 3.0, 2.0, 2.0],
             ),
             (
                 "2cxm",
                 _FakeAccelModule.ModelID.TWO_COMPARTMENT_EXCHANGE,
-                [0.11, 0.22, 0.33, 0.44],
-                [0.01, 1.01, 0.02, 1.02, 0.03, 1.03, 0.04, 1.04],
-                [1.0, 2.0, 3.0, 4.0, 0.1, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0],
+                # param[0] is now E = Ktrans/Fp = 0.11/0.44 = 0.25; bounds[0] = [ktrans_lo/fp_hi, ~1].
+                [0.25, 0.22, 0.33, 0.44],
+                [0.01 / 1.04, 1.0 - 1e-8, 0.02, 1.02, 0.03, 1.03, 0.04, 1.04],
+                # mock returns [E=1, ve=2, vp=3, Fp=4]; recovered Ktrans = E*Fp = 4.
+                [4.0, 2.0, 3.0, 4.0, 0.1, 4.0, 4.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0],
             ),
         ],
     )
@@ -965,6 +1023,7 @@ class TestDcePipeline:
         }
 
         _FakeAccelModule.last_call = None
+        _FakeAccelModule.first_call = None
         with patch("dce_pipeline._load_fit_module_for_acceleration", return_value=_FakeAccelModule):
             out = _fit_stage_d_model_accelerated(
                 model_name=model_name,
@@ -982,10 +1041,75 @@ class TestDcePipeline:
         assert np.allclose(np.asarray(out)[0, :], np.asarray(expected_row0, dtype=np.float64)), (
             f"{model_name}: unexpected output row"
         )
-        assert _FakeAccelModule.last_call is not None, f"{model_name}: accelerator call missing"
-        assert _FakeAccelModule.last_call["model_id"] == model_id
-        assert np.allclose(_FakeAccelModule.last_call["initial_parameters"][0, :], np.asarray(expected_init))
-        assert np.allclose(_FakeAccelModule.last_call["constraints"][0, :], np.asarray(expected_bounds))
+        assert _FakeAccelModule.first_call is not None, f"{model_name}: accelerator call missing"
+        assert _FakeAccelModule.first_call["model_id"] == model_id
+        # The base (fixed-start) call carries the configured initials/bounds; multi-start
+        # refine calls (2cxm/2cum) perturb the initials and are not asserted here.
+        assert np.allclose(_FakeAccelModule.first_call["initial_parameters"][0, :], np.asarray(expected_init))
+        assert np.allclose(_FakeAccelModule.first_call["constraints"][0, :], np.asarray(expected_bounds))
+
+    def test_stage_d_accelerated_patlak_uses_per_voxel_linear_seed(self) -> None:
+        """Patlak now routes through dce_fit_backends: unlike the other accelerated
+        models (which start every voxel from the same fixed prefs value), it seeds
+        each voxel's first candidate from the closed-form linear-Patlak estimate --
+        the same seeding dce_models.model_patlak_fit has always used on the CPU path.
+        """
+        from dce_models import model_patlak_linear
+
+        ct = np.asarray(
+            [
+                [1.0, 2.0],
+                [1.1, 2.1],
+                [1.2, 2.2],
+                [1.3, 2.3],
+                [1.4, 2.4],
+            ],
+            dtype=np.float64,
+        )
+        cp = np.asarray([0.7, 0.8, 0.9, 1.0, 1.1], dtype=np.float64)
+        timer = np.asarray([0.0, 0.1, 0.2, 0.3, 0.4], dtype=np.float64)
+        prefs = {
+            "initial_value_ktrans": 0.11,
+            "initial_value_vp": 0.33,
+            "lower_limit_ktrans": 0.01,
+            "upper_limit_ktrans": 1.01,
+            "lower_limit_vp": 0.03,
+            "upper_limit_vp": 1.03,
+            "gpu_tolerance": 1e-6,
+            "gpu_max_n_iterations": 64,
+        }
+        expected_seed = model_patlak_linear(list(ct[:, 0]), list(cp), list(timer))
+        # fit_with_multistart clamps every candidate to the model's bounds before
+        # handing it to any backend, so a seed outside [lower, upper] arrives clamped.
+        expected_init = [
+            min(max(float(expected_seed[0]), prefs["lower_limit_ktrans"]), prefs["upper_limit_ktrans"]),
+            min(max(float(expected_seed[1]), prefs["lower_limit_vp"]), prefs["upper_limit_vp"]),
+        ]
+
+        _FakeAccelModule.last_call = None
+        _FakeAccelModule.first_call = None
+        with patch("dce_pipeline._load_fit_module_for_acceleration", return_value=_FakeAccelModule):
+            out = _fit_stage_d_model_accelerated(
+                model_name="patlak",
+                ct=ct,
+                cp_use=cp,
+                timer=timer,
+                prefs=prefs,
+                acceleration_backend="cpufit_cpu",
+            )
+
+        assert out is not None
+        assert out.shape == (ct.shape[1], len(MODEL_LAYOUTS["patlak"]["param_names"]))
+        # Fake module always returns canned params=[1, 2], chi=0.1 regardless of the
+        # candidate tried; CI columns stay at the -1.0 sentinel patlak has always used
+        # on the accelerated backend (no Jacobian available there).
+        assert np.allclose(out[0, :], np.asarray([1.0, 2.0, 0.1, -1.0, -1.0, -1.0, -1.0]))
+        assert _FakeAccelModule.first_call is not None
+        assert _FakeAccelModule.first_call["model_id"] == _FakeAccelModule.ModelID.PATLAK
+        assert np.allclose(_FakeAccelModule.first_call["initial_parameters"][0, :], np.asarray(expected_init))
+        assert np.allclose(
+            _FakeAccelModule.first_call["constraints"][0, :], np.asarray([0.01, 1.01, 0.03, 1.03])
+        )
 
     @pytest.mark.parametrize("model_name", ["ex_tofts", "tissue_uptake", "2cxm"])
     def test_stage_d_uses_acceleration_for_new_models(self, model_name: str) -> None:

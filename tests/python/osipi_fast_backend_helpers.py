@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import json
 import math
 from pathlib import Path
 import sys
@@ -24,11 +23,12 @@ from dce_pipeline import (  # noqa: E402
     probe_acceleration_backend,
 )
 
+from osipi_official_tolerances import official_abs_tol  # noqa: E402
+
 
 OSIPI_ROOT = REPO_ROOT / "tests" / "data" / "osipi"
 DCE_DATA_DIR = OSIPI_ROOT / "dce_models"
 REFERENCE_DIR = OSIPI_ROOT / "reference"
-PEER_ERROR_SUMMARY = json.loads((REFERENCE_DIR / "osipi_peer_error_summary.json").read_text())
 
 FAST_BACKEND_CASES: dict[str, dict[str, str]] = {
     "tofts": {
@@ -85,30 +85,6 @@ def _rows(csv_file: Path) -> list[dict[str, str]]:
 
 def _series(raw: str) -> list[float]:
     return [float(x) for x in str(raw).split()]
-
-
-def _peer_method_metrics(category: str, method: str) -> dict[str, Any]:
-    methods = PEER_ERROR_SUMMARY["metrics"][category]
-    if method in methods:
-        return methods[method]
-    for key, value in methods.items():
-        if str(key).lower() == method.lower():
-            return value
-    raise KeyError(f"Missing peer method '{method}' in category '{category}'")
-
-
-def _peer_max_abs_error(category: str, method: str, param: str) -> float:
-    return float(_peer_method_metrics(category, method)[param]["max_abs_error"])
-
-
-def _assert_close(actual: float, expected: float, tol: float, label: str, param: str) -> None:
-    if not math.isfinite(actual):
-        pytest.fail(f"OSIPI {label} {param} produced non-finite value: {actual!r}")
-    err = abs(actual - expected)
-    assert err <= tol, (
-        f"OSIPI {label} {param} abs error {err:.8g} exceeded tolerance {tol:.8g}. "
-        f"actual={actual:.8g}, expected={expected:.8g}"
-    )
 
 
 def _ps_per_min_from_ktrans_fp_per_sec(ktrans_per_sec: float, fp_per_sec: float) -> float:
@@ -219,139 +195,68 @@ def require_gpufit_backend() -> str:
     return "gpufit_cuda"
 
 
-def assert_fast_backend_model_case(model_name: str, acceleration_backend: str) -> None:
-    """Assert one model's accelerated fit (single representative curve) stays within peer tolerance."""
+def _model_param_checks(model_name: str, fit: np.ndarray, row: dict[str, str]) -> list[tuple[str, float, float]]:
+    """Return [(param, actual, expected)] in OSIPI comparison units for one fit vector."""
+    if model_name == "tofts":
+        return [("Ktrans", float(fit[0]) * 60.0, float(row["Ktrans"])),
+                ("ve", float(fit[1]), float(row["ve"]))]
+    if model_name == "ex_tofts":
+        return [("Ktrans", float(fit[0]) * 60.0, float(row["Ktrans"])),
+                ("ve", float(fit[1]), float(row["ve"])),
+                ("vp", float(fit[2]), float(row["vp"]))]
+    if model_name == "patlak":
+        return [("ps", float(fit[0]) * 60.0, float(row["ps"])),
+                ("vp", float(fit[1]), float(row["vp"]))]
+    if model_name == "2cxm":
+        kt, fp = float(fit[0]), float(fit[3])
+        return [("ve", float(fit[1]), float(row["ve"])),
+                ("vp", float(fit[2]), float(row["vp"])),
+                ("fp", fp * 60.0 * 100.0, float(row["fp"])),
+                ("ps", _ps_per_min_from_ktrans_fp_per_sec(kt, fp), float(row["ps"]))]
+    if model_name == "tissue_uptake":
+        kt, fp = float(fit[0]), float(fit[1])
+        return [("vp", float(fit[2]), float(row["vp"])),
+                ("fp", fp * 60.0 * 100.0, float(row["fp"])),
+                ("ps", _ps_per_min_from_ktrans_fp_per_sec(kt, fp), float(row["ps"]))]
+    raise KeyError(f"Unsupported fast backend model '{model_name}'.")
+
+
+def assert_backend_model_sweep(model_name: str, acceleration_backend: str) -> None:
+    """Assert an accelerated backend fits the FULL OSIPI DRO sweep within OSIPI tolerances.
+
+    Every case of the model's DRO dataset is fit and each parameter checked against the
+    OSIPI official acceptance tolerance (``a_tol + r_tol*|ref|``). Fails with a per-case
+    breakdown of every out-of-tolerance parameter.
+    """
     if model_name not in FAST_BACKEND_CASES:
         raise KeyError(f"Unsupported fast backend model '{model_name}'.")
-
     case = FAST_BACKEND_CASES[model_name]
-    row = _rows(DCE_DATA_DIR / case["dataset"])[0]
-    fit = _accelerated_fit_row(
-        model_name=model_name,
-        row=row,
-        signal_col=case["signal_col"],
-        aif_col=case["aif_col"],
-        time_col=case["time_col"],
-        acceleration_backend=acceleration_backend,
-    )
-    label = f"{row['label']} ({model_name} {acceleration_backend})"
     method = case["peer_method"]
+    rows_ = _rows(DCE_DATA_DIR / case["dataset"])
 
-    if model_name == "tofts":
-        _assert_close(
-            float(fit[0]) * 60.0,
-            float(row["Ktrans"]),
-            _peer_max_abs_error("DCEmodels", method, "Ktrans") + 1e-6,
-            label,
-            "Ktrans",
-        )
-        _assert_close(
-            float(fit[1]),
-            float(row["ve"]),
-            _peer_max_abs_error("DCEmodels", method, "ve") + 1e-6,
-            label,
-            "ve",
-        )
-        return
+    failures: list[str] = []
+    n_checks = 0
+    for row in rows_:
+        try:
+            fit = _accelerated_fit_row(
+                model_name=model_name, row=row, signal_col=case["signal_col"],
+                aif_col=case["aif_col"], time_col=case["time_col"], acceleration_backend=acceleration_backend,
+            )
+        except Exception as exc:  # noqa: BLE001 - report, don't abort the sweep
+            failures.append(f"{row['label']}: fit raised {exc!r}")
+            continue
+        for param, actual, expected in _model_param_checks(model_name, fit, row):
+            n_checks += 1
+            tol = official_abs_tol(method, param, expected)
+            if not (math.isfinite(actual) and abs(actual - expected) <= tol):
+                failures.append(
+                    f"{row['label']} {param}: |{actual:.6g}-{expected:.6g}|={abs(actual - expected):.6g} > tol {tol:.6g}"
+                )
 
-    if model_name == "ex_tofts":
-        _assert_close(
-            float(fit[0]) * 60.0,
-            float(row["Ktrans"]),
-            _peer_max_abs_error("DCEmodels", method, "Ktrans") + 1e-6,
-            label,
-            "Ktrans",
+    if failures:
+        shown = "\n  ".join(failures[:12])
+        more = f"\n  ... and {len(failures) - 12} more" if len(failures) > 12 else ""
+        raise AssertionError(
+            f"{model_name} ({acceleration_backend}) OSIPI full sweep: {len(failures)} of {n_checks} "
+            f"parameter checks outside OSIPI tolerance across {len(rows_)} cases:\n  {shown}{more}"
         )
-        _assert_close(
-            float(fit[1]),
-            float(row["ve"]),
-            _peer_max_abs_error("DCEmodels", method, "ve") + 1e-6,
-            label,
-            "ve",
-        )
-        _assert_close(
-            float(fit[2]),
-            float(row["vp"]),
-            _peer_max_abs_error("DCEmodels", method, "vp") + 1e-6,
-            label,
-            "vp",
-        )
-        return
-
-    if model_name == "patlak":
-        _assert_close(
-            float(fit[0]) * 60.0,
-            float(row["ps"]),
-            _peer_max_abs_error("DCEmodels", method, "ps") + 1e-6,
-            label,
-            "ps",
-        )
-        _assert_close(
-            float(fit[1]),
-            float(row["vp"]),
-            _peer_max_abs_error("DCEmodels", method, "vp") + 1e-6,
-            label,
-            "vp",
-        )
-        return
-
-    if model_name == "2cxm":
-        ktrans_per_sec = float(fit[0])
-        fp_per_sec = float(fit[3])
-        _assert_close(
-            float(fit[1]),
-            float(row["ve"]),
-            _peer_max_abs_error("DCEmodels", method, "ve") + 1e-6,
-            label,
-            "ve",
-        )
-        _assert_close(
-            float(fit[2]),
-            float(row["vp"]),
-            _peer_max_abs_error("DCEmodels", method, "vp") + 1e-6,
-            label,
-            "vp",
-        )
-        _assert_close(
-            fp_per_sec * 60.0 * 100.0,
-            float(row["fp"]),
-            _peer_max_abs_error("DCEmodels", method, "fp") + 1e-6,
-            label,
-            "fp",
-        )
-        _assert_close(
-            _ps_per_min_from_ktrans_fp_per_sec(ktrans_per_sec, fp_per_sec),
-            float(row["ps"]),
-            _peer_max_abs_error("DCEmodels", method, "ps") + 1e-6,
-            label,
-            "ps",
-        )
-        return
-
-    if model_name == "tissue_uptake":
-        ktrans_per_sec = float(fit[0])
-        fp_per_sec = float(fit[1])
-        _assert_close(
-            float(fit[2]),
-            float(row["vp"]),
-            _peer_max_abs_error("DCEmodels", method, "vp") + 1e-6,
-            label,
-            "vp",
-        )
-        _assert_close(
-            fp_per_sec * 60.0 * 100.0,
-            float(row["fp"]),
-            _peer_max_abs_error("DCEmodels", method, "fp") + 1e-6,
-            label,
-            "fp",
-        )
-        _assert_close(
-            _ps_per_min_from_ktrans_fp_per_sec(ktrans_per_sec, fp_per_sec),
-            float(row["ps"]),
-            _peer_max_abs_error("DCEmodels", method, "ps") + 1e-6,
-            label,
-            "ps",
-        )
-        return
-
-    raise KeyError(f"Unsupported fast backend model '{model_name}'.")

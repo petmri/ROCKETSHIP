@@ -22,15 +22,21 @@ Keep strategic sequencing in `docs/project-management/ROADMAP.md` and current me
 - [ ] Improve `2cxm` and `tissue_uptake` stability/accuracy on real data.
 - [ ] Expand DSC support beyond current core (`DSC_convolution_oSVD` and broader workflow parity).
 - [ ] Decide final status of `nested` and `FXL_rr` (full support vs explicit non-support with cleanup).
+- [ ] Extend the Stage-D fit-backend consolidation (shared `FitInputs` + one multi-start
+      mechanism, currently proven on `patlak` only) to `tofts`/`ex_tofts`/`tissue_uptake`/
+      `2cxm` -- see `docs/project-management/projects/stage-d-fit-consolidation/STAGE_D_FIT_CONSOLIDATION_PLAN.md`.
+- [ ] Address the multiple end steady-state issues (see recent Patlak regression) with a unified approach. Short term: read end_ss from the AIF json sidecar; medium term: evaluate the 5 end_ss algorithms we have (unify with matlab); long term: implement a robust end_ss estimation method (update AutoAIF neural net) that is consistent across all models and datasets.
 
 ## External Accelerator Handoff (Open Items Only)
 
 ### GPUfit / CPUfit Backend
-- [ ] Improve constrained-fit robustness for multi-parameter DCE models (`2cxm`, `tissue_uptake`).
-- [ ] Ensure deterministic handling/reporting for failed fits (no silent NaN propagation).
-- [ ] Verify bound handling and initialization consistency across GPUfit/CPUfit implementations.
+The `E=Ktrans/Fp` reparam + O(N) convolution + analytic-Jacobian fix is **done and verified on
+cpufit** (all 5 OSIPI sweeps pass incl. all 24 2CXM; ~3000× faster on 2cxm) — see `COMPLETED.md`
+and `docs/project-management/projects/osipi-verification/STATUS.md`. Remaining:
+- [ ] **Verify the reparam kernels on CUDA hardware.** The `.cuh` kernels (`two-compartment_exchange.cuh`, `tissue_uptake.cuh`) carry the same reparam + analytic Jacobian and are host-verified (analytic-vs-central L2 ~1e-9), but not built/run with nvcc here. Build pyGpufit and run `test_osipi_pygpufit.py` on a CUDA box; the `2cxm` gpufit test is `xfail(strict=False)` until then. Also confirm the false-CONVERGED fix + multi-start (2CUM) on hardware.
+- [x] **Review the `Fp` floor default change** (`2cxm`/`tissue_uptake` `lower_limit_fp` 1e-3→1e-4 in `dce_pipeline._stage_d_fit_prefs`) before dev-merge — it affects all backends (only relaxes the feasible region; physically ~0.6 mL/100mL/min).
+- [ ] Verify bound handling and initialization consistency across GPUfit/CPUfit implementations (in progress with stage D refactoring).
 - [ ] Provide backend diagnostics that can be surfaced directly in Python test failure messages.
-- [ ] Verify CUDA/GPUfit runtime behavior for recent `TOFTS_EXTENDED` and `2CXM` backend fixes on CUDA-capable machines.
 
 ### Synthetic_DCE Generator
 - [ ] Import segmentation image with tissue classes.

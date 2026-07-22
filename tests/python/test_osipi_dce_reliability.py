@@ -1,4 +1,8 @@
-"""OSIPI-labeled DCE reliability tests using imported OSIPI reference datasets."""
+"""OSIPI DCE reliability tests — python backend (``model_*_fit``).
+
+Full sweep of every OSIPI DRO case, gated on OSIPI's official acceptance tolerances.
+The cpufit/gpufit backends are covered by test_osipi_pycpufit.py / test_osipi_pygpufit.py.
+"""
 
 from __future__ import annotations
 
@@ -21,15 +25,12 @@ from rocketship import (  # noqa: E402
     model_tissue_uptake_fit,
     model_tofts_fit,
 )
-from osipi_dce_primary_helpers import strict_peer_max_limit
+from osipi_official_tolerances import official_abs_tol
 
 
 OSIPI_ROOT = REPO_ROOT / "tests" / "data" / "osipi"
 DCE_DATA_DIR = OSIPI_ROOT / "dce_models"
 REFERENCE_DIR = OSIPI_ROOT / "reference"
-
-PEER_ERROR_SUMMARY = json.loads((REFERENCE_DIR / "osipi_peer_error_summary.json").read_text())
-SLOW_SKIP_MSG = "Use --osipi-slow to run long OSIPI reliability fits."
 
 
 def _rows(csv_file: Path) -> list[dict[str, str]]:
@@ -41,15 +42,16 @@ def _series(raw: str) -> list[float]:
     return [float(x) for x in str(raw).split()]
 
 
-def _peer_max_abs_error(category: str, method: str, param: str) -> float:
-    return float(PEER_ERROR_SUMMARY["metrics"][category][method][param]["max_abs_error"])
-
-
-def _peer_strict_max_abs_tol(category: str, method: str, param: str) -> float:
-    return strict_peer_max_limit(_peer_max_abs_error(category, method, param))
-
-
-def _assert_close(actual: float, expected: float, tol: float, label: str, param: str) -> None:
+def _assert_within_official(actual: float, expected: float, method: str, param: str, label: str) -> None:
+    """Hard gate: OSIPI official acceptance tolerance (abs(a-e) <= a_tol + r_tol*|e|)."""
+    tol = official_abs_tol(method, param, expected)
+    if not math.isfinite(actual):
+        pytest.fail(f"OSIPI {label} {method} {param} produced non-finite value: {actual!r}")
+    err = abs(actual - expected)
+    assert err <= tol, (
+        f"OSIPI {label} {method} {param} abs error {err:.8g} exceeded OSIPI official tolerance "
+        f"{tol:.8g}. actual={actual:.8g}, expected={expected:.8g}"
+    )
     if not math.isfinite(actual):
         pytest.fail(f"OSIPI {label} {param} produced non-finite value: {actual!r}")
     err = abs(actual - expected)
@@ -59,9 +61,6 @@ def _assert_close(actual: float, expected: float, tol: float, label: str, param:
     )
 
 
-def _require_osipi_slow(run_osipi_slow: bool) -> None:
-    if not run_osipi_slow:
-        pytest.skip(SLOW_SKIP_MSG)
 
 
 def _ps_per_min_from_ktrans_fp_per_sec(ktrans_per_sec: float, fp_per_sec: float) -> float:
@@ -74,9 +73,6 @@ def _ps_per_min_from_ktrans_fp_per_sec(ktrans_per_sec: float, fp_per_sec: float)
 def test_osipi_tofts_reliability_against_reference_values() -> None:
     rows = _rows(DCE_DATA_DIR / "dce_DRO_data_tofts.csv")
 
-    ktrans_tol = _peer_strict_max_abs_tol("DCEmodels", "tofts", "Ktrans")
-    ve_tol = _peer_strict_max_abs_tol("DCEmodels", "tofts", "ve")
-
     for row in rows:
         fit = model_tofts_fit(_series(row["C"]), _series(row["ca"]), _series(row["t"]))
 
@@ -84,17 +80,13 @@ def test_osipi_tofts_reliability_against_reference_values() -> None:
         ktrans_per_min = float(fit[0]) * 60.0
         ve = float(fit[1])
 
-        _assert_close(ktrans_per_min, float(row["Ktrans"]), ktrans_tol, row["label"], "Ktrans")
-        _assert_close(ve, float(row["ve"]), ve_tol, row["label"], "ve")
+        _assert_within_official(ktrans_per_min, float(row["Ktrans"]), "tofts", "Ktrans", row["label"])
+        _assert_within_official(ve, float(row["ve"]), "tofts", "ve", row["label"])
 
 
 @pytest.mark.osipi
 def test_osipi_extended_tofts_reliability_against_reference_values() -> None:
     rows = _rows(DCE_DATA_DIR / "dce_DRO_data_extended_tofts.csv")
-
-    ktrans_tol = _peer_strict_max_abs_tol("DCEmodels", "etofts", "Ktrans")
-    ve_tol = _peer_strict_max_abs_tol("DCEmodels", "etofts", "ve")
-    vp_tol = _peer_strict_max_abs_tol("DCEmodels", "etofts", "vp")
 
     for row in rows:
         fit = model_extended_tofts_fit(_series(row["C"]), _series(row["ca"]), _series(row["t"]))
@@ -104,9 +96,9 @@ def test_osipi_extended_tofts_reliability_against_reference_values() -> None:
         ve = float(fit[1])
         vp = float(fit[2])
 
-        _assert_close(ktrans_per_min, float(row["Ktrans"]), ktrans_tol, row["label"], "Ktrans")
-        _assert_close(ve, float(row["ve"]), ve_tol, row["label"], "ve")
-        _assert_close(vp, float(row["vp"]), vp_tol, row["label"], "vp")
+        _assert_within_official(ktrans_per_min, float(row["Ktrans"]), "etofts", "Ktrans", row["label"])
+        _assert_within_official(ve, float(row["ve"]), "etofts", "ve", row["label"])
+        _assert_within_official(vp, float(row["vp"]), "etofts", "vp", row["label"])
 
 
 @pytest.mark.osipi
@@ -138,9 +130,6 @@ def test_osipi_patlak_delay_reference_values_are_imported() -> None:
 def test_osipi_patlak_reliability_delay0_against_reference_values() -> None:
     rows = _rows(DCE_DATA_DIR / "patlak_sd_0.02_delay_0.csv")
 
-    ps_tol = _peer_strict_max_abs_tol("DCEmodels", "patlak", "ps")
-    vp_tol = _peer_strict_max_abs_tol("DCEmodels", "patlak", "vp")
-
     for row in rows:
         fit = model_patlak_fit(_series(row["C_t"]), _series(row["cp_aif"]), _series(row["t"]))
 
@@ -148,25 +137,14 @@ def test_osipi_patlak_reliability_delay0_against_reference_values() -> None:
         ps_per_min = float(fit[0]) * 60.0
         vp = float(fit[1])
 
-        _assert_close(ps_per_min, float(row["ps"]), ps_tol, row["label"], "ps")
-        _assert_close(vp, float(row["vp"]), vp_tol, row["label"], "vp")
+        _assert_within_official(ps_per_min, float(row["ps"]), "patlak", "ps", row["label"])
+        _assert_within_official(vp, float(row["vp"]), "patlak", "vp", row["label"])
 
 
 @pytest.mark.osipi
-@pytest.mark.osipi_slow
 @pytest.mark.slow
-@pytest.mark.xfail(
-    reason="Secondary-goal model: keep visibility but do not block merge decisions on 2CXM reliability yet.",
-    strict=False,
-)
-def test_osipi_2cxm_reliability_delay0_against_reference_values(run_osipi_slow: bool) -> None:
-    _require_osipi_slow(run_osipi_slow)
+def test_osipi_2cxm_reliability_delay0_against_reference_values() -> None:
     rows = _rows(DCE_DATA_DIR / "2cxm_sd_0.001_delay_0.csv")
-
-    ve_tol = _peer_max_abs_error("DCEmodels", "2CXM", "ve") + 1e-6
-    vp_tol = _peer_max_abs_error("DCEmodels", "2CXM", "vp") + 1e-6
-    fp_tol = _peer_max_abs_error("DCEmodels", "2CXM", "fp") + 1e-6
-    ps_tol = _peer_max_abs_error("DCEmodels", "2CXM", "ps") + 1e-6
 
     for row in rows:
         fit = model_2cxm_fit(_series(row["C_t"]), _series(row["cp_aif"]), _series(row["t"]))
@@ -177,26 +155,16 @@ def test_osipi_2cxm_reliability_delay0_against_reference_values(run_osipi_slow: 
         fp_per_100ml_per_min = float(fit[3]) * 60.0 * 100.0
         ps_per_min = _ps_per_min_from_ktrans_fp_per_sec(ktrans_per_sec, float(fit[3]))
 
-        _assert_close(ve, float(row["ve"]), ve_tol, row["label"], "ve")
-        _assert_close(vp, float(row["vp"]), vp_tol, row["label"], "vp")
-        _assert_close(fp_per_100ml_per_min, float(row["fp"]), fp_tol, row["label"], "fp")
-        _assert_close(ps_per_min, float(row["ps"]), ps_tol, row["label"], "ps")
+        _assert_within_official(ve, float(row["ve"]), "2CXM", "ve", row["label"])
+        _assert_within_official(vp, float(row["vp"]), "2CXM", "vp", row["label"])
+        _assert_within_official(fp_per_100ml_per_min, float(row["fp"]), "2CXM", "fp", row["label"])
+        _assert_within_official(ps_per_min, float(row["ps"]), "2CXM", "ps", row["label"])
 
 
 @pytest.mark.osipi
-@pytest.mark.osipi_slow
 @pytest.mark.slow
-@pytest.mark.xfail(
-    reason="Secondary-goal model: keep visibility but do not block merge decisions on tissue uptake reliability yet.",
-    strict=False,
-)
-def test_osipi_2cum_reliability_delay0_against_reference_values(run_osipi_slow: bool) -> None:
-    _require_osipi_slow(run_osipi_slow)
+def test_osipi_2cum_reliability_delay0_against_reference_values() -> None:
     rows = _rows(DCE_DATA_DIR / "2cum_sd_0.0025_delay_0.csv")
-
-    vp_tol = _peer_max_abs_error("DCEmodels", "2CUM", "vp") + 1e-6
-    fp_tol = _peer_max_abs_error("DCEmodels", "2CUM", "fp") + 1e-6
-    ps_tol = _peer_max_abs_error("DCEmodels", "2CUM", "ps") + 1e-6
 
     for row in rows:
         fit = model_tissue_uptake_fit(_series(row["C_t"]), _series(row["cp_aif"]), _series(row["t"]))
@@ -207,6 +175,6 @@ def test_osipi_2cum_reliability_delay0_against_reference_values(run_osipi_slow: 
         fp_per_100ml_per_min = fp_per_sec * 60.0 * 100.0
         ps_per_min = _ps_per_min_from_ktrans_fp_per_sec(ktrans_per_sec, fp_per_sec)
 
-        _assert_close(vp, float(row["vp"]), vp_tol, row["label"], "vp")
-        _assert_close(fp_per_100ml_per_min, float(row["fp"]), fp_tol, row["label"], "fp")
-        _assert_close(ps_per_min, float(row["ps"]), ps_tol, row["label"], "ps")
+        _assert_within_official(vp, float(row["vp"]), "2CUM", "vp", row["label"])
+        _assert_within_official(fp_per_100ml_per_min, float(row["fp"]), "2CUM", "fp", row["label"])
+        _assert_within_official(ps_per_min, float(row["ps"]), "2CUM", "ps", row["label"])

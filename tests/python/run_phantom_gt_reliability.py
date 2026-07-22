@@ -146,6 +146,8 @@ def _session_rows(summary: Dict[str, Any]) -> List[Dict[str, str]]:
                     "bias_med_pct": _fmt_percent(stats.get("median_bias_pct_gt_median")),
                     "fit_median": _fmt_float(stats.get("pred_median"), digits=2),
                     "gt_abs_median": _fmt_float(stats.get("gt_median_abs"), digits=2),
+                    "cov": "n/a",
+                    "z_p95": "n/a",
                 }
             )
 
@@ -167,6 +169,8 @@ def _session_rows(summary: Dict[str, Any]) -> List[Dict[str, str]]:
                             "bias_med_pct": _fmt_percent(stats.get("median_bias_pct_gt_median")),
                             "fit_median": _fmt_float(stats.get("pred_median"), digits=4),
                             "gt_abs_median": _fmt_float(stats.get("gt_median_abs"), digits=4),
+                            "cov": _fmt_ratio(stats.get("ci_coverage_frac")),
+                            "z_p95": _fmt_float(stats.get("ci_z_abs_p95"), digits=2),
                         }
                     )
 
@@ -202,6 +206,8 @@ def _print_table(rows: List[Dict[str, str]]) -> None:
         ("bias_med_pct", "bias%(med)"),
         ("fit_median", "median(fit)"),
         ("gt_abs_median", "median|GT|"),
+        ("cov", "cov(GT in CI)"),
+        ("z_p95", "z95"),
     ]
     widths: Dict[str, int] = {}
     for key, header in columns:
@@ -214,7 +220,17 @@ def _print_table(rows: List[Dict[str, str]]) -> None:
     sep = "  ".join("-" * widths[key] for key, _ in columns)
     print(header)
     print(sep)
-    numeric_cols = {"n", "mae", "mae_pct", "bias", "bias_med_pct", "fit_median", "gt_abs_median"}
+    numeric_cols = {
+        "n",
+        "mae",
+        "mae_pct",
+        "bias",
+        "bias_med_pct",
+        "fit_median",
+        "gt_abs_median",
+        "cov",
+        "z_p95",
+    }
     last_session = None
     for row in rows:
         session = row.get("session")
@@ -244,6 +260,9 @@ def _print_condensed(summary_by_backend: Dict[str, Dict[str, Any]]) -> None:
         print("\nNotes: `MAE`, `bias` are voxelwise over the region (compute per-voxel error, then average).")
         print("Notes: `%GT` = 100 * MAE / median(|GT|) within the tissue region.")
         print("Notes: `bias%(med)` = 100 * (median(fit) - median(GT)) / median(GT).")
+        print("Notes: `cov(GT in CI)` = fraction of voxels where ground truth falls inside the fit's 95% CI")
+        print("       (well-calibrated ~0.95; much lower means systematic bias, not just noise).")
+        print("Notes: `z95` = 95th pct of |GT - fit| / CI_halfwidth (values > ~1 are outside the 95% CI).")
         print("Notes: Phantom runs currently align Stage-A baseline to GT `baseline_images` for diagnostics only.")
 
 

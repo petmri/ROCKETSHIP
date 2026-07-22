@@ -53,6 +53,13 @@ addParameter(p, 'snrFilter', 5.0, @isscalar);
 addParameter(p, 'relaxivity', 3.6, @isscalar);
 addParameter(p, 'models', {'tofts'}, @is_model_list);
 addParameter(p, 'roiList', {}, @is_text_list_or_scalar);
+% Optional explicit input paths. When set, they override the flat subjectRoot/processed layout,
+% which lets this generator target the BIDS_test sub-10bbbdownsample fixture (or any BIDS subject).
+addParameter(p, 'dynamicPath', '', @is_text_scalar);
+addParameter(p, 'aifRoiPath', '', @is_text_scalar);
+addParameter(p, 'brainRoiPath', '', @is_text_scalar);
+addParameter(p, 't1MapPath', '', @is_text_scalar);
+addParameter(p, 'noiseRoiPath', '', @is_text_scalar);
 parse(p, varargin{:});
 
 subjectRoot = char(p.Results.subjectRoot);
@@ -68,12 +75,12 @@ if ~exist(outputRoot, 'dir')
     mkdir(outputRoot);
 end
 
-dynamicPath = fullfile(subjectRoot, 'Dynamic_t1w.nii');
 processedRoot = fullfile(subjectRoot, 'processed');
-t1AifPath = fullfile(processedRoot, 'T1_AIF_roi.nii');
-t1RoiPath = fullfile(processedRoot, 'T1_brain_roi.nii');
-t1MapPath = fullfile(processedRoot, 'T1_map_t1_fa_fit_fa10.nii');
-noisePath = fullfile(processedRoot, 'T1_noise_roi.nii');
+dynamicPath = pick_path(p.Results.dynamicPath, fullfile(subjectRoot, 'Dynamic_t1w.nii'));
+t1AifPath = pick_path(p.Results.aifRoiPath, fullfile(processedRoot, 'T1_AIF_roi.nii'));
+t1RoiPath = pick_path(p.Results.brainRoiPath, fullfile(processedRoot, 'T1_brain_roi.nii'));
+t1MapPath = pick_path(p.Results.t1MapPath, fullfile(processedRoot, 'T1_map_t1_fa_fit_fa10.nii'));
+noisePath = pick_path(p.Results.noiseRoiPath, fullfile(processedRoot, 'T1_noise_roi.nii'));
 
 required = {dynamicPath, t1AifPath, t1RoiPath, t1MapPath, noisePath};
 for i = 1:numel(required)
@@ -265,5 +272,15 @@ for i = 1:numel(value)
         continue;
     end
     out{end + 1} = text; %#ok<AGROW>
+end
+end
+
+function out = pick_path(override, fallback)
+% Use the explicit override path when provided, otherwise the flat-layout fallback.
+override = char(override);
+if isempty(strtrim(override))
+    out = fallback;
+else
+    out = override;
 end
 end

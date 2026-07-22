@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import re
+import shutil
 import sys
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -148,12 +149,20 @@ def _run_dce_for_phantom_session(
         "write_param_maps": True,
         "write_postfit_arrays": False,
     }
+    aif_path = aif
     if steady_state_end_1b is not None and int(steady_state_end_1b) >= 1:
-        # Phantom-only diagnostic alignment: use generator-provided baseline_images so
-        # Stage-A baseline matches the GT AIF header. This is not the general real-data
-        # solution; TODO is to port MATLAB baseline auto-detection into the pipeline.
-        stage_overrides["steady_state_start"] = 1
-        stage_overrides["steady_state_end"] = int(steady_state_end_1b)
+        # Phantom ground-truth alignment: the generator-provided baseline_images value
+        # must match the GT AIF header exactly, so pin it via the AIF sidecar mechanism
+        # (SteadyStateEndTimeIndex) rather than auto-detecting. Copy the AIF file into
+        # the scratch output_dir first so the sidecar doesn't get written into the
+        # committed fixture tree.
+        aif_copy_dir = output_dir / "aif_sidecar"
+        aif_copy_dir.mkdir(parents=True, exist_ok=True)
+        aif_path = aif_copy_dir / aif.name
+        shutil.copyfile(aif, aif_path)
+        sidecar_suffix = ".nii.gz" if aif.name.endswith(".nii.gz") else aif.suffix
+        sidecar_path = aif_copy_dir / (aif.name[: -len(sidecar_suffix)] + ".json")
+        sidecar_path.write_text(json.dumps({"SteadyStateEndTimeIndex": int(steady_state_end_1b)}))
 
     cfg = DcePipelineConfig.from_dict(
         {
@@ -165,7 +174,7 @@ def _run_dce_for_phantom_session(
             "write_xls": False,
             "aif_mode": "auto",
             "dynamic_files": [str(dynamic)],
-            "aif_files": [str(aif)],
+            "aif_files": [str(aif_path)],
             "roi_files": [str(roi)],
             "t1map_files": [str(t1_map_path)],
             # Synthetic phantom fixtures can have near-zero background noise; use ROI for deterministic noise estimate.
@@ -218,6 +227,64 @@ def _region_mae_stats(pred: np.ndarray, truth: np.ndarray, mask: np.ndarray) -> 
     if abs(truth_median) > 1e-12:
         out["median_bias"] = float(pred_median - truth_median)
         out["median_bias_pct_gt_median"] = float((out["median_bias"] / truth_median) * 100.0)
+    return out
+
+
+def _region_ci_coverage_stats(
+    pred: np.ndarray,
+    ci_low: np.ndarray,
+    ci_high: np.ndarray,
+    truth: np.ndarray,
+    mask: np.ndarray,
+) -> Optional[Dict[str, float]]:
+    """Ground-truth coverage of the fit's 95% CI, per region.
+
+    On noisy synthetic data the CI belongs to the fit estimate, not the truth, so
+    the right accuracy question is how often ground truth falls inside the fit's CI.
+    For a well-calibrated fit this coverage should be ~0.95; coverage far below
+    nominal indicates systematic bias (model mismatch or over-tight CIs) rather than
+    noise. Also returns a standardized error z = |GT - fit| / CI_halfwidth (values
+    > ~1 are outside the 95% CI). CI bounds are ordered per voxel so derived-parameter
+    intervals that come out reversed are handled; voxels with non-finite or zero-width
+    CIs are excluded from the coverage denominator and counted in ci_n_invalid.
+    """
+    mask_use = (
+        np.asarray(mask, dtype=bool)
+        & np.isfinite(pred)
+        & np.isfinite(truth)
+        & np.isfinite(ci_low)
+        & np.isfinite(ci_high)
+    )
+    n = int(np.count_nonzero(mask_use))
+    if n <= 0:
+        return None
+    pred_vals = pred[mask_use]
+    truth_vals = truth[mask_use]
+    lo = np.minimum(ci_low[mask_use], ci_high[mask_use])
+    hi = np.maximum(ci_low[mask_use], ci_high[mask_use])
+    width = hi - lo
+    valid = width > 0.0
+    n_valid = int(np.count_nonzero(valid))
+    out: Dict[str, float] = {
+        "ci_n": float(n),
+        "ci_n_invalid": float(n - n_valid),
+    }
+    if n_valid <= 0:
+        out["ci_coverage_frac"] = float("nan")
+        return out
+    lo_v = lo[valid]
+    hi_v = hi[valid]
+    gt_v = truth_vals[valid]
+    pred_v = pred_vals[valid]
+    inside = (gt_v >= lo_v) & (gt_v <= hi_v)
+    halfwidth = 0.5 * (hi_v - lo_v)
+    z = np.abs(gt_v - pred_v) / halfwidth
+    out["ci_coverage_frac"] = float(np.mean(inside))
+    out["ci_frac_gt_below"] = float(np.mean(gt_v < lo_v))
+    out["ci_frac_gt_above"] = float(np.mean(gt_v > hi_v))
+    out["ci_halfwidth_median"] = float(np.median(halfwidth))
+    out["ci_z_abs_median"] = float(np.median(z))
+    out["ci_z_abs_p95"] = float(np.percentile(z, 95.0))
     return out
 
 
@@ -657,12 +724,33 @@ def run_phantom_gt_session_compare(
                 continue
             pred_map = np.asarray(_load_array(Path(str(map_path_str))), dtype=np.float64)
             truth_map = gt_maps[param_name]
+            ci_base = str(param_name).lower()
+            ci_low_path = map_paths.get(f"{ci_base}_ci_low")
+            ci_high_path = map_paths.get(f"{ci_base}_ci_high")
+            ci_low_map = (
+                np.asarray(_load_array(Path(str(ci_low_path))), dtype=np.float64)
+                if ci_low_path
+                else None
+            )
+            ci_high_map = (
+                np.asarray(_load_array(Path(str(ci_high_path))), dtype=np.float64)
+                if ci_high_path
+                else None
+            )
             region_metrics: Dict[str, Any] = {}
             for label_value, region_name in PHANTOM_LABELS.items():
                 region_mask = (gt_seg == float(label_value)) & (pred_map != 0.0)
                 stats = _region_mae_stats(pred_map, truth_map, region_mask)
-                if stats is not None:
-                    region_metrics[region_name] = _numeric_copy(stats)
+                if stats is None:
+                    continue
+                region_stats = _numeric_copy(stats)
+                if ci_low_map is not None and ci_high_map is not None:
+                    coverage = _region_ci_coverage_stats(
+                        pred_map, ci_low_map, ci_high_map, truth_map, region_mask
+                    )
+                    if coverage is not None:
+                        region_stats.update(coverage)
+                region_metrics[region_name] = region_stats
             if region_metrics:
                 model_metrics[param_name] = region_metrics
         if model_metrics:

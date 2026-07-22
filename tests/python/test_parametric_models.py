@@ -25,7 +25,7 @@ def _within_tol(actual: float, expected: float, atol: float, rtol: float) -> boo
 def test_t2_linear_fast_matches_matlab_baseline() -> None:
     baseline = json.loads((REPO_ROOT / "tests/contracts/baselines/matlab_reference_v1.json").read_text())
     tolerances = json.loads((REPO_ROOT / "tests/contracts/tolerance_profiles.json").read_text())
-    tol = tolerances["fit_recovery"]
+    tol = tolerances["fit_recovery_strict"]
 
     te = [10.0, 20.0, 40.0, 60.0]
     true_t2 = 85.0
@@ -47,7 +47,7 @@ def test_t2_linear_fast_matches_matlab_baseline() -> None:
 def test_t1_fa_linear_fit_matches_matlab_baseline() -> None:
     baseline = json.loads((REPO_ROOT / "tests/contracts/baselines/matlab_reference_v1.json").read_text())
     tolerances = json.loads((REPO_ROOT / "tests/contracts/tolerance_profiles.json").read_text())
-    tol = tolerances["fit_recovery"]
+    tol = tolerances["fit_recovery_strict"]
 
     fa = [2.0, 5.0, 10.0, 15.0]
     tr = 8.0
@@ -94,7 +94,7 @@ def test_t1_fa_nonlinear_fit_recovers_synthetic_t1() -> None:
 def test_t1_fa_nonlinear_fit_matches_matlab_reference() -> None:
     baseline = json.loads((REPO_ROOT / "tests/contracts/baselines/matlab_reference_v1.json").read_text())
     tolerances = json.loads((REPO_ROOT / "tests/contracts/tolerance_profiles.json").read_text())
-    tol = tolerances["fit_recovery"]
+    tol = tolerances["fit_recovery_strict"]
 
     fa = [2.0, 5.0, 10.0, 15.0]
     tr = 8.0

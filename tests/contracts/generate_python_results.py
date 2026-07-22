@@ -65,26 +65,15 @@ def main() -> int:
     timer = baseline["dce"]["forward"]["timer"]
     cp = baseline["dce"]["forward"]["Cp"]
 
-    # Use MATLAB-fit values from baseline to avoid hard-coding fixture internals.
-    tofts_fit = baseline["dce"]["inverse"]["tofts_fit"]
-    ktrans = float(tofts_fit[0])
-    ve = float(tofts_fit[1])
-
-    ex_tofts_fit = baseline["dce"]["inverse"]["extended_tofts_fit"]
-    ex_ktrans = float(ex_tofts_fit[0])
-    ex_ve = float(ex_tofts_fit[1])
-    ex_vp = float(ex_tofts_fit[2])
-
-    patlak_fit = baseline["dce"]["inverse"]["patlak_linear"]
-    patlak_ktrans = float(patlak_fit[0])
-    patlak_vp = float(patlak_fit[1])
-
-    patlak_forward = model_patlak_cfit(patlak_ktrans, patlak_vp, cp, timer)
-
-    dce_params = baseline["dce"].get("params", {})
-    dce_ktrans = float(dce_params.get("ktrans", patlak_ktrans))
-    dce_ve = float(dce_params.get("ve", float(tofts_fit[1])))
-    dce_vp = float(dce_params.get("vp", patlak_vp))
+    # Forward-model parity must use the KNOWN fixture parameters (the same ones
+    # MATLAB used to synthesize baseline.dce.forward.*), read straight from the
+    # baseline so nothing is hard-coded here. Do NOT use MATLAB's recovered fit
+    # values: that conflates forward-model parity with fit recovery and only
+    # passes because noise-free recovery happens to land near-exact.
+    dce_params = baseline["dce"]["params"]
+    dce_ktrans = float(dce_params["ktrans"])
+    dce_ve = float(dce_params["ve"])
+    dce_vp = float(dce_params["vp"])
     tissue_uptake_fp = float(dce_params.get("fp", 0.15))
     tissue_uptake_tp = float(dce_params.get("tp", dce_vp / tissue_uptake_fp))
     dce_tau = float(dce_params.get("tau", 0.08))
@@ -159,9 +148,9 @@ def main() -> int:
             ],
         },
         "results": {
-            "tofts_forward": model_tofts_cfit(ktrans, ve, cp, timer),
-            "extended_tofts_forward": model_extended_tofts_cfit(ex_ktrans, ex_ve, ex_vp, cp, timer),
-            "patlak_forward": patlak_forward,
+            "tofts_forward": model_tofts_cfit(dce_ktrans, dce_ve, cp, timer),
+            "extended_tofts_forward": model_extended_tofts_cfit(dce_ktrans, dce_ve, dce_vp, cp, timer),
+            "patlak_forward": model_patlak_cfit(dce_ktrans, dce_vp, cp, timer),
             "vp_forward": model_vp_cfit(dce_vp, cp, timer),
             "tissue_uptake_forward": model_tissue_uptake_cfit(
                 dce_ktrans, tissue_uptake_fp, tissue_uptake_tp, cp, timer
@@ -185,7 +174,9 @@ def main() -> int:
                 dce_r1,
                 dce_fw,
             ),
-            "patlak_linear_inverse": model_patlak_linear(patlak_forward, cp, timer),
+            "patlak_linear_inverse": model_patlak_linear(
+                baseline["dce"]["forward"]["patlak"], cp, timer
+            ),
             "tofts_fit_inverse": model_tofts_fit(
                 baseline["dce"]["forward"]["tofts"],
                 cp,

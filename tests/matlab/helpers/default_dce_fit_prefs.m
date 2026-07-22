@@ -13,7 +13,7 @@ prefs.lower_limit_vp = 1e-3;
 prefs.upper_limit_vp = 1;
 prefs.initial_value_vp = 0.02;
 
-prefs.lower_limit_fp = 1e-3;
+prefs.lower_limit_fp = 1e-4;
 prefs.upper_limit_fp = 100;
 prefs.initial_value_fp = 0.2;
 

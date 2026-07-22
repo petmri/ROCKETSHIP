@@ -13,7 +13,12 @@ import numpy as np
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_OUTPUT = REPO_ROOT / "tests" / "data" / "ci_fixtures" / "dce" / "tiny_settings_case"
+# The tiny DCE fixture is the DCE half of the BIDS_test sub-11tiny subject. The VFA anat half
+# (used by the T1-map parity test) is a committed asset with its own MATLAB baseline and is not
+# produced here. --output-root points at the BIDS dataset root; files land under sub-11tiny/ses-01.
+DEFAULT_OUTPUT = REPO_ROOT / "tests" / "data" / "BIDS_test"
+SUBJECT = "sub-11tiny"
+SESSION = "ses-01"
 
 
 def _to_signal_from_conc(
@@ -130,14 +135,36 @@ def _generate_fixture(output_root: Path, seed: int) -> dict:
         dynamic[x, y, z, :] = base[x, y, z] + rng.normal(0.0, 4.0, size=nt)
 
     affine = np.eye(4, dtype=np.float64)
-    processed = output_root / "processed"
-    processed.mkdir(parents=True, exist_ok=True)
+    stem = f"{SUBJECT}_{SESSION}"
+    raw_dce = output_root / "rawdata" / SUBJECT / SESSION / "dce"
+    der_anat = output_root / "derivatives" / SUBJECT / SESSION / "anat"
+    der_dce = output_root / "derivatives" / SUBJECT / SESSION / "dce"
+    for d in (raw_dce, der_anat, der_dce):
+        d.mkdir(parents=True, exist_ok=True)
 
-    nib.save(nib.Nifti1Image(dynamic.astype(np.float32), affine), str(output_root / "Dynamic_t1w.nii"))
-    nib.save(nib.Nifti1Image(aif_mask.astype(np.uint8), affine), str(processed / "T1_AIF_roi.nii"))
-    nib.save(nib.Nifti1Image(roi_mask.astype(np.uint8), affine), str(processed / "T1_brain_roi.nii"))
-    nib.save(nib.Nifti1Image((t1_map * 1000.0).astype(np.float32), affine), str(processed / "T1_map_t1_fa_fit_fa10.nii"))
-    nib.save(nib.Nifti1Image(noise_mask.astype(np.uint8), affine), str(processed / "T1_noise_roi.nii"))
+    nib.save(nib.Nifti1Image(dynamic.astype(np.float32), affine), str(raw_dce / f"{stem}_DCE.nii"))
+    nib.save(nib.Nifti1Image(aif_mask.astype(np.uint8), affine), str(der_dce / f"{stem}_desc-AIFroi_mask.nii"))
+    nib.save(nib.Nifti1Image(roi_mask.astype(np.uint8), affine), str(der_anat / f"{stem}_desc-brain_mask.nii"))
+    nib.save(
+        nib.Nifti1Image((t1_map * 1000.0).astype(np.float32), affine),
+        str(der_dce / f"{stem}_space-DCEref_T1map.nii"),
+    )
+    nib.save(nib.Nifti1Image(noise_mask.astype(np.uint8), affine), str(der_anat / f"{stem}_desc-noise_mask.nii"))
+
+    (raw_dce / f"{stem}_DCE.json").write_text(
+        json.dumps(
+            {
+                "RepetitionTime": tr_ms / 1000.0,
+                "TemporalResolution": time_resolution_sec,
+                "FlipAngle": fa_deg,
+                "Relaxivity_per_mM_per_s": relaxivity,
+                "Hematocrit": hematocrit,
+                "AcquisitionDateTime": "2000-01-01T00:00:00.000000",
+            },
+            indent=2,
+        )
+        + "\n"
+    )
 
     meta = {
         "seed": int(seed),
@@ -150,7 +177,7 @@ def _generate_fixture(output_root: Path, seed: int) -> dict:
         "start_injection_min": float(timer_min[inj]),
         "end_injection_min": float(timer_min[min(nt - 1, inj + 2)]),
     }
-    (processed / "tiny_fixture_meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+    (der_dce / f"{stem}_desc-tinymeta.json").write_text(json.dumps(meta, indent=2) + "\n")
     return meta
 
 
@@ -165,12 +192,18 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     out = args.output_root.expanduser().resolve()
-    if args.clean and out.exists():
-        shutil.rmtree(out)
+    if args.clean:
+        # Remove only the DCE trees this script owns. The VFA anat half of sub-11tiny and its
+        # MATLAB T1 baseline (derivatives/matlabref) are committed assets and must survive.
+        for owned in (
+            out / "rawdata" / SUBJECT / SESSION / "dce",
+            out / "derivatives" / SUBJECT / SESSION,
+        ):
+            if owned.exists():
+                shutil.rmtree(owned)
     out.mkdir(parents=True, exist_ok=True)
-    meta = _generate_fixture(out, int(args.seed))
-    (out / "manifest.json").write_text(json.dumps(meta, indent=2) + "\n")
-    print(str(out))
+    _generate_fixture(out, int(args.seed))
+    print(str(out / "rawdata" / SUBJECT / SESSION))
     return 0
 
 

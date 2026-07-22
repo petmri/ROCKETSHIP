@@ -1,301 +1,164 @@
 # ROCKETSHIP Test Suite (Algorithm-Focused)
 
-This test suite is scoped to **core algorithms** and intentionally avoids GUI behavior.
+Scoped to **core algorithms** (MATLAB and the Python port); GUI behavior is intentionally out of scope.
+All commands below assume you are at the repo root and using the project venv (`.venv/bin/python`),
+shown here as `pytest` for brevity.
 
-## Goals
-- Verify numerical correctness of core MATLAB algorithms.
-- Build reusable parity contracts so future Python ports can be validated against MATLAB reference behavior.
-- Support both synthetic fixtures and curated real fixtures from `tests/data`.
+## How do I run …?
+
+| Goal | Command |
+|---|---|
+| Default Python suite (incl. gated DCE parity) | `pytest tests/python` |
+| DCE parity, all models (reported extras) | `pytest tests/python -m parity --parity-suite=allmodels -s` |
+| Runtime parity vs MATLAB (needs MATLAB) | `pytest tests/python/test_runtime_parity.py --run-runtime-parity` |
+| OSIPI reliability | `pytest tests/python -m osipi -v` (runs the full 2CXM/2CUM sweeps by default) |
+| BIDS qualification | `pytest tests/python --run-qualification` |
+| MATLAB unit tests | `run_unit_tests()` in MATLAB |
+| Coverage | `pytest tests/python -q --cov=python --cov-report=term-missing --cov-fail-under=60` |
 
 ## Layout
-- `tests/matlab/unit/`: fast deterministic unit tests for core DCE/DSC/parametric algorithms.
-- `tests/matlab/integration/`: fixture integrity and heavier workflow checks.
-- `tests/matlab/helpers/`: shared MATLAB helpers for path setup, fixtures, and assertions.
-- `tests/contracts/`: cross-language parity contracts and tolerance profiles.
-- `tests/contracts/baselines/`: generated MATLAB baseline outputs used by future Python parity checks.
-- `tests/data/osipi/`: imported OSIPI reference datasets, provenance docs, and peer-result tolerance summaries used by OSIPI-labeled Python tests.
+- `tests/matlab/{unit,integration,helpers}/`: MATLAB algorithm tests, fixtures, shared helpers.
+- `tests/contracts/`, `tests/contracts/baselines/`: cross-language parity contracts and generated MATLAB baselines.
+- `tests/python/`: Python pytest suite (pipeline, parity, OSIPI, qualification).
+- `tests/data/`: fixtures. `BIDS_test/` holds the committed lightweight fixtures used by CI (no per-run generation), including the `sub-10bbbdownsample` / `sub-11tiny` fit-parity subjects.
+- `tests/data/osipi/`: imported OSIPI datasets + provenance + peer-result tolerances (see that dir's `README.md`).
 
-## Running MATLAB tests
-From MATLAB:
+## DCE Python↔MATLAB parity
+
+The parity suite compares the Python pipeline against committed MATLAB baseline maps. It is organized by a
+single **`--parity-suite`** selector and split into **gated** vs **reported-only** checks.
+
+- **`--parity-suite=standard`** (default; runs on a plain `pytest`): gates **Tofts & Patlak, Ktrans only**,
+  Python-vs-MATLAB (cpu & auto), on **RMSE and Corr**.
+- **`--parity-suite=allmodels`**: additionally runs **ex_tofts, tissue_uptake, 2cxm** as **reported-only**
+  diagnostics (never gated — they are not identifiable on this fixture).
+- **`--parity-suite=all`**: union of the above.
+
+**Regions and the gated set.** Each model/param is evaluated over three ROIs — whole **brain** (sparse),
+**GM**, and **WM**. Patlak Ktrans gates on all three. Tofts Ktrans gates on **brain + WM only**; **tofts-GM
+is reported-only** because Tofts Ktrans is non-identifiable in that GM patch (flat objective along Ktrans;
+Python's fit is equal-or-better than MATLAB's by SSE — see `docs/parity-testing-improvement-plan.md`).
+Non-Ktrans params (ve/vp/fp) and backend-consistency (auto-vs-cpu) are always reported, never gated.
+
+**Reported metrics.** Every check logs `corr` and `rmse`; each Python-vs-MATLAB parameter check also
+logs CI-aware diagnostics — **`ci_norm_absdiff_p95`** (p95 of `|py−matlab| / CI-width`, both sides are
+95% CI) and **proportion outside the CI**. A full summary JSON is written to `--parity-summary-dir`.
+
+`test_bbb_p19_region_parity` replaced the former per-scenario voxelwise parity tests
+(`*_tofts_ktrans`, `*_primary_models_ktrans_cpu`). Gated checks whose masks collapse to `<2` valid
+voxels **fail** (a collapse is a silent hole, not a pass), and the suite asserts at least one gated
+check compared real data.
+
+**ROI-summary `.xls` parity** is a separate check, `test_bbb_p19_roi_xls_parity` (default-on):
+
+```bash
+pytest tests/python/test_dce_pipeline_parity_metrics.py::test_bbb_p19_roi_xls_parity
+```
+
+MATLAB averages each parameter's concentration curve over the whole-brain ROI and fits once
+(average-then-fit). Python reproduces this exactly via the pipeline's **ROI-only mode**
+(`stage_overrides.fit_voxels=0`), which skips the per-voxel fit — so the check runs in a few seconds
+and matches MATLAB's tables within tolerance. See `docs/dce_options.md` for `fit_voxels`.
+
+### Thresholds
+
+Gate thresholds default to `tests/python/parity_thresholds_default.json`. Override with a copy:
+
+```bash
+pytest tests/python -m parity --parity-thresholds path/to/my_thresholds.json
+```
+
+Only the keys you include are overlaid. The standard gate uses `model_ktrans_corr_min` and
+`model_ktrans_mse_max` (RMSE gate = `sqrt(model_ktrans_mse_max)`). The individual `--parity-*-corr-min` /
+`--parity-*-mse-max` CLI flags still work but are secondary to the JSON.
+
+### Deprecated flags
+
+`--run-multi-model-backend-parity` / `--mm-parity`, `--parity-required-models`, `--parity-cpu-optional-models`,
+and `--parity-require-all-models` / `--all-models` are superseded by `--parity-suite` (the gated/reported
+split is now fixed in code). They still work as aliases; migration of CI to `--parity-suite` is tracked in
+`docs/project-management/PORTING_STATUS.md`.
+
+## Other Python test groups
+
+**Noisy-data parity (function level, default-on):** compares the Python fit of a stored noisy curve against
+MATLAB's fit of the same curve, gated per-parameter on identifiability.
+
+```bash
+pytest tests/python/test_dce_noisy_parity.py -v
+```
+
+**End-to-end T1 map parity** (default-on; compares against the committed MATLAB reference over
+identifiable voxels). Regenerate the reference only when the MATLAB T1 algorithm changes:
+
+```bash
+matlab -batch "addpath('tests/matlab'); addpath('tests/matlab/helpers'); \
+  generate_t1_parity_map('vfaFiles', {'tests/data/BIDS_test/rawdata/sub-11tiny/ses-01/anat/sub-11tiny_ses-01_flip-01_VFA.nii.gz', \
+   'tests/data/BIDS_test/rawdata/sub-11tiny/ses-01/anat/sub-11tiny_ses-01_flip-02_VFA.nii.gz', \
+   'tests/data/BIDS_test/rawdata/sub-11tiny/ses-01/anat/sub-11tiny_ses-01_flip-03_VFA.nii.gz'}, 'flipAngles', [2 5 10], \
+  'trMs', 8.012, 'fitType', 't1_fa_fit', \
+  'outputPath', 'tests/data/BIDS_test/derivatives/matlabref/sub-11tiny/ses-01/anat/sub-11tiny_ses-01_desc-t1fafit_T1map.nii', 'rsquaredThreshold', 0);"
+pytest tests/python/test_t1_map_parity.py
+```
+
+**OSIPI reliability** (ground-truth correctness against published peer tolerances):
+
+```bash
+pytest tests/python -m osipi -v                 # all OSIPI checks (incl. full 2CXM/2CUM sweeps)
+pytest tests/python/test_osipi_backend_consistency.py -v   # cpu vs cpufit/gpufit
+pytest tests/python/test_osipi_pycpufit.py tests/python/test_osipi_pygpufit.py -m fast -v
+python tests/python/run_osipi_reliability.py --suite all --summary-json /tmp/osipi_summary.json
+```
+
+**BIDS discovery and qualification:**
+
+```bash
+python run_bids_discovery.py --bids-root tests/data/BIDS_test --output-json out/bids_manifest.json --print-json
+python run_python_qualification.py --bids-root tests/data/BIDS_test \
+  --output-root out/python_qualification_bids_test --backend cpu --print-summary-json
+```
+
+**Synthetic phantom GT reliability (diagnostic, not a merge gate yet):**
+
+```bash
+python tests/python/run_phantom_gt_reliability.py --backend auto [--subject sub-08phantom]
+```
+
+The phantom tolerance profile (`tests/data/BIDS_test/phantom_gt_mae_tolerances.json`) is provisional;
+`test_phantom_gt_reliability.py` is qualification-gated and `xfail`s when `gate_ready=false`. See
+`docs/project-management/projects/phantom-gt/PHANTOM_GT_QUALIFICATION_STATUS.md`.
+
+## Helpers
+
+```bash
+python tests/python/run_dce_parity.py --suite multi-model      # prints parity summary metrics
+python tests/python/run_dce_benchmark.py                       # benchmarks
+python tests/python/run_dce_postfit_analysis.py --analysis ftest --region roi \
+  --result lower_model_fit_postfit_arrays.npz --result higher_model_fit_postfit_arrays.npz \
+  --output-dir /tmp/dce_postfit_ftest --print-summary-json
+```
+
+Generate Part E NPZ inputs from Stage D with `stage_overrides.write_postfit_arrays=true`.
+
+## MATLAB tests and baselines
 
 ```matlab
 results = run_unit_tests();
-```
-
-or
-
-```matlab
 results = run_all_tests('suite', 'all', 'includeIntegration', true);
+baseline = export_parity_baseline();          % writes tests/contracts/baselines/matlab_reference_v1.{mat,json}
+manifest = generate_synthetic_datasets();     % deterministic synthetic BIDS-like fixtures
 ```
 
-## Generating parity baselines
-Generate canonical MATLAB outputs for synthetic fixtures:
-
-```matlab
-baseline = export_parity_baseline();
-```
-
-This writes:
-- `tests/contracts/baselines/matlab_reference_v1.mat`
-- `tests/contracts/baselines/matlab_reference_v1.json`
-
-These files are intended for direct numerical comparison when the Python implementation is introduced.
-
-## Generating synthetic datasets
-Create deterministic synthetic BIDS-like fixtures derived from `tests/data/BIDS_example`:
-
-```matlab
-manifest = generate_synthetic_datasets();
-```
-
-Default output:
-- `tests/data/synthetic/generated/noisy_low`
-- `tests/data/synthetic/generated/noisy_high`
-- `tests/data/synthetic/generated/downsample_x2`
-- `tests/data/synthetic/generated/bolus_delay`
-
-You can also generate into a temp directory:
-
-```matlab
-manifest = generate_synthetic_datasets('outputRoot', fullfile(tempdir, 'rocketship_synth'));
-```
-
-Generate a fast, nearest-neighbor downsampled `BBB data p19` fixture (`x3,y3`) for Python-vs-MATLAB DCE map parity checks:
+Regenerate the downsampled BBB p19 DCE parity fixture and its MATLAB baseline maps:
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python tests/data/scripts/generate_bbb_p19_downsample.py --clean --factor-x 3 --factor-y 3
+python tests/data/scripts/generate_bbb_p19_downsample.py --clean --factor-x 3 --factor-y 3
+S=tests/data/BIDS_test; sub=sub-10bbbdownsample; ses=ses-01
+matlab -batch "addpath('tests/matlab'); generate_dce_tofts_parity_map( \
+  'dynamicPath', '$S/rawdata/$sub/$ses/dce/${sub}_${ses}_DCE.nii', \
+  'aifRoiPath', '$S/derivatives/$sub/$ses/dce/${sub}_${ses}_desc-AIFroi_mask.nii', \
+  'brainRoiPath', '$S/derivatives/$sub/$ses/anat/${sub}_${ses}_desc-brain_mask.nii', \
+  't1MapPath', '$S/derivatives/$sub/$ses/anat/${sub}_${ses}_space-DCEref_T1map.nii', \
+  'noiseRoiPath', '$S/derivatives/$sub/$ses/anat/${sub}_${ses}_desc-noise_mask.nii', \
+  'outputRoot', '$S/derivatives/matlabref/$sub/$ses/dce', 'models', {'tofts', 'patlak'});"
 ```
-
-CI uses committed lightweight fixtures (no per-run generation required):
-- `tests/data/ci_fixtures/dce/downsample_x2_bids` (MATLAB PR smoke DCE run)
-- `tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3` (Python DCE pipeline parity)
-
-Generate MATLAB Tofts Ktrans parity baselines (`processed/results_matlab`) for both
-downsampled and full-volume BBB datasets:
-
-```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
-matlab -batch "cd('/Users/samuelbarnes/code/ROCKETSHIP'); addpath('tests/matlab'); generate_dce_tofts_parity_map('subjectRoot','/Users/samuelbarnes/code/ROCKETSHIP/tests/data/synthetic/generated/bbb_p19_downsample_x3y3')"
-matlab -batch "cd('/Users/samuelbarnes/code/ROCKETSHIP'); addpath('tests/matlab'); generate_dce_tofts_parity_map('subjectRoot','/Users/samuelbarnes/code/ROCKETSHIP/tests/data/BBB data p19')"
-```
-
-## MATLAB-vs-Python parity runner
-Use the lightweight Python comparator in `/Users/samuelbarnes/code/ROCKETSHIP/tests/contracts/`:
-
-```bash
-python3 tests/contracts/compare_with_matlab_baseline.py \
-  --write-template tests/contracts/python_results_template.json
-```
-
-Then compare Python outputs by contract:
-
-```bash
-python3 tests/contracts/compare_with_matlab_baseline.py \
-  --python-results tests/contracts/python_results_template.json
-```
-
-Contract parity currently includes parametric fitters:
-- `t2_linear_fast`
-- `t1_fa_linear_fit`
-- `t1_fa_fit`
-
-Current Python ports are under `/Users/samuelbarnes/code/ROCKETSHIP/python/`.
-
-## Running Python tests
-Run the default Python test suite:
-
-```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python -m pytest tests/python -q
-```
-
-Coverage run:
-
-```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python -m pytest tests/python -q \
-  --cov=python \
-  --cov-report=term-missing \
-  --cov-report=xml \
-  --cov-fail-under=60
-```
-
-Targeted reliability checks:
-
-```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python -m pytest \
-  tests/python/test_install_python_acceleration.py \
-  tests/python/test_dce_pipeline_contracts.py -v
-```
-
-## OSIPI-labeled tests
-Run OSIPI tests:
-
-```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python -m pytest tests/python -m osipi -v
-```
-
-Run OSIPI T1 + SI-to-concentration reliability checks only:
-
-```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python -m pytest \
-  tests/python/test_osipi_t1_reliability.py \
-  tests/python/test_osipi_si_to_conc_reliability.py \
-  -v
-```
-
-Run OSIPI primary merge-gate reliability summary (prints SI-to-conc and primary DCE thresholds vs ours and writes JSON):
-
-```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python tests/python/run_osipi_reliability.py \
-  --suite all \
-  --summary-json /tmp/osipi_primary_reliability_summary.json
-```
-
-Run fast OSIPI backend checks only:
-
-```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python -m pytest \
-  tests/python/test_osipi_pycpufit.py \
-  tests/python/test_osipi_pygpufit.py \
-  -m fast -v
-```
-
-Run primary-model backend consistency checks (`cpu` vs `cpufit`/`gpufit`, with skip when unavailable):
-
-```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python -m pytest tests/python/test_osipi_backend_consistency.py -v
-```
-
-Enable long OSIPI fits:
-
-```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python -m pytest tests/python -m osipi -v --osipi-slow
-```
-
-## Dataset-backed DCE parity tests
-Run downsample Tofts parity:
-
-```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python -m pytest \
-  tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_tofts_ktrans \
-  --parity
-```
-
-Run full-volume Tofts parity (slow):
-
-```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python -m pytest \
-  tests/python/test_dce_pipeline_parity_metrics.py::test_full_bbb_p19_tofts_ktrans \
-  --parity --full-parity
-```
-
-Run multi-model backend parity:
-
-```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python -m pytest \
-  tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_models_cpu_and_auto \
-  --parity --mm-parity
-```
-
-Run CPU model-map + ROI table parity:
-
-```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python -m pytest \
-  tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_model_maps_and_roi_xls_cpu \
-  --parity
-```
-
-## BIDS discovery and qualification
-Create a discoverable-session manifest from any BIDS root:
-
-```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python run_bids_discovery.py \
-  --bids-root tests/data/BIDS_test \
-  --output-json out/bids_manifest.json \
-  --print-json
-```
-
-Run end-to-end Python qualification across all discovered sessions:
-
-```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python run_python_qualification.py \
-  --bids-root tests/data/BIDS_test \
-  --output-root out/python_qualification_bids_test \
-  --backend cpu \
-  --print-summary-json
-```
-
-## Synthetic phantom GT reliability (diagnostic)
-Run the phantom GT summary runner (reconstructs T1, runs DCE, compares against `rawdata/.../gt` by tissue region):
-
-```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python tests/python/run_phantom_gt_reliability.py --backend auto
-```
-
-Limit to a single phantom (useful for fast debugging, e.g. low-noise `sub-08phantom`):
-
-```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python tests/python/run_phantom_gt_reliability.py --backend auto --subject sub-08phantom
-```
-
-Important current status:
-- The phantom tolerance profile (`tests/data/BIDS_test/phantom_gt_mae_tolerances.json`) is provisional and not a merge gate yet.
-- `tests/python/test_phantom_gt_reliability.py` is qualification-gated and will `xfail` when the profile is marked `gate_ready=false`.
-- Phantom runs currently align Stage-A baseline to GT `BaselineImages` for diagnostics; real-data baseline auto-detection is still a TODO.
-- See `~/code/ROCKETSHIP/docs/project-management/projects/phantom-gt/PHANTOM_GT_QUALIFICATION_STATUS.md` for current findings, ruled-out causes, and known dataset details.
-
-## Parity and benchmark helpers
-Parity helper (prints summary metrics after pytest):
-
-```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python tests/python/run_dce_parity.py --suite multi-model
-```
-
-Examples:
-
-```bash
-.venv/bin/python tests/python/run_dce_parity.py -s tofts-downsample
-.venv/bin/python tests/python/run_dce_parity.py -s tofts-full -f "/path/to/ROCKETSHIP/tests/data/BBB data p19"
-.venv/bin/python tests/python/run_dce_parity.py -s model-map-roi-cpu -d "/path/to/ROCKETSHIP/tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3"
-```
-
-Benchmark helper:
-
-```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python tests/python/run_dce_benchmark.py
-```
-
-Part E post-fit comparison helper from Stage-D postfit NPZ outputs:
-
-```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
-.venv/bin/python tests/python/run_dce_postfit_analysis.py \
-  --analysis ftest \
-  --region roi \
-  --result /path/to/lower_model_fit_postfit_arrays.npz \
-  --result /path/to/higher_model_fit_postfit_arrays.npz \
-  --output-dir /tmp/dce_postfit_ftest \
-  --print-summary-json
-```
-
-Generate those NPZ inputs from Stage D by setting `stage_overrides.write_postfit_arrays=true`.
-Use `--no-plots` to skip optional PNG artifact generation.

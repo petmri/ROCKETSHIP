@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 from typing import Any, Dict, IO, Optional
 
+from banner import print_banner
 from parametric_pipeline import ParametricT1Config, run_parametric_t1_pipeline
 
 
@@ -102,6 +103,7 @@ def _build_event_logger(event_log_path: Path, emit_stdout: bool) -> tuple[IO[str
 
 
 def main(argv: list[str] | None = None) -> int:
+    print_banner()
     args = parse_args(argv if argv is not None else sys.argv[1:])
     config_path = args.config.expanduser().resolve()
     payload = _load_config(config_path)

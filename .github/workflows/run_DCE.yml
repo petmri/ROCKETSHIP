@@ -110,21 +110,85 @@ jobs:
           products: Curve_Fitting_Toolbox Image_Processing_Toolbox Optimization_Toolbox Parallel_Computing_Toolbox Statistics_and_Machine_Learning_Toolbox
           release: R2022a
 
+      - name: Regenerate MATLAB parity baseline (for drift guard)
+        uses: matlab-actions/run-command@v2
+        with:
+          command: addpath('tests/matlab'); addpath('tests/matlab/helpers'); export_parity_baseline('_ci_baseline_candidate');
+
+      - name: Check MATLAB baseline drift
+        # Fails if committed matlab_reference_v1.json no longer matches current MATLAB
+        # output, i.e. MATLAB algorithm code changed without regenerating the baseline.
+        # Together with the contract parity step below (Python vs committed baseline),
+        # this transitively verifies Python matches *current* MATLAB, not a stale snapshot.
+        run: |
+          python tests/contracts/check_baseline_drift.py \
+            --candidate _ci_baseline_candidate/matlab_reference_v1.json
+
+      - name: Regenerate MATLAB region-parity baseline (drift-check candidate)
+        uses: matlab-actions/run-command@v2
+        with:
+          command: >-
+            addpath('.'); addpath('tests/matlab');
+            generate_dce_tofts_parity_map(
+            'outputRoot', '_ci_matlabref_candidate/sub-10bbbdownsample',
+            'dynamicPath', 'tests/data/BIDS_test/rawdata/sub-10bbbdownsample/ses-01/dce/sub-10bbbdownsample_ses-01_DCE.nii',
+            'aifRoiPath', 'tests/data/BIDS_test/derivatives/sub-10bbbdownsample/ses-01/dce/sub-10bbbdownsample_ses-01_desc-AIFroi_mask.nii',
+            'brainRoiPath', 'tests/data/BIDS_test/derivatives/sub-10bbbdownsample/ses-01/anat/sub-10bbbdownsample_ses-01_desc-brain_mask.nii',
+            't1MapPath', 'tests/data/BIDS_test/derivatives/sub-10bbbdownsample/ses-01/anat/sub-10bbbdownsample_ses-01_space-DCEref_T1map.nii',
+            'noiseRoiPath', 'tests/data/BIDS_test/derivatives/sub-10bbbdownsample/ses-01/anat/sub-10bbbdownsample_ses-01_desc-noise_mask.nii',
+            'models', {'tofts', 'patlak'});
+
+      - name: Check MATLAB region-parity baseline drift (sub-10bbbdownsample)
+        # Fails if a fresh MATLAB run of generate_dce_tofts_parity_map no longer matches
+        # the committed derivatives/matlabref/... maps, i.e. MATLAB's own pipeline
+        # (steady-state auto-detect, fitting, etc.) changed without regenerating the
+        # fixture. Complements the contract drift guard above, which never exercises
+        # A_make_R1maps_func/find_end_ss.
+        run: |
+          python tests/contracts/check_matlabref_map_drift.py \
+            --candidate-root _ci_matlabref_candidate/sub-10bbbdownsample
+
       - name: Generate MATLAB parity baseline maps (downsample fixture)
         uses: matlab-actions/run-command@v3
         with:
-          command: addpath .; addpath tests/matlab/; generate_dce_tofts_parity_map('subjectRoot', 'tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3', 'models', {'tofts'});
+          command: >-
+            addpath('.'); addpath('tests/matlab');
+            generate_dce_tofts_parity_map(
+            'outputRoot', 'tests/data/BIDS_test/derivatives/matlabref/sub-10bbbdownsample/ses-01/dce',
+            'dynamicPath', 'tests/data/BIDS_test/rawdata/sub-10bbbdownsample/ses-01/dce/sub-10bbbdownsample_ses-01_DCE.nii',
+            'aifRoiPath', 'tests/data/BIDS_test/derivatives/sub-10bbbdownsample/ses-01/dce/sub-10bbbdownsample_ses-01_desc-AIFroi_mask.nii',
+            'brainRoiPath', 'tests/data/BIDS_test/derivatives/sub-10bbbdownsample/ses-01/anat/sub-10bbbdownsample_ses-01_desc-brain_mask.nii',
+            't1MapPath', 'tests/data/BIDS_test/derivatives/sub-10bbbdownsample/ses-01/anat/sub-10bbbdownsample_ses-01_space-DCEref_T1map.nii',
+            'noiseRoiPath', 'tests/data/BIDS_test/derivatives/sub-10bbbdownsample/ses-01/anat/sub-10bbbdownsample_ses-01_desc-noise_mask.nii',
+            'models', {'tofts', 'patlak'});
 
       - name: Run Python contract parity checks
         run: |
           python tests/contracts/generate_python_results.py --output /tmp/python_results.json
           python tests/contracts/compare_with_matlab_baseline.py --python-results /tmp/python_results.json --require-all
 
-      - name: Run Python DCE pipeline parity (downsample fixture)
+      - name: Run Python DCE region parity (downsample fixture, gated tofts/patlak Ktrans + ROI xls)
         run: |
-          python -m pytest tests/python/test_dce_pipeline_parity_metrics.py::test_downsample_bbb_p19_tofts_ktrans \
-            --run-parity \
-            --dataset-root tests/data/ci_fixtures/dce/bbb_p19_downsample_x3y3 \
+          python -m pytest tests/python/test_dce_pipeline_parity_metrics.py::test_bbb_p19_region_parity \
+            --dataset-root tests/data/BIDS_test \
+            -q
+
+      - name: Generate MATLAB T1 parity map (small VFA fixture)
+        uses: matlab-actions/run-command@v2
+        with:
+          command: >-
+            addpath('tests/matlab'); addpath('tests/matlab/helpers');
+            generate_t1_parity_map(
+            'vfaFiles', {'tests/data/BIDS_test/rawdata/sub-11tiny/ses-01/anat/sub-11tiny_ses-01_flip-01_VFA.nii.gz',
+            'tests/data/BIDS_test/rawdata/sub-11tiny/ses-01/anat/sub-11tiny_ses-01_flip-02_VFA.nii.gz',
+            'tests/data/BIDS_test/rawdata/sub-11tiny/ses-01/anat/sub-11tiny_ses-01_flip-03_VFA.nii.gz'},
+            'flipAngles', [2 5 10], 'trMs', 8.012, 'fitType', 't1_fa_fit',
+            'outputPath', 'tests/data/BIDS_test/derivatives/matlabref/sub-11tiny/ses-01/anat/sub-11tiny_ses-01_desc-t1fafit_T1map.nii',
+            'rsquaredThreshold', 0);
+
+      - name: Run Python T1 map parity (small VFA fixture)
+        run: |
+          python -m pytest tests/python/test_t1_map_parity.py::test_bids_t1_map_parity_nonlinear \
             -q
 
   matlab_checks:
@@ -152,7 +216,7 @@ jobs:
       - name: Run T1 mapping
         uses: matlab-actions/run-command@v3
         with:
-          command: addpath .; addpath dce/; addpath external_programs/; addpath external_programs/niftitools/; addpath parametric_scripts/; addpath parametric_scripts/custom_scripts/; T1mapping_fit('tests/data/BIDS_test/rawdata/sub-01original/ses-01/anat/', 'tests/data/BIDS_test/derivatives/sub-01original/ses-01/anat/', 'sub-01_ses-01_space-DCEref_desc-bfczunified_VFA.nii')
+          command: addpath .; addpath dce/; addpath external_programs/; addpath external_programs/niftitools/; addpath parametric_scripts/; addpath parametric_scripts/custom_scripts/; T1mapping_fit('tests/data/BIDS_test/rawdata/sub-01original/ses-01/anat/', 'tests/data/BIDS_test/derivatives/sub-01original/ses-01/anat/', 'sub-01original_ses-01_space-DCEref_desc-bfczunified_VFA.nii')
 
       - name: Run Algorithm Unit Tests
         uses: matlab-actions/run-command@v3
