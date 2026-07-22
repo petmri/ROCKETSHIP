@@ -251,6 +251,47 @@ Regenerating `sub-10bbbdownsample`'s matlabref maps under the new `tv` window an
 Full repro commands (matlabref regeneration, the exact test invocations) are in the
 archived `steady-state-tv-default/STATUS.md`.
 
+## Update (2026-07-22): gated Ktrans checks switched from Pearson to Spearman correlation
+
+`_metrics()` in `test_dce_pipeline_parity_metrics.py` (feeds the `corr` field for all 10
+gated tofts/patlak Ktrans checks in `test_bbb_p19_region_parity`) now computes Spearman
+rank correlation (`scipy.stats.spearmanr`) instead of Pearson (`np.corrcoef`). Same
+motivation as the "Tabled" section above and the earlier `check_matlabref_map_drift.py`
+fix (commit `ddc35c0`): Pearson is a sum-of-products statistic, so a single
+non-identifiable/high-leverage voxel can collapse it even when the rest of the map agrees
+closely, while a genuine algorithm regression still collapses Spearman toward 0/negative.
+Threshold values (`model_ktrans_corr_min=0.95`, etc.) were left unchanged.
+
+Effect on the 10 gated Ktrans checks (`sub-10bbbdownsample`, `--parity-suite=multi-model`):
+9 of 10 now pass (up from 8 of 10 under Pearson). `patlak_ktrans_brain_auto_vs_matlab` flips
+from failing (Pearson `corr=0.877854`) to passing (Spearman `corr=0.973583`). This does
+*not* fully resolve the patlak+`brain` non-identifiability issue documented above --
+`patlak_ktrans_brain_cpu_vs_matlab` still fails, but far more narrowly: Spearman
+`corr=0.937637` vs Pearson's `corr=0.032283`, just under the `0.95` bar rather than
+collapsed. That remaining gap is consistent with a real, if now much smaller, residual
+disagreement (not purely a single-voxel Pearson artifact) -- most likely more voxels than
+just the one profiled above are affected, or the CPU-vs-MATLAB path has its own smaller
+drift on top of the known gpufit-vs-CPU one. The GM/WM-style gating exception noted above
+is still the actual fix for `patlak`+`brain`; still not implemented. Left failing rather
+than adjusting the threshold to force a pass -- the point of this check is to catch real
+drift, and 0.9376 is close enough to the bar that lowering it to paper over this specific
+case isn't obviously safe without further investigation.
+
+**New TODO found while investigating this:** the existing CI-aware diagnostics
+(`_ci_metrics()`'s `ci_norm_absdiff_median/p95` and `prop_py_outside_matlab_ci`, reported-
+only, never gated) are currently non-functional on `sub-10bbbdownsample` -- MATLAB's Ktrans
+CI maps (`*_ci_low`/`*_ci_high`) are zero-width (`ci_low == ci_high == 0.0`) for every voxel
+checked, across tofts/patlak/ex_tofts. This makes `ci_norm_absdiff_median` always `NaN`
+(no positive-width voxels to normalize by) and `prop_py_outside_matlab_ci` a meaningless
+`~1.0` (a zero-width "interval" makes almost any Python value trivially "outside" it --
+that field doesn't currently exclude degenerate widths the way the median/p95 field does).
+Not yet root-caused (MATLAB `confint()` behavior on this fixture? a batch-config flag that
+disables CI computation for the downsample run? something else?). Blocks ever promoting
+either CI-aware metric to a real gate until fixed. Secondary, smaller fix once unblocked:
+`prop_py_outside_matlab_ci` should skip degenerate (zero-width) voxels the same way
+`ci_norm_absdiff_median` already does, so it's not silently meaningless whenever any
+degenerate CI shows up in the mask.
+
 ## Testing Gap Analysis
 The CPU-vs-CPUfit divergence and weighted-AIF side effects were not caught early because:
 - Existing parity gates focus on final map parity and do not separately gate Stage-B AIF-fit outputs (`Cp_use`) as a first-class contract.

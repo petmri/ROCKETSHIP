@@ -11,6 +11,7 @@ import tempfile
 import nibabel as nib
 import numpy as np
 import pytest
+from scipy.stats import spearmanr
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -297,9 +298,17 @@ def _metrics(
         raise AssertionError("Too few voxels for parity metrics")
     diff = x - y
     mse = float(np.mean(diff * diff))
+    # Rank (Spearman), not Pearson: Pearson is a sum-of-products statistic, so a single
+    # high-leverage voxel (e.g. a non-identifiable fit pinned at a parameter bound) can
+    # collapse it even though every other voxel agrees closely -- observed on real fixtures
+    # (patlak brain corr ~-0.007 from one degenerate-seed voxel out of 237; see
+    # docs/project-management/projects/batch-parity/batch_parity.md, "Tabled" section, and
+    # the same fix already applied to tests/contracts/check_matlabref_map_drift.py). A
+    # genuine algorithm change still collapses Spearman to ~0/negative.
+    corr = float(spearmanr(x, y).correlation) if np.std(x) > 0 and np.std(y) > 0 else float("nan")
     return {
         "n": int(x.size),
-        "corr": float(np.corrcoef(x, y)[0, 1]),
+        "corr": corr,
         "mse": mse,
         "rmse": float(np.sqrt(mse)),
     }
@@ -321,6 +330,15 @@ def _ci_metrics(
     Both MATLAB and Python report a 95% CI, so CI widths are directly comparable.
     Returns the CI-normalized absolute difference (median + p95) using the MATLAB CI
     as the denominator, and the proportion of voxels falling outside the other side's CI.
+
+    NOTE (2026-07-22): on the sub-10bbbdownsample fixture, MATLAB's Ktrans CI maps are
+    currently zero-width (ci_low == ci_high == 0.0) for every voxel across every model
+    checked (tofts, patlak, ex_tofts), making ci_norm_absdiff_median NaN (no positive-width
+    voxels) and prop_py_outside_matlab_ci a meaningless ~1.0 (a zero-width "interval" makes
+    almost any Python value trivially "outside" it -- this metric doesn't currently exclude
+    degenerate widths the way ci_norm_absdiff_median does). Not yet root-caused; tracked as
+    a TODO in docs/project-management/projects/batch-parity/batch_parity.md. Do not gate on
+    either field until that's fixed and re-verified as non-degenerate on real fixture data.
     """
     mask = (
         np.isfinite(py_map)

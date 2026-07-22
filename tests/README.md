@@ -29,7 +29,7 @@ The parity suite compares the Python pipeline against committed MATLAB baseline 
 single **`--parity-suite`** selector and split into **gated** vs **reported-only** checks.
 
 - **`--parity-suite=standard`** (default; runs on a plain `pytest`): gates **Tofts & Patlak, Ktrans only**,
-  Python-vs-MATLAB (cpu & auto), on **RMSE and Corr**.
+  Python-vs-MATLAB (cpu & auto), on **RMSE and Spearman (rank) correlation**.
 - **`--parity-suite=allmodels`**: additionally runs **ex_tofts, tissue_uptake, 2cxm** as **reported-only**
   diagnostics (never gated — they are not identifiable on this fixture).
 - **`--parity-suite=all`**: union of the above.
@@ -40,9 +40,13 @@ is reported-only** because Tofts Ktrans is non-identifiable in that GM patch (fl
 Python's fit is equal-or-better than MATLAB's by SSE — see `docs/parity-testing-improvement-plan.md`).
 Non-Ktrans params (ve/vp/fp) and backend-consistency (auto-vs-cpu) are always reported, never gated.
 
-**Reported metrics.** Every check logs `corr` and `rmse`; each Python-vs-MATLAB parameter check also
-logs CI-aware diagnostics — **`ci_norm_absdiff_p95`** (p95 of `|py−matlab| / CI-width`, both sides are
-95% CI) and **proportion outside the CI**. A full summary JSON is written to `--parity-summary-dir`.
+**Reported metrics.** Every check logs `corr` (Spearman rank correlation, not Pearson — robust to the
+single high-leverage/non-identifiable voxel that can otherwise dominate a sum-of-products statistic;
+see `docs/project-management/projects/batch-parity/batch_parity.md`) and `rmse`; each Python-vs-MATLAB
+parameter check also logs CI-aware diagnostics — **`ci_norm_absdiff_p95`** (p95 of `|py−matlab| /
+CI-width`, both sides are 95% CI) and **proportion outside the CI**. These CI-aware fields are
+reported-only, not gated — and are currently non-functional (always degenerate) on the downsample
+fixture, see the note in `_ci_metrics()`. A full summary JSON is written to `--parity-summary-dir`.
 
 `test_bbb_p19_region_parity` replaced the former per-scenario voxelwise parity tests
 (`*_tofts_ktrans`, `*_primary_models_ktrans_cpu`). Gated checks whose masks collapse to `<2` valid
