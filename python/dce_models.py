@@ -390,8 +390,22 @@ def _fit_2cxm_osipi_canonical(
 
     # CIs from curve_fit's covariance (fit coefficients are [vp, ve, fp, e]).
     # Ktrans = E * Fp is derived, so its variance comes from the delta method.
+    #
+    # curve_fit (absolute_sigma=False) internally scales pcov by
+    # sse / (len(ct_interp) - n_params) -- i.e. by the *interpolated* grid's
+    # point count, not the number of actually acquired, independent DCE time
+    # points. ct_interp is a dense quadratic-resampled curve (OSIPI LEK
+    # convention, ~0.1s steps) that carries no more real information than the
+    # original samples it was interpolated from, so using its length as dof
+    # systematically understates the variance (and hence CI width). Rescale
+    # pcov to the real dof: cov_real = pcov * dof_interp / dof_real.
     cov = np.asarray(pcov, dtype=float)
-    dof = int(len(ct_interp)) - 4
+    dof_interp = int(len(ct_interp)) - 4
+    dof = int(len(t_min_vec)) - 4
+    if dof > 0 and dof_interp > 0:
+        cov = cov * (float(dof_interp) / float(dof))
+    else:
+        cov = np.full_like(cov, np.nan)
 
     def _safe_se(value: float) -> float:
         return math.sqrt(value) if (math.isfinite(value) and value >= 0.0) else float("nan")

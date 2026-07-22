@@ -22,6 +22,7 @@ from dce_models import (
     _fit_2cxm_osipi_canonical,
     _least_squares_kwargs,
     _merge_prefs_in_canonical_units,
+    _reject_algorithm_override,
     model_extended_tofts_cfit,
     model_patlak_cfit,
     model_patlak_linear,
@@ -39,6 +40,11 @@ class FitInputs:
     timer: np.ndarray  # (n_time,)
     bounds_row: np.ndarray  # flat [lo0, hi0, lo1, hi1, ...]
     prefs: Dict[str, Any]
+    # Caller-supplied overrides only (pre-merge with hardcoded defaults), needed
+    # by tissue_uptake/2cxm's python runners to convert bounds to canonical
+    # per-minute units without re-scaling the (already-canonical) defaults
+    # baked into `prefs`. See _run_tissue_uptake_python/_run_2cxm_python.
+    raw_prefs: Optional[Dict[str, Any]] = None
 
     @property
     def n_voxels(self) -> int:
@@ -269,27 +275,35 @@ def _e_space_bounds(ktrans_lo: float, ktrans_hi: float, fp_lo: float, fp_hi: flo
     return float(e_lo), float(e_hi)
 
 
+# Hardcoded canonical (per-minute) defaults -- already in the internal fit
+# units, unlike caller-supplied prefs which follow the input timer's unit.
+# Kept as a standalone constant so `_run_tissue_uptake_python` can merge the
+# caller's *raw* overrides into these canonical values with correct
+# unit scaling, instead of re-scaling the already-canonical defaults too.
+_TISSUE_UPTAKE_DEFAULTS: Dict[str, Any] = {
+    "lower_limit_ktrans": 1e-7,
+    "upper_limit_ktrans": 2.0,
+    "initial_value_ktrans": 2e-4,
+    "lower_limit_fp": 1e-4,
+    "upper_limit_fp": 100.0,
+    "initial_value_fp": 0.2,
+    "lower_limit_vp": 0.0,
+    "upper_limit_vp": 1.0,
+    "initial_value_vp": 0.02,
+    "lower_limit_tp": 0.0,
+    "upper_limit_tp": 1e6,
+    "initial_value_tp": 0.05,
+    "max_nfev": 2000,
+    "tol_fun": 1e-12,
+    "tol_x": 1e-6,
+    "robust": "off",
+    "multistart_starts": 4,
+    "multistart_seed": 0,
+}
+
+
 def _tissue_uptake_settings(prefs: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    settings: Dict[str, Any] = {
-        "lower_limit_ktrans": 1e-7,
-        "upper_limit_ktrans": 2.0,
-        "initial_value_ktrans": 2e-4,
-        "lower_limit_fp": 1e-4,
-        "upper_limit_fp": 100.0,
-        "initial_value_fp": 0.2,
-        "lower_limit_vp": 0.0,
-        "upper_limit_vp": 1.0,
-        "initial_value_vp": 0.02,
-        "lower_limit_tp": 0.0,
-        "upper_limit_tp": 1e6,
-        "initial_value_tp": 0.05,
-        "max_nfev": 2000,
-        "tol_fun": 1e-12,
-        "tol_x": 1e-6,
-        "robust": "off",
-        "multistart_starts": 4,
-        "multistart_seed": 0,
-    }
+    settings: Dict[str, Any] = dict(_TISSUE_UPTAKE_DEFAULTS)
     if prefs:
         settings.update(prefs)
     return settings
@@ -370,24 +384,30 @@ def assemble_tissue_uptake_candidates(inputs: FitInputs) -> np.ndarray:
     return np.concatenate([fixed, patlak, random_candidates], axis=0)
 
 
+# See _TISSUE_UPTAKE_DEFAULTS: hardcoded canonical (per-minute) defaults, kept
+# standalone so _run_2cxm_python can merge raw overrides in without
+# re-scaling the already-canonical defaults.
+_2CXM_DEFAULTS: Dict[str, Any] = {
+    "lower_limit_ktrans": 1e-7,
+    "upper_limit_ktrans": 2.0,
+    "initial_value_ktrans": 2e-4,
+    "lower_limit_ve": 0.02,
+    "upper_limit_ve": 1.0,
+    "initial_value_ve": 0.2,
+    "lower_limit_vp": 1e-3,
+    "upper_limit_vp": 1.0,
+    "initial_value_vp": 0.02,
+    "lower_limit_fp": 1e-4,
+    "upper_limit_fp": 2.0,
+    "initial_value_fp": 20.0 / 100.0,
+    "max_nfev": 4000,
+    "multistart_starts": 5,
+    "multistart_seed": 0,
+}
+
+
 def _2cxm_settings(prefs: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    settings: Dict[str, Any] = {
-        "lower_limit_ktrans": 1e-7,
-        "upper_limit_ktrans": 2.0,
-        "initial_value_ktrans": 2e-4,
-        "lower_limit_ve": 0.02,
-        "upper_limit_ve": 1.0,
-        "initial_value_ve": 0.2,
-        "lower_limit_vp": 1e-3,
-        "upper_limit_vp": 1.0,
-        "initial_value_vp": 0.02,
-        "lower_limit_fp": 1e-4,
-        "upper_limit_fp": 2.0,
-        "initial_value_fp": 20.0 / 100.0,
-        "max_nfev": 4000,
-        "multistart_starts": 5,
-        "multistart_seed": 0,
-    }
+    settings: Dict[str, Any] = dict(_2CXM_DEFAULTS)
     if prefs:
         settings.update(prefs)
     return settings
@@ -578,8 +598,8 @@ def _run_tissue_uptake_python(
     cp_vec = [float(v) for v in inputs.cp]
     timer_min, _, rate_in_to_min, rate_min_to_output = _canonical_time_context(t_vec, settings)
     canonical = _merge_prefs_in_canonical_units(
-        {},
-        settings,
+        _TISSUE_UPTAKE_DEFAULTS,
+        inputs.raw_prefs,
         rate_keys=_TISSUE_UPTAKE_RATE_KEYS,
         time_constant_keys=_TISSUE_UPTAKE_TIME_CONSTANT_KEYS,
         rate_in_to_min=rate_in_to_min,
@@ -670,7 +690,7 @@ def _run_2cxm_python(
     cp_vec = [float(v) for v in inputs.cp]
     timer_min, _, rate_in_to_min, rate_min_to_output = _canonical_time_context(t_vec, settings)
     canonical = _merge_prefs_in_canonical_units(
-        {}, settings, rate_keys=_2CXM_RATE_KEYS, rate_in_to_min=rate_in_to_min
+        _2CXM_DEFAULTS, inputs.raw_prefs, rate_keys=_2CXM_RATE_KEYS, rate_in_to_min=rate_in_to_min
     )
 
     n_voxels = inputs.n_voxels
@@ -1009,12 +1029,15 @@ def _fit_stage_d_batch(
     model's MATLAB-style output row. One or many voxels, either backend --
     see the public `fit_*_stage_d` wrappers for the per-model contract.
     """
+    _reject_algorithm_override(prefs, model_name)
     ct_arr, cp_arr, timer_arr, single_voxel = _validate_stage_d_inputs(ct, cp, timer)
 
     spec = _MODEL_SPECS[model_name]
     settings = spec.settings_fn(prefs)
     bounds_row = spec.bounds_fn(settings)
-    inputs = FitInputs(ct=ct_arr, cp=cp_arr, timer=timer_arr, bounds_row=bounds_row, prefs=settings)
+    inputs = FitInputs(
+        ct=ct_arr, cp=cp_arr, timer=timer_arr, bounds_row=bounds_row, prefs=settings, raw_prefs=prefs
+    )
     candidates = spec.assemble_fn(inputs)
 
     params, _success, chi, extra = fit_with_multistart(backend, model_name, inputs, candidates)
@@ -1171,5 +1194,3 @@ def fit_2cxm_stage_d(
     implementation used.
     """
     return _fit_stage_d_batch("2cxm", ct, cp, timer, prefs, backend)
-
-    return out[0] if single_voxel else out
