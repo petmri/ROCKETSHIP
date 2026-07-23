@@ -17,7 +17,12 @@ Keep strategic sequencing in `docs/project-management/ROADMAP.md` and current me
 ### 1. Synthetic Example Dataset Coverage
 - [ ] Generate BIDS-structured synthetic set with three SNR tiers (low/medium/high), each with two repeated measurements using identical parameters and independent noise.
 
-### 2. Modeling and Workflow Follow-Ups
+### 2. Large Test/Parity Data Distribution
+- [ ] Decide how to distribute large test/parity fixtures (~240 MB now, growing) outside the
+      main git repo. Options + recommendation (Release assets now, DataLad later) in
+      `docs/project-management/projects/large-data-distribution/large_data_distribution.md`.
+
+### 3. Modeling and Workflow Follow-Ups
 - [ ] Evaluate moving T1 fitting onto CPUfit/GPUfit for performance improvements.
 - [ ] Improve `2cxm` and `tissue_uptake` stability/accuracy on real data.
 - [ ] Expand DSC support beyond current core (`DSC_convolution_oSVD` and broader workflow parity).

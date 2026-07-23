@@ -13,12 +13,15 @@ This folder contains canonical planning and status documents for the Python tran
 
 - `projects/batch-parity/`
   - `batch_parity.md`: MATLAB vs Python batch parity tracking and diagnostics.
+  - `quality_of_fit.md`: plan for a per-voxel quality-of-fit metric to exclude unreliable voxels (analysis + real-data parity).
 - `projects/osipi-verification/`
   - `osipi_summary.md`: OSIPI accuracy summary and peer-comparison snapshot.
 - `projects/qualification/`
   - `QUALIFICATION_MERGE_PACKET.md`: qualification run packet and blocker classification.
 - `projects/phantom-gt/`
   - `PHANTOM_GT_QUALIFICATION_STATUS.md`: synthetic phantom GT qualification status.
+- `projects/large-data-distribution/`
+  - `large_data_distribution.md`: options for distributing large test/parity data outside the main git repo.
 
 ## Update Policy
 
