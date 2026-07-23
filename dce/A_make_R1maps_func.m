@@ -281,7 +281,6 @@ if dimt==1
     else
         error('Input dynamic images not 4D data, or time dimension = 1');
     end
-    
 end
 
 % The TR is in ms

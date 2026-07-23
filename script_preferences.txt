@@ -22,8 +22,8 @@
     % input nifti datasets, can specify subfolders and use wildcard *
     dynamic_files = /dce/*_desc-bfcz_DCE.nii*
 
-    aif_files = /dce/*desc-AIF_T1map.nii*
-    roi_files = /anat/*space-DCEref_desc-brain_mask.nii*
+    aif_files = /dce/*label-AIF_T1map.nii*
+    roi_files = /anat/*space-DCEref_label-brain_mask.nii*
     t1map_files = /anat/*space-DCEref_T1map.nii*
     noise_files =
     drift_files =
