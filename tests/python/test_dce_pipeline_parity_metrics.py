@@ -18,6 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "python"))
 
 from dce_pipeline import DcePipelineConfig, run_dce_pipeline  # noqa: E402
+import dce_qof  # noqa: E402
 
 MULTI_MODEL_PARITY_SPECS = {
     "tofts": {"params": ["Ktrans", "ve"]},
@@ -511,6 +512,15 @@ def _compare_roi_table_against_reference(
 STANDARD_PARITY_MODELS = ["tofts", "patlak"]
 ALLMODELS_EXTRA = ["ex_tofts", "tissue_uptake", "2cxm"]
 
+# QoF filtering (sigma_estimators.md): exclude voxels whose Python-CPU reduced χ² exceeds this
+# ABSOLUTE cutoff (residuals > τ× the estimated noise variance), per model, using the CPU (reference)
+# backend's χ² for every check. τ=6.0 was calibrated on sub-10bbbdownsample: χ² positively tracks
+# cross-backend divergence (Spearman ≈0.29), τ=6 removes the ~8% clearly-anomalous tail (χ²≫median~1.7,
+# up to ~500) while retaining ~92%, and — unlike a percentile (p95 ranged 5.8–8.5 across ROI sizes) —
+# is stable regardless of how many voxels are evaluated. Set env ROCKETSHIP_PARITY_QOF_CHI2_MAX<=0 to
+# disable.
+QOF_CHI2_MAX = float(os.environ.get("ROCKETSHIP_PARITY_QOF_CHI2_MAX", "6.0"))
+
 
 @pytest.mark.parity
 @pytest.mark.integration
@@ -555,9 +565,10 @@ def test_bbb_p19_region_parity(
             paths["roi"], [sparse_roi_path, paths["roi_gm"], paths["roi_wm"]], run_roi_path
         )
 
-        cpu_result = run_dce_pipeline(
-            _make_config(paths, out_cpu, backend="cpu", models=models, roi_path=run_roi_path)
-        )
+        cpu_cfg = _make_config(paths, out_cpu, backend="cpu", models=models, roi_path=run_roi_path)
+        # QoF filtering reads the per-voxel post-fit arrays (C(t) + SSE) from the CPU reference run.
+        cpu_cfg.stage_overrides = {**cpu_cfg.stage_overrides, "write_postfit_arrays": True}
+        cpu_result = run_dce_pipeline(cpu_cfg)
         auto_result = run_dce_pipeline(
             _make_config(paths, out_auto, backend="auto", models=models, roi_path=run_roi_path)
         )
@@ -597,10 +608,14 @@ def test_bbb_p19_region_parity(
             gated: bool,
             extra_mask: np.ndarray | None = None,
             ci: dict | None = None,
+            qof_mask: np.ndarray | None = None,
         ) -> None:
             combined = np.asarray(region_mask, dtype=bool)
             if extra_mask is not None:
                 combined = combined & np.asarray(extra_mask, dtype=bool)
+            n_pre_qof = int(np.count_nonzero(np.isfinite(lhs) & np.isfinite(rhs) & combined))
+            if qof_mask is not None:
+                combined = combined & np.asarray(qof_mask, dtype=bool)
             n_valid = int(np.count_nonzero(np.isfinite(lhs) & np.isfinite(rhs) & combined))
             check_rec: dict = {
                 "label": label,
@@ -608,6 +623,8 @@ def test_bbb_p19_region_parity(
                 "corr_min": float(corr_min),
                 "mse_max": float(mse_max),
                 "valid_voxels": n_valid,
+                "qof_filtered": bool(qof_mask is not None),
+                "qof_excluded_voxels": int(n_pre_qof - n_valid) if qof_mask is not None else 0,
             }
             if n_valid < 2:
                 # A gated check with nothing to compare is a silent hole, not a pass.
@@ -651,10 +668,36 @@ def test_bbb_p19_region_parity(
                 _parity_log(f"{label}: FAILED (gated)")
             checks.append(check_rec)
 
+        # Per-model QoF reliable masks from the CPU run's reduced χ² (absolute cutoff QOF_CHI2_MAX;
+        # see sigma_estimators.md). The same mask filters every check for that model (cpu/auto vs
+        # matlab, auto vs cpu).
+        qof_masks: dict[str, np.ndarray | None] = {}
+        qof_records: list[dict] = []
+        for model_name in models:
+            npz = out_cpu / f"Dyn-1_{model_name}_fit_postfit_arrays.npz"
+            if QOF_CHI2_MAX <= 0.0 or not npz.exists():
+                qof_masks[model_name] = None
+                continue
+            chi2_vol = np.squeeze(dce_qof.qof_volumes(npz)["chi2nu"])
+            mask_vol, tau = dce_qof.reliable_mask(chi2_vol, chi2_max=QOF_CHI2_MAX)
+            qof_masks[model_name] = mask_vol
+            n_fit = int(np.isfinite(chi2_vol).sum())
+            n_excl = n_fit - int(mask_vol.sum())
+            qof_records.append({
+                "model": model_name,
+                "chi2_max": float(tau),
+                "fit_voxels": n_fit,
+                "excluded_voxels": int(n_excl),
+            })
+            _parity_log(
+                f"QoF {model_name}: chi2_nu<={tau:g} excludes {n_excl}/{n_fit} fitted voxels"
+            )
+
         for model_name in models:
             spec = MULTI_MODEL_PARITY_SPECS[model_name]
             _parity_log(f"model={model_name}: running checks")
             gated_model = model_name in gated_models
+            qof_mask_m = qof_masks.get(model_name)
             py_cpu_ktrans = _load_nifti(out_cpu / f"Dyn-1_{model_name}_fit_Ktrans.nii.gz")
             py_auto_ktrans = _load_nifti(out_auto / f"Dyn-1_{model_name}_fit_Ktrans.nii.gz")
             matlab_ktrans = _load_nifti(_matlab_map_path(paths, model_name, "Ktrans"))
@@ -681,19 +724,19 @@ def test_bbb_p19_region_parity(
                     py_cpu_ktrans, matlab_ktrans,
                     label=f"{model_name}_ktrans_{region_name}_cpu_vs_matlab",
                     region_mask=region_mask, corr_min=ktrans_corr_min, mse_max=ktrans_mse_max,
-                    gated=ktrans_gated, extra_mask=cpu_excl, ci=ci_cpu,
+                    gated=ktrans_gated, extra_mask=cpu_excl, ci=ci_cpu, qof_mask=qof_mask_m,
                 )
                 run_check(
                     py_auto_ktrans, matlab_ktrans,
                     label=f"{model_name}_ktrans_{region_name}_auto_vs_matlab",
                     region_mask=region_mask, corr_min=ktrans_corr_min, mse_max=ktrans_mse_max,
-                    gated=ktrans_gated, extra_mask=auto_excl, ci=ci_auto,
+                    gated=ktrans_gated, extra_mask=auto_excl, ci=ci_auto, qof_mask=qof_mask_m,
                 )
                 run_check(
                     py_auto_ktrans, py_cpu_ktrans,
                     label=f"{model_name}_ktrans_{region_name}_auto_vs_cpu",
                     region_mask=region_mask, corr_min=ktrans_corr_min, mse_max=ktrans_mse_max,
-                    gated=False, extra_mask=cpu_auto_excl,
+                    gated=False, extra_mask=cpu_auto_excl, qof_mask=qof_mask_m,
                 )
 
                 for param in spec["params"]:
@@ -714,19 +757,19 @@ def test_bbb_p19_region_parity(
                         py_cpu_map, matlab_map,
                         label=f"{model_name}_{param}_{region_name}_cpu_vs_matlab",
                         region_mask=region_mask, corr_min=param_corr_min, mse_max=param_mse_max,
-                        gated=False, extra_mask=cpu_pm, ci=ci_cpu_p,
+                        gated=False, extra_mask=cpu_pm, ci=ci_cpu_p, qof_mask=qof_mask_m,
                     )
                     run_check(
                         py_auto_map, matlab_map,
                         label=f"{model_name}_{param}_{region_name}_auto_vs_matlab",
                         region_mask=region_mask, corr_min=param_corr_min, mse_max=param_mse_max,
-                        gated=False, extra_mask=auto_pm, ci=ci_auto_p,
+                        gated=False, extra_mask=auto_pm, ci=ci_auto_p, qof_mask=qof_mask_m,
                     )
                     run_check(
                         py_auto_map, py_cpu_map,
                         label=f"{model_name}_{param}_{region_name}_auto_vs_cpu",
                         region_mask=region_mask, corr_min=param_corr_min, mse_max=param_mse_max,
-                        gated=False, extra_mask=cpu_auto_pm,
+                        gated=False, extra_mask=cpu_auto_pm, qof_mask=qof_mask_m,
                     )
 
         _parity_log("completed multi-model backend parity")
@@ -736,6 +779,8 @@ def test_bbb_p19_region_parity(
             "roi_stride": int(roi_stride),
             "gated_models": sorted(gated_models),
             "regions": sorted(regions.keys()),
+            "qof_chi2_max": QOF_CHI2_MAX,
+            "qof_filtering": qof_records,
             "gated_failures": failures,
             "checks": checks,
         }

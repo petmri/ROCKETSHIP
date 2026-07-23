@@ -15,7 +15,9 @@ identifiable on this fixture. Suite layout in `tests/README.md`.
 
 **Active workstreams**
 - **Per-voxel quality-of-fit (QoF) reliability metric** to exclude unreliable voxels from both
-  analysis and real-data parity — see [`quality_of_fit.md`](quality_of_fit.md) in this folder.
+  analysis and real-data parity — see [`quality_of_fit.md`](quality_of_fit.md) (first metric =
+  reduced χ²; its noise-σ dependency is broken out into
+  [`sigma_estimators.md`](sigma_estimators.md)).
   This is the general solution to the recurring "noisy/non-conforming voxel pollutes parity and
   analysis" problem that the Spearman swap and hand-curated ROIs only partially mask.
 - Closing the remaining gated-parity gaps (below).
@@ -51,16 +53,18 @@ identifiable on this fixture. Suite layout in `tests/README.md`.
 
 ### Open issues
 
-**1. patlak + `brain` non-identifiability — one gated check still fails (now the `auto` path).**
-With the CPU-regenerated reference (issue #3), `patlak_ktrans_brain_cpu_vs_matlab` **now passes**
-(Spearman `corr=0.9732`) — Python-CPU vs MATLAB-CPU agree well now that both use the CPU
-`fit()` path. The single residual failure moved to `patlak_ktrans_brain_auto_vs_matlab`
-(`corr=0.9369`, just under the `0.95` bar): Python `auto` is gpufit on this machine, so this is
-the known gpufit-vs-MATLAB-CPU backend divergence at the same one non-identifiable voxel
-(`parity-backend-divergence`), not a fitter bug. GM/WM patlak pass cleanly (`corr≥0.995`). Root
-cause and mitigation are in the deep-dive below; the decided fix (GM/WM-style gating exception
-for patlak+brain) is **still not implemented**, and QoF masking (see `quality_of_fit.md`) is the
-preferred principled version of that exception. Left failing rather than tuned away.
+**1. patlak + `brain` non-identifiability — RESOLVED 2026-07-23 via QoF χ² masking.**
+History: with the CPU-regenerated reference (issue #3), `patlak_ktrans_brain_cpu_vs_matlab` passed
+(Spearman `corr=0.9732`) but the `auto`/gpufit path still failed —
+`patlak_ktrans_brain_auto_vs_matlab` `corr=0.9369` (< `0.95`), the known gpufit-vs-MATLAB-CPU
+backend divergence (`parity-backend-divergence`) concentrated at a handful of non-identifiable
+voxels. **Fix (implemented):** `test_bbb_p19_region_parity` now filters each region by the
+per-model QoF reduced-χ² reliable mask (keep voxels with **χ²_ν ≤ 6.0**, an absolute cutoff
+calibrated on real cross-backend divergence — see `quality_of_fit.md` / `sigma_estimators.md`).
+Excluding ~5–8% (20 of 237 brain voxels) lifts `patlak_ktrans_brain_auto_vs_matlab` to `corr=0.990`
+and **all 10 gated checks pass** — the principled replacement for a hand-curated exception (the
+canonical QoF target). Disable with `ROCKETSHIP_PARITY_QOF_CHI2_MAX=0` (reproduces the old `0.9369`
+failure). Deep-dive on the underlying single-voxel mechanism kept below.
 
 **2. `tofts_roi_xls` / `tissue_uptake_roi_xls` ROI-average failures — not root-caused.**
 Under the `tv` window, `test_bbb_p19_roi_xls_parity` fails for `tofts`
