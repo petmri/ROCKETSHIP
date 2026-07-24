@@ -31,9 +31,13 @@ Keep strategic sequencing in `docs/project-management/ROADMAP.md` and current me
       (update AutoAIF neural net) consistent across all models/datasets. Short term (AIF
       sidecar) and medium term (evaluate the 4 algorithms, port the winner to MATLAB) are
       done and archived (`docs/project-management/projects/archived/steady-state-tv-default/`);
-      the `tv`-default rollout (uncommitted) currently blocks `pytest -m parity` -- see
-      `docs/project-management/projects/batch-parity/batch_parity.md` for findings and
-      next steps before committing.
+      the `tv`-default rollout is committed (`a9d78b6`) and `pytest -m parity` passes
+      (all 10 gated checks, now with QoF χ²-masking -- see
+      `docs/project-management/projects/batch-parity/batch_parity.md`).
+- [ ] QoF data-analysis usability: wire per-voxel quality-of-fit (reduced χ²) into the pipeline as a
+      normal output (maps next to param maps), config/CLI surface, batch integration, and QoF-aware
+      ROI stats. Parity-side masking is done (`153728e`). Plan + full TODO:
+      `docs/project-management/projects/batch-parity/quality_of_fit.md` -> "Status & remaining work".
 
 ## External Accelerator Handoff (Open Items Only)
 

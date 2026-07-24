@@ -19,8 +19,11 @@ sys.path.insert(0, str(REPO_ROOT / "python"))
 
 from dce_sigma import (  # noqa: E402
     bolus_exclude_window,
+    eb_fit_variance_prior,
+    eb_moderate_variance,
     reduced_chi_square,
     reduced_chi_square_weighted,
+    retained_diff_count,
     sigma_successive_difference,
     successive_difference_sigma,
 )
@@ -227,3 +230,67 @@ def test_weighted_per_frame_sigma_and_2d() -> None:
     residuals = np.tile(per_frame_sigma[:, None], (1, v))  # r_i / sigma_i == 1 everywhere
     out = reduced_chi_square_weighted(residuals, per_frame_sigma[:, None], n_params=n_params)
     np.testing.assert_allclose(out, np.full(v, n / (n - n_params)), rtol=1e-12)
+
+
+# ------------------------------------------------------------------ eBayes variance moderation
+
+
+def _sample_scaled_invchi2(rng, d0, s0_2, dof, n):
+    """Draw sample variances from an inverse-gamma prior + scaled-chi2 sampling."""
+    true_var = d0 * s0_2 / rng.chisquare(d0, n)          # sigma^2_i ~ scaled-inv-chi2(d0, s0_2)
+    return true_var * rng.chisquare(dof, n) / dof        # s2_i | sigma^2_i ~ sigma^2 * chi2_dof/dof
+
+
+@pytest.mark.unit
+def test_eb_fit_prior_recovers_hyperparameters() -> None:
+    rng = np.random.default_rng(0)
+    d0_true, s0_2_true, dof = 8.0, 1.0, 20
+    s2 = _sample_scaled_invchi2(rng, d0_true, s0_2_true, dof, 8000)
+    prior = eb_fit_variance_prior(s2, dof, robust=False)
+    assert prior["s0_2"] == pytest.approx(s0_2_true, rel=0.15)
+    assert prior["d0"] == pytest.approx(d0_true, rel=0.45)
+
+
+@pytest.mark.unit
+def test_eb_moderate_clamps_incompatible_outlier_only() -> None:
+    rng = np.random.default_rng(2)
+    dof = 20
+    s2 = _sample_scaled_invchi2(rng, 4.0, 1.0, dof, 800)
+    s2 = np.concatenate([s2, [1e4]])  # one extreme artifact, incompatible with the prior
+    res = eb_moderate_variance(s2, dof=dof, clamp_quantile=0.999)
+    assert res["clamp_mask"][-1]                               # artifact clamped
+    assert res["s2"][-1] == pytest.approx(res["s0_2"])         # ... to the prior mean
+    assert res["clamp_mask"][:-1].mean() < 0.02                # bulk essentially untouched
+
+
+@pytest.mark.unit
+def test_eb_moderate_shrinks_bulk_toward_prior() -> None:
+    rng = np.random.default_rng(3)
+    dof = 15
+    s2 = _sample_scaled_invchi2(rng, 5.0, 2.0, dof, 500)
+    res = eb_moderate_variance(s2, dof=dof, clamp_quantile=None)
+    # moderated variances have smaller spread than the raw estimates (shrinkage)
+    assert np.std(np.log(res["s2"])) < np.std(np.log(s2))
+    assert res["clamp_value"] == np.inf  # clamp disabled
+
+
+@pytest.mark.unit
+def test_eb_moderate_constant_variances_full_shrink() -> None:
+    res = eb_moderate_variance(np.full(200, 3.0), dof=10)
+    assert np.isinf(res["d0"])
+    np.testing.assert_allclose(res["s2"], res["s2"][0])  # all collapse to one value
+
+
+@pytest.mark.unit
+def test_eb_moderate_passes_through_nonfinite_and_nonpositive() -> None:
+    s2 = np.array([1.0, 2.0, np.nan, -1.0, 3.0])
+    res = eb_moderate_variance(s2, dof=10, clamp_quantile=None)
+    assert np.isnan(res["s2"][2])
+    assert res["s2"][3] == -1.0
+
+
+@pytest.mark.unit
+def test_retained_diff_count() -> None:
+    assert retained_diff_count(10, None) == 9
+    # excluding frames [3,6) removes diffs 2,3,4,5 (those touching an excluded endpoint)
+    assert retained_diff_count(10, (3, 6)) == 9 - 4

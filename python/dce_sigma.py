@@ -13,6 +13,12 @@ Implements the day-1 pieces of the QoF reduced-χ² signal
 - **Reduced χ²** helpers: a scalar-σ form `SSE/(σ²·(N−p))` (B's path) and a per-frame weighted
   form `Σ(r_i/σ_i)²/(N−p)` (for estimator C / heteroscedastic σ, using the precomputed
   `voxel_residuals`).
+- **Empirical-Bayes variance moderation** (`eb_moderate_variance`): shrink per-unit σ² toward an
+  inverse-gamma prior (limma/Smyth `squeezeVar`) and **clamp** σ² that is statistically
+  incompatible with that fitted prior (the prior-predictive tail) — this both improves the σ
+  estimate for the bulk and restores χ²_ν at contaminated (e.g. motion-artifact) voxels whose
+  inflated σ would otherwise suppress χ²_ν. A general variance-stabilization tool (reusable beyond
+  DCE — AIF voxels, bad time points).
 
 Estimator C (signal-domain σ_S propagated through the SPGR Jacobian) is intentionally not here
 yet — it needs raw signal / `R1t` + SPGR params that are not in the post-fit artifact (see the
@@ -25,6 +31,8 @@ import warnings
 from typing import Optional, Tuple, Union
 
 import numpy as np
+from scipy.special import digamma, polygamma
+from scipy.stats import f as f_dist
 
 
 # Consistency factor turning MAD into a Gaussian-σ estimate (1/Φ⁻¹(0.75)).
@@ -50,6 +58,12 @@ def _retained_diff_mask(n_frames: int, exclude: Optional[Tuple[int, int]]) -> np
         if hi > lo:
             retained[lo:hi] = False
     return retained[:-1] & retained[1:]
+
+
+def retained_diff_count(n_frames: int, exclude: Optional[Tuple[int, int]] = None) -> int:
+    """Number of lag-1 differences retained after excising `exclude` — the raw sample count
+    behind :func:`successive_difference_sigma`. Handy for deriving an effective σ dof."""
+    return int(_retained_diff_mask(n_frames, exclude).sum())
 
 
 def _robust_scale(diffs: np.ndarray) -> float:
@@ -259,3 +273,116 @@ def reduced_chi_square_weighted(
     if np.ndim(chi2v) == 0:
         return float(chi2v)
     return chi2v
+
+
+# --------------------------------------------------------------------------- variance moderation
+
+
+def _trigamma_inverse(x: np.ndarray) -> np.ndarray:
+    """Solve `trigamma(y) = x` for `y` (Newton iteration; after limma's trigammaInverse)."""
+    x = np.asarray(x, dtype=np.float64)
+    y = 0.5 + 1.0 / x  # initial guess
+    for _ in range(60):
+        tri = polygamma(1, y)
+        step = tri * (1.0 - tri / x) / polygamma(2, y)
+        y = y + step
+        if np.max(np.abs(step / y)) < 1e-10:
+            break
+    return y
+
+
+def eb_fit_variance_prior(
+    s2: np.ndarray,
+    dof: float,
+    *,
+    robust: bool = True,
+) -> dict:
+    """Fit an inverse-gamma (scaled-inverse-χ²) prior to sample variances — limma/Smyth `fitFDist`.
+
+    Models `s2_i | σ²_i ~ σ²_i · χ²_dof / dof` with `σ²_i` inverse-gamma. Returns the prior
+    location `s0_2` and prior degrees of freedom `d0` (may be `inf` ⇒ all units share one
+    variance). `robust=True` estimates the hyperparameters from the median/MAD of the log-variances
+    so a heavy outlier tail (e.g. motion voxels) does not corrupt the prior.
+
+    Args:
+        s2: 1-D sample variances (> 0); non-finite / non-positive entries are ignored in the fit.
+        dof: residual degrees of freedom of each `s2` estimate (scalar).
+        robust: use median/MAD (default) vs mean/variance of the log-variances.
+
+    Returns:
+        ``{"d0": float, "s0_2": float, "dof": float}``.
+    """
+    arr = np.asarray(s2, dtype=np.float64).reshape(-1)
+    good = np.isfinite(arr) & (arr > 0)
+    if good.sum() < 2:
+        raise ValueError("need at least 2 finite positive variances to fit the prior")
+    df = float(dof)
+    z = np.log(arr[good])
+    e = z - digamma(df / 2.0) + np.log(df / 2.0)  # E[e] = log(s0^2)
+    if robust:
+        loc = float(np.median(e))
+        evar = float((_MAD_TO_SIGMA * np.median(np.abs(e - loc))) ** 2)
+    else:
+        loc = float(np.mean(e))
+        evar = float(np.var(e, ddof=1))
+    evar_adj = evar - float(polygamma(1, df / 2.0))
+    if evar_adj <= 0:
+        # observed spread ≤ sampling spread ⇒ variances are effectively constant ⇒ full shrinkage.
+        return {"d0": np.inf, "s0_2": float(np.exp(loc)), "dof": df}
+    d0 = 2.0 * float(_trigamma_inverse(np.asarray(evar_adj)))
+    s0_2 = float(np.exp(loc + digamma(d0 / 2.0) - np.log(d0 / 2.0)))
+    return {"d0": d0, "s0_2": s0_2, "dof": df}
+
+
+def eb_moderate_variance(
+    s2: np.ndarray,
+    dof: float,
+    *,
+    robust: bool = True,
+    clamp_quantile: Optional[float] = 0.999,
+) -> dict:
+    """Empirical-Bayes moderated variances: shrink toward an inverse-gamma prior + clamp outliers.
+
+    Two effects, both driven by the *same* fitted prior (no hand-tuned σ threshold):
+    1. **Shrinkage** — every unit's `s2` is pulled toward the prior mean by
+       `s2_post = (d0·s0² + dof·s2) / (d0 + dof)`, stabilizing noisy estimates.
+    2. **Clamp** — units whose `s2` exceeds the prior-predictive upper quantile
+       (`s0²·F_q(dof, d0)`) are statistically incompatible with the noise model (contamination —
+       motion, etc.) and are set to the prior mean `s0²`. This restores a large χ²_ν at those
+       units instead of letting an inflated σ suppress it. Pass `clamp_quantile=None` to skip.
+
+    Non-finite / non-positive inputs pass through unchanged.
+
+    Returns:
+        ``{"s2": moderated array, "d0", "s0_2", "clamp_value", "clamp_mask", "dof"}``.
+    """
+    arr = np.asarray(s2, dtype=np.float64)
+    flat = arr.reshape(-1)
+    good = np.isfinite(flat) & (flat > 0)
+    prior = eb_fit_variance_prior(flat, dof, robust=robust)
+    d0, s0_2, df = prior["d0"], prior["s0_2"], prior["dof"]
+
+    out = flat.copy()
+    if np.isinf(d0):
+        out[good] = s0_2
+        clamp_value = s0_2
+        clamp_mask_flat = good.copy()
+    else:
+        out[good] = (d0 * s0_2 + df * flat[good]) / (d0 + df)
+        clamp_mask_flat = np.zeros_like(good)
+        if clamp_quantile is not None:
+            clamp_value = s0_2 * float(f_dist.ppf(clamp_quantile, df, d0))
+            hits = good & (flat > clamp_value)
+            out[hits] = s0_2  # contaminated: substitute the population noise level
+            clamp_mask_flat = hits
+        else:
+            clamp_value = np.inf
+
+    return {
+        "s2": out.reshape(arr.shape),
+        "d0": float(d0),
+        "s0_2": float(s0_2),
+        "clamp_value": float(clamp_value),
+        "clamp_mask": clamp_mask_flat.reshape(arr.shape),
+        "dof": float(df),
+    }

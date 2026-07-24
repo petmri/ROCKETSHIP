@@ -678,7 +678,9 @@ def test_bbb_p19_region_parity(
             if QOF_CHI2_MAX <= 0.0 or not npz.exists():
                 qof_masks[model_name] = None
                 continue
-            chi2_vol = np.squeeze(dce_qof.qof_volumes(npz)["chi2nu"])
+            # shrink_sigma: eBayes-moderate σ² + prior-predictive clamp before χ²_ν, so
+            # motion-inflated σ (which would otherwise suppress χ²_ν) can't hide a bad fit.
+            chi2_vol = np.squeeze(dce_qof.qof_volumes(npz, shrink_sigma=True)["chi2nu"])
             mask_vol, tau = dce_qof.reliable_mask(chi2_vol, chi2_max=QOF_CHI2_MAX)
             qof_masks[model_name] = mask_vol
             n_fit = int(np.isfinite(chi2_vol).sum())

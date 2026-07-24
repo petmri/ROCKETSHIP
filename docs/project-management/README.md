@@ -13,7 +13,8 @@ This folder contains canonical planning and status documents for the Python tran
 
 - `projects/batch-parity/`
   - `batch_parity.md`: MATLAB vs Python batch parity tracking and diagnostics.
-  - `quality_of_fit.md`: plan for a per-voxel quality-of-fit metric to exclude unreliable voxels (analysis + real-data parity).
+  - `quality_of_fit.md`: per-voxel quality-of-fit metric (reduced χ²) to exclude unreliable voxels — status + remaining work (parity side landed `153728e`; data-analysis usability next).
+  - `sigma_estimators.md`: noise-σ estimation sub-plan for the reduced-χ² QoF signal (estimators B/C, calibration, σ-outlier robustification).
 - `projects/osipi-verification/`
   - `osipi_summary.md`: OSIPI accuracy summary and peer-comparison snapshot.
 - `projects/qualification/`

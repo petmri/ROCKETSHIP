@@ -14,12 +14,15 @@ Parity between the MATLAB reference pipeline and the Python port for DCE paramet
 identifiable on this fixture. Suite layout in `tests/README.md`.
 
 **Active workstreams**
-- **Per-voxel quality-of-fit (QoF) reliability metric** to exclude unreliable voxels from both
-  analysis and real-data parity — see [`quality_of_fit.md`](quality_of_fit.md) (first metric =
-  reduced χ²; its noise-σ dependency is broken out into
-  [`sigma_estimators.md`](sigma_estimators.md)).
-  This is the general solution to the recurring "noisy/non-conforming voxel pollutes parity and
-  analysis" problem that the Spearman swap and hand-curated ROIs only partially mask.
+- **Per-voxel quality-of-fit (QoF) reliability metric** — the general solution to the recurring
+  "noisy/non-conforming voxel pollutes parity and analysis" problem that the Spearman swap and
+  hand-curated ROIs only partially mask. **Parity side landed + committed (`153728e`)**: reduced-χ²
+  (estimator B) filters the gate at absolute χ²_ν ≤ 6.0 (resolved issue #1). **No MATLAB-side QoF**
+  (single-sided Python-CPU mask is a data-quality filter — see `quality_of_fit.md`). Remaining is
+  **data-analysis usability** (pipeline hook so a normal run writes QoF maps, config/CLI surface,
+  batch integration, QoF-aware ROI stats) + real-`RUNNER_DATA` validation + σ-outlier robustification.
+  Full plan & TODO: [`quality_of_fit.md`](quality_of_fit.md) → "Status & remaining work";
+  σ detail in [`sigma_estimators.md`](sigma_estimators.md).
 - Closing the remaining gated-parity gaps (below).
 
 ## Current State
@@ -41,6 +44,11 @@ identifiable on this fixture. Suite layout in `tests/README.md`.
   `patlak_ktrans_brain_auto_vs_matlab` flipped to pass (Spearman `0.9736` vs Pearson `0.8779`).
 - **Gated/reported split** — obsoletes the former "ex_tofts required-failure" and
   weighted-AIF-regresses-ex_tofts TODOs: ex_tofts is no longer a gate.
+- **QoF reduced-χ² masking in the parity gate** — commit `153728e`. `python/dce_sigma.py`
+  (estimator B σ + reduced χ²) + `python/dce_qof.py` (per-voxel σ/χ²_ν maps + `reliable_mask`);
+  `test_bbb_p19_region_parity` excludes voxels with χ²_ν > 6.0 (calibrated on cross-backend
+  divergence). Resolves issue #1 (patlak+brain 0.937→0.990) on principled grounds. 27 unit tests.
+  Not yet wired into the pipeline as a normal output — see `quality_of_fit.md` remaining work.
 
 ### Alignment verified (still holds)
 - Stage-A/Stage-B arrays (`timer`, `Ct`, `Cp_use`) match MATLAB to floating-point noise on the

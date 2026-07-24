@@ -19,7 +19,13 @@ from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
-from dce_sigma import bolus_exclude_window, reduced_chi_square, sigma_successive_difference
+from dce_sigma import (
+    bolus_exclude_window,
+    eb_moderate_variance,
+    reduced_chi_square,
+    retained_diff_count,
+    sigma_successive_difference,
+)
 
 
 # Free-parameter count `p` and 1-based SSE column per model. The first six mirror
@@ -74,11 +80,22 @@ def compute_qof(
     margin_frames: int = 2,
     checkpoint_path: Optional[Path] = None,
     chi2_reliable_max: Optional[float] = None,
+    shrink_sigma: bool = False,
+    sigma_dof: Optional[float] = None,
+    clamp_quantile: Optional[float] = 0.999,
+    eb_robust: bool = True,
 ) -> Dict[str, Any]:
     """Compute per-voxel σ (estimator B) and reduced χ² from a post-fit NPZ.
 
+    When `shrink_sigma=True`, the per-voxel σ² is moderated by empirical-Bayes shrinkage toward an
+    inverse-gamma prior with a prior-predictive clamp (`dce_sigma.eb_moderate_variance`) before χ²_ν
+    is formed — stabilizing the bulk and restoring χ²_ν at contaminated (e.g. motion) voxels whose
+    inflated σ would otherwise suppress it. `sigma_dof` is the σ estimator's effective dof (default:
+    half the retained-difference count, an MA(1) heuristic the clamp is insensitive to).
+
     Returns a dict with `model_name`, per-voxel `sigma`/`chi2v`/`sse`, `tumind`, `dims`, the
-    `window` used, `n_obs`/`p`, and (if `chi2_reliable_max` given) a boolean `reliable` mask.
+    `window` used, `n_obs`/`p`, and (if `chi2_reliable_max` given) a boolean `reliable` mask. When
+    shrinking, also `sigma_raw` and `eb` (prior + clamp diagnostics).
     """
     npz_path = Path(npz_path)
     with np.load(npz_path) as data:
@@ -112,6 +129,20 @@ def compute_qof(
     )
 
     sigma = np.asarray(sigma_successive_difference(ct, exclude=window, robust=robust), dtype=np.float64)
+
+    sigma_raw = None
+    eb_info = None
+    if shrink_sigma:
+        if sigma_dof is None:
+            sigma_dof = max(retained_diff_count(n_obs, window) / 2.0, 4.0)
+        sigma_raw = sigma
+        eb = eb_moderate_variance(
+            sigma_raw ** 2, dof=float(sigma_dof), robust=eb_robust, clamp_quantile=clamp_quantile,
+        )
+        sigma = np.sqrt(eb["s2"])
+        eb_info = {k: eb[k] for k in ("d0", "s0_2", "clamp_value", "dof")}
+        eb_info["n_clamped"] = int(np.nansum(eb["clamp_mask"]))
+
     chi2v = np.asarray(reduced_chi_square(sse, sigma, n_obs=n_obs, n_params=p), dtype=np.float64)
 
     result: Dict[str, Any] = {
@@ -125,6 +156,9 @@ def compute_qof(
         "n_obs": n_obs,
         "p": p,
     }
+    if sigma_raw is not None:
+        result["sigma_raw"] = sigma_raw
+        result["eb"] = eb_info
     if chi2_reliable_max is not None:
         result["reliable"] = np.isfinite(chi2v) & (chi2v <= float(chi2_reliable_max))
     return result
@@ -188,17 +222,20 @@ def write_qof_maps(
     checkpoint_path: Optional[Path] = None,
     chi2_reliable_max: Optional[float] = None,
     chi2_reliable_percentile: Optional[float] = None,
+    **compute_kwargs: Any,
 ) -> Dict[str, str]:
     """Compute QoF and write `*_qof_{sigma,chi2nu}[,_reliable]` maps next to the fit outputs.
 
     Writes NIfTI when `reference_nifti` (a 3-D map to borrow affine/header from) is given, else
     `.npy`. A `qof_reliable` layer is added when `chi2_reliable_percentile` (e.g. 95.0, keep the
-    best 95%) or `chi2_reliable_max` is given. Returns the written paths keyed by map name.
+    best 95%) or `chi2_reliable_max` is given. Extra `compute_kwargs` (e.g. `shrink_sigma=True`)
+    forward to :func:`compute_qof`. Returns the written paths keyed by map name.
     """
     import nibabel as nib  # local import: only needed when writing NIfTI
 
     res = compute_qof(
         npz_path, robust=robust, margin_frames=margin_frames, checkpoint_path=checkpoint_path,
+        **compute_kwargs,
     )
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

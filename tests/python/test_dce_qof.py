@@ -157,6 +157,37 @@ def test_qof_volumes_reconstructs_chi2_and_sigma(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+def test_compute_qof_shrink_sigma_clamps_outlier_voxel(tmp_path: Path) -> None:
+    # Build an NPZ whose last voxel has a grossly inflated concentration-curve noise (motion-like);
+    # eBayes shrinkage should clamp its sigma to the prior mean, restoring a large chi2_nu there.
+    rng = np.random.default_rng(0)
+    n, dims = 48, (10, 10, 1)
+    n_vox = 60
+    ramp = 1.0 / (1.0 + np.exp(-8.0 * (np.linspace(0, 1, n) - 0.3)))
+    ct = ramp[:, None] + rng.normal(0.0, 0.05, size=(n, n_vox))
+    ct[:, -1] = ramp + rng.normal(0.0, 1.0, size=n)  # artifact voxel: 20x noise
+    voxel_results = np.zeros((n_vox, 4))
+    voxel_results[:, 2] = 0.1  # small SSE for everyone; the artifact's inflated sigma would hide it
+    npz = tmp_path / "Dyn-1_tofts_fit_postfit_arrays.npz"
+    np.savez_compressed(
+        npz, model_name=np.asarray("tofts"), ct_voxel_mM=ct,
+        timer_min=np.linspace(0, 2, n), voxel_results=voxel_results,
+        tumind_0based=np.arange(n_vox, dtype=np.int64), dimensions_xyz=np.asarray(dims, np.int64),
+    )
+
+    plain = dce_qof.compute_qof(npz)
+    shrunk = dce_qof.compute_qof(npz, shrink_sigma=True, clamp_quantile=0.999)
+
+    assert "sigma_raw" in shrunk and "eb" in shrunk
+    assert shrunk["eb"]["dof"] > 0
+    # the artifact voxel had the largest raw sigma...
+    assert np.argmax(shrunk["sigma_raw"]) == n_vox - 1
+    # ...and shrinkage pulled it below its raw value (clamped toward the prior)
+    assert shrunk["sigma"][-1] < shrunk["sigma_raw"][-1]
+    assert shrunk["eb"]["n_clamped"] >= 1
+
+
+@pytest.mark.unit
 def test_unknown_model_raises(tmp_path: Path) -> None:
     npz = _write_synthetic_npz(tmp_path, model="not_a_model")
     with pytest.raises(ValueError):

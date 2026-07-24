@@ -24,12 +24,13 @@ landing in different optima. QoF should exclude exactly that voxel on principled
 ## Goals
 - A per-voxel **QoF reason bitmask + boolean "reliable" mask**, written alongside each parameter
   map (and rolled up per ROI).
-- Built from quantities **both MATLAB and Python already produce**, so the reliable subset does
-  not itself become a source of cross-language divergence.
+- Built from the **concentration curve `C(t)` and the fit SSE** — quantities driven by the shared
+  *input data*, so the reliable subset is a **data-quality** judgement, not a fitter-specific one
+  (see "Why single-sided masking is valid").
 - Two consumers, one metric:
   - **Analysis:** drop or flag unreliable voxels in ROI statistics and parameter maps.
-  - **Parity:** evaluate map agreement over the **intersection of both pipelines' reliable
-    masks** — a principled, automatic replacement for today's hand-curated GM/WM gating.
+  - **Parity:** evaluate map agreement over the **Python-CPU reliable mask** — a principled,
+    automatic replacement for today's hand-curated GM/WM gating.
 
 ## Candidate per-voxel signals
 
@@ -128,51 +129,70 @@ keeping voxels with **χ²_ν ≤ 6.0** (`QOF_CHI2_MAX`, env `ROCKETSHIP_PARITY_
 tracks |auto−matlab| divergence (Spearman ≈0.29), and an absolute cutoff beats a percentile (p95 swung
 5.8–8.5 across ROI sizes). Effect: excluding ~5–8% (20/237 brain voxels) lifts the long-standing
 `patlak_ktrans_brain_auto_vs_matlab` from `corr=0.937` (FAIL) to `0.990` (PASS) — all 10 gated checks
-pass, the principled replacement for a hand-curated exception. Remaining/next:
-- Currently masks on the **CPU (reference) χ² only**; upgrade to the **intersection of both
-  pipelines' reliable masks** once MATLAB-side χ² exists (Phase 2).
-- Keep the hand-curated GM/WM ROIs as a fixed control; retire the tofts+gm exception once QoF
-  reproduces it. Revisit τ per-model / per-dataset as more real data lands.
+pass, the principled replacement for a hand-curated exception. Remaining parity work is in
+"Status & remaining work" below.
 
-## Cross-language consistency (critical)
-- Define QoF from quantities both pipelines compute the same way (SSE, CI, bound comparison).
-  Backend-specific signals (convergence state) are for **analysis masking only**, never as a
-  parity-gate input — or require both pipelines to agree.
-- **Mask-overlap guard:** a QoF-parity test must first verify the two reliable masks agree to
-  high overlap (Dice/Jaccard) on the fixture; otherwise the mask is a divergence source, not a
-  filter.
+## Why single-sided (Python-CPU) masking is valid
+**Decision (2026-07-23): no MATLAB-side QoF.** The earlier plan wanted the parity mask built from the
+*intersection of both pipelines' reliable masks*, with a Dice/Jaccard overlap guard — which implied a
+MATLAB mirror of the QoF computation. We drop that, because the reliable mask is a **data-quality**
+judgement, not a fitter judgement:
+- **σ comes only from `C(t)`** — the concentration curve is the shared input data, and σ is
+  model- and backend-independent (verified: σ maps are byte-identical across models). A voxel with a
+  noisy/artifact curve is unreliable no matter who fits it.
+- **The χ²_ν numerator (Python-CPU SSE) matches MATLAB-CPU closely** (>0.97; both use the `fit()`
+  path), so the Python-CPU χ² is a faithful stand-in for "is this voxel fittable."
+So a single-sided Python-CPU mask excludes voxels the *data* can't support, not voxels *Python*
+happens to fit poorly — no MATLAB mirror needed. Backend-specific signals (convergence state) stay
+analysis-only, never a parity-gate input.
 
-## Phased roadmap
-- **Phase 1 (primary):** implement the residual GoF core in Python, **leading with reduced χ² (#2)**
-  — the crux is the σ estimator, so Phase 1 begins in [`sigma_estimators.md`](sigma_estimators.md)
-  (stand up estimator B, then C; validate real-data-weighted) before wiring χ²_ν from the SSE we
-  already write. Then add **R² (#1)** as the cheap complement and gate
-  `reliable ⟺ R² ≥ τ_R AND χ²_ν ≤ τ_χ`; write reliable mask + reason bitmask alongside parameter
-  maps; add **bound-hit** as a cheap all-backend adjunct. Validate real-data-weighted (phantom-gt
-  sanity tier only, per `sigma_estimators.md`). All of
-  this is backend-agnostic (works on gpufit output).
-- **Phase 2:** mirror the flag computation in MATLAB (or a shared post-fit analyzer) so the two
-  pipelines' reliable masks are comparable; verify mask overlap (Dice/Jaccard).
-- **Phase 3:** QoF-masked parity mode in `test_bbb_p19_region_parity` — **done + calibrated
-  (2026-07-23):** per-model CPU-χ² reliable mask at absolute **χ²_ν ≤ 6** (Tier-2 divergence
-  calibration); canonical target `patlak_ktrans_brain_auto_vs_matlab` now passes (0.937→0.990).
-  Remaining: both-pipeline mask intersection (needs Phase 2), real-data parity, retire the tofts+gm
-  exception.
-- **Phase 4 (optional / CPU-only):** CI-width (CoV) signal and continuous QoF score +
-  model-selection (F-test/AIC). CPU-side only, since gpufit produces no CIs.
+## Status & remaining work
+**Done (committed `153728e`, 2026-07-23):**
+- Estimator B (concentration-curve noise σ) + wash-in exclusion + reduced χ² — `python/dce_sigma.py`.
+- QoF map builder `python/dce_qof.py`: per-voxel σ / χ²_ν volumes + `reliable_mask`.
+- Parity gate: `test_bbb_p19_region_parity` filters each region at absolute **χ²_ν ≤ 6.0**
+  (calibrated on real cross-backend divergence). Canonical patlak+brain failure resolved; all 10
+  gated checks pass. 27 unit tests.
 
-_Done (2026-07-23):_ MATLAB CI maps regenerated with real widths (`force_cpu` CPU path). This
-was a prerequisite for the CI-based signal / reported-only CI-aware parity metric, **not** for
-the residual core — #1/#2 never needed CIs. See batch_parity.md issue #3.
+**Remaining — parity (validation/cleanup; the gate is already live):**
+- Validate on real `RUNNER_DATA`: χ²_ν filtering should collapse the cross-backend gap on a real
+  session, not just the fixture.
+- Re-enable the **tofts+gm** gate with QoF on and retire that hand-curated exception if QoF
+  reproduces it.
+- One-line note (done, above) that single-sided masking is intentional — replaces the dropped
+  mask-overlap guard.
+
+**Remaining — data analysis (the real remaining work; mostly greenfield):**
+1. **Pipeline hook (highest value):** write `*_qof_{sigma,chi2nu,reliable}.nii.gz` next to the param
+   maps on a normal run — the pipeline already has `ct_source`, SSE, `tumind`, `spatial_shape`,
+   timer, and injection timing in scope at `_write_param_maps` (~line 3760), so no NPZ round-trip.
+   Gate on a `write_qof_maps` preference.
+2. **Config/CLI surface:** promote `write_qof_maps` + `qof_chi2_max` (τ) to real preferences
+   (`dce_default.json`/`dceprep_default.json`) + `dce_cli.py`, replacing the test-only env knob.
+3. **Batch integration:** `run_dce_bids_batch.py` emits QoF maps per session.
+4. **QoF-aware ROI stats:** exclude unreliable voxels from voxelwise ROI parameter rollups (and/or
+   report reliable-fraction per ROI) so nonsense voxels stop polluting ROI means — the original
+   motivation.
+
+**Done since (2026-07-23):**
+- **σ outlier robustification — eBayes variance moderation** (`dce_sigma.eb_moderate_variance`):
+  motion voxels' inflated σ was suppressing χ²_ν and slipping the filter; now σ² is shrunk toward an
+  **inverse-gamma** prior (empirically the best fit — gamma was worst) with a **prior-predictive
+  clamp** that flags contaminated σ without adding a second user threshold. Wired into
+  `compute_qof(shrink_sigma=True)` and the parity gate. See [`sigma_estimators.md`](sigma_estimators.md).
+
+**Optional / not on the "usable" critical path:**
+- **Estimator C** (heteroscedastic per-frame σ) — accuracy refinement; B is sufficient and validated.
+- **Reason bitmask + bound-hit flag; R² (#1)** as the complementary gate — interpretable exclusions.
+- **Why median χ²_ν ≈ 1.5–1.9 > 1** — σ bias vs mild misfit; affects only absolute χ²_ν
+  interpretation, not the (empirically-calibrated) reliability filter.
 
 ## Open questions
-- Reduced-χ² needs a trustworthy per-voxel noise σ — see [`sigma_estimators.md`](sigma_estimators.md)
-  (candidate estimators + verification plan); the open sub-question is whether estimator C's Jacobian
-  propagation beats the simpler successive-difference B enough to justify plumbing raw signal through.
-- CI CoV blows up as a parameter → 0; pair the relative threshold with an absolute floor.
-- One global threshold set, or per-model (tofts vs patlak have different identifiability)?
+- One global τ_χ, or per-model / per-dataset (tofts vs patlak differ in identifiability)? Currently one
+  absolute τ=6.0 works for both on the fixture.
 - Apply QoF only at comparison/analysis time, never mutating the committed reference maps
   (preferred — keep raw maps intact).
+- σ-outlier robustification approach (shrinkage prior distribution) — see `sigma_estimators.md`.
 
 ## Related
 - [`batch_parity.md`](batch_parity.md) — Spearman swap (partial mitigation), the patlak+brain

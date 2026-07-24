@@ -194,10 +194,52 @@ knee — patlak auto/matlab climbs smoothly 0.982→0.995 as τ tightens ∞→2
 Chose **τ_χ = 6.0**: ~3–4× the χ²_ν median (~1.7), removes the clear tail while **retaining ~92%**, and
 is stable across ROI size. Reasonable range 5–8; revisit per-model / per-dataset as more data lands.
 
-Remaining: mask on the **intersection of both pipelines'** reliable masks once MATLAB χ² exists;
-per-model τ if models diverge more; estimator C (`dcdE_spgr`, `sigma_signal_jacobian`) still deferred
-with its plumbing. Actual `bolus_exclude_window` signature is frame-based:
+**No MATLAB-side QoF (decision 2026-07-23):** parity masks on the **Python-CPU χ² alone** — the mask
+is a data-quality judgement (σ from the shared `C(t)`, Python-CPU SSE ≈ MATLAB-CPU), not a
+Python-specific one, so no MATLAB mirror / Dice-overlap guard is built. Rationale in
+[`quality_of_fit.md`](quality_of_fit.md) → "Why single-sided masking is valid".
+
+Remaining (see [`quality_of_fit.md`](quality_of_fit.md) → "Status & remaining work" for the full
+list): data-analysis usability (pipeline hook so a normal run writes `*_qof_*` maps, config/CLI
+surface, batch integration, QoF-aware ROI stats); real-`RUNNER_DATA` parity validation; **σ
+robustification (below)**; estimator C (`dcdE_spgr`, `sigma_signal_jacobian`) still deferred with its
+plumbing. Actual `bolus_exclude_window` signature is frame-based:
 `bolus_exclude_window(onset_frame, duration_frames, n_frames, *, margin_frames=2)`.
+
+## σ outlier robustification — eBayes variance moderation (IMPLEMENTED 2026-07-23)
+**Problem:** estimator B produces **anomalously high σ** at motion/edge voxels (successive-difference
+reads the frame-to-frame motion jump as "noise"). Because χ²_ν = SSE/(σ²·…), inflated σ **suppresses
+χ²_ν**, so a genuinely bad fit looks reliable and slips the filter. Measured on the fixture brain: the
+197–328 highest-σ voxels had χ²_ν *median 1.3 vs 1.9* for the bulk, and 86% passed χ²_ν≤6.
+
+**Distribution — decided empirically (not by guess).** Fit σ to candidate priors (KS distance, lower
+better): **inverse-gamma 0.038 < log-normal 0.065 < gamma 0.182**. So gamma (the ComBat instinct) is
+*worst*; **inverse-gamma** is best — and it's also the theoretically-correct conjugate for variance
+(sample variances are scaled-χ²; ComBat's *variance* term is itself inverse-gamma). So we model σ² with
+an inverse-gamma prior (limma/Smyth `squeezeVar`).
+
+**Key finding — plain shrinkage is not enough; add a clamp.** Prototyped proper inverse-gamma eBayes:
+because our σ has high dof (~30 effective) and the genuine between-voxel σ spread is large, the
+data-estimated shrinkage is *weak* (d₀≈6.6, weight ≈0.15) and barely moves the outliers (their χ²_ν
+1.32→~1.5). eBayes *stabilizes noisy* variance estimates; it does **not reject contaminated** ones
+(motion σ is a model violation, not sampling noise). **Fix:** clamp σ² that is statistically
+incompatible with the fitted prior — beyond the **prior-predictive quantile** `s0²·F_q(dof, d₀)`
+(default q=0.999) — to the prior mean s0². The bound is *derived from the same fitted prior* (no
+hand-tuned σ threshold), so the user still tunes **one** interpretable knob (τ_χ). On the fixture:
+clamps 27 voxels, their χ²_ν → ~200 (all flagged), **bulk χ²_ν unchanged** (1.926→1.924); ~21–22
+previously-passing motion voxels correctly rescued into the excluded set.
+
+**Implementation:** `dce_sigma.eb_fit_variance_prior` (robust median/MAD hyperparameters) +
+`eb_moderate_variance` (shrink + clamp); wired into `dce_qof.compute_qof(shrink_sigma=True, …)` and the
+parity gate (`qof_volumes(npz, shrink_sigma=True)`). Effective σ dof defaults to half the
+retained-difference count (MA(1) heuristic; the clamp is insensitive to it). Tests in
+`test_dce_sigma.py` / `test_dce_qof.py`. **General tool:** the same moderated-variance machinery is
+reusable for the lower-dof settings where shrinkage matters *more* — bad-AIF-voxel and
+bad-time-point detection.
+
+**Open:** does the eBayes σ dof want the split-half empirical estimate instead of the MA(1) heuristic?
+Per-model / per-tissue prior instead of one global s0²? Whether to make `shrink_sigma` the pipeline
+default once validated on real `RUNNER_DATA`.
 
 1. **New module `python/dce_sigma.py`** (name TBD) with:
    - `successive_difference_sigma(x, *, exclude=None, robust=True) -> float` — the shared core: robust
