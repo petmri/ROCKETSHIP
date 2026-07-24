@@ -73,45 +73,34 @@ def bolus_window_from_checkpoint(
     return bolus_exclude_window(onset, duration, n_frames, margin_frames=margin_frames)
 
 
-def compute_qof(
-    npz_path: Path,
+def compute_qof_arrays(
+    model_name: str,
+    ct: np.ndarray,
+    voxel_results: np.ndarray,
     *,
+    window: Optional[Tuple[int, int]] = None,
+    n_obs: Optional[int] = None,
     robust: bool = True,
-    margin_frames: int = 2,
-    checkpoint_path: Optional[Path] = None,
     chi2_reliable_max: Optional[float] = None,
     shrink_sigma: bool = False,
     sigma_dof: Optional[float] = None,
     clamp_quantile: Optional[float] = 0.999,
     eb_robust: bool = True,
 ) -> Dict[str, Any]:
-    """Compute per-voxel σ (estimator B) and reduced χ² from a post-fit NPZ.
+    """Per-voxel σ (estimator B) + reduced χ² from in-memory arrays (no NPZ needed).
 
-    When `shrink_sigma=True`, the per-voxel σ² is moderated by empirical-Bayes shrinkage toward an
-    inverse-gamma prior with a prior-predictive clamp (`dce_sigma.eb_moderate_variance`) before χ²_ν
-    is formed — stabilizing the bulk and restoring χ²_ν at contaminated (e.g. motion) voxels whose
-    inflated σ would otherwise suppress it. `sigma_dof` is the σ estimator's effective dof (default:
-    half the retained-difference count, an MA(1) heuristic the clamp is insensitive to).
+    The compute core shared by :func:`compute_qof` (NPZ loader) and the pipeline's native QoF hook.
+    `ct` is `(T, V)` concentration curves; `voxel_results` is `(V, ncols)` with SSE at the model's
+    `sse_col`. `window` is the bolus wash-in exclusion (from :func:`bolus_exclude_window`). See
+    :func:`compute_qof` for the `shrink_sigma` moderation semantics.
 
-    Returns a dict with `model_name`, per-voxel `sigma`/`chi2v`/`sse`, `tumind`, `dims`, the
-    `window` used, `n_obs`/`p`, and (if `chi2_reliable_max` given) a boolean `reliable` mask. When
-    shrinking, also `sigma_raw` and `eb` (prior + clamp diagnostics).
+    Returns a dict with `model_name`, per-voxel `sigma`/`chi2v`/`sse`, the `window`, `n_obs`/`p`,
+    (if `chi2_reliable_max`) `reliable`, and (if shrinking) `sigma_raw` + `eb`.
     """
-    npz_path = Path(npz_path)
-    with np.load(npz_path) as data:
-        model_name = str(np.asarray(data["model_name"]).reshape(-1)[0])
-        ct = np.asarray(data["ct_voxel_mM"], dtype=np.float64)  # (T, V)
-        timer = np.asarray(data["timer_min"], dtype=np.float64).reshape(-1)
-        voxel_results = np.asarray(data["voxel_results"], dtype=np.float64)  # (V, ncols)
-        tumind = np.asarray(data["tumind_0based"], dtype=np.int64).reshape(-1)
-        dims = (
-            tuple(int(v) for v in np.asarray(data["dimensions_xyz"]).reshape(-1).tolist())
-            if "dimensions_xyz" in data
-            else None
-        )
-
     if model_name not in _MODEL_PARAMS:
         raise ValueError(f"unknown model '{model_name}'; known: {sorted(_MODEL_PARAMS)}")
+    ct = np.asarray(ct, dtype=np.float64)
+    voxel_results = np.asarray(voxel_results, dtype=np.float64)
     p = _MODEL_PARAMS[model_name]["p"]
     sse_col = _MODEL_PARAMS[model_name]["sse_col"]
     if sse_col - 1 >= voxel_results.shape[1]:
@@ -119,14 +108,7 @@ def compute_qof(
             f"voxel_results has {voxel_results.shape[1]} cols; SSE col {sse_col} out of range"
         )
     sse = voxel_results[:, sse_col - 1]
-    n_obs = int(ct.shape[0])
-
-    if checkpoint_path is None:
-        checkpoint_path = npz_path.parent / "checkpoints" / "b_out.json"
-    window = bolus_window_from_checkpoint(
-        checkpoint_path, n_obs, timer_min0=float(timer[0]) if timer.size else 0.0,
-        margin_frames=margin_frames,
-    )
+    n_obs = int(ct.shape[0]) if n_obs is None else int(n_obs)
 
     sigma = np.asarray(sigma_successive_difference(ct, exclude=window, robust=robust), dtype=np.float64)
 
@@ -150,8 +132,6 @@ def compute_qof(
         "sigma": sigma,
         "chi2v": chi2v,
         "sse": np.asarray(sse, dtype=np.float64),
-        "tumind": tumind,
-        "dims": dims,
         "window": window,
         "n_obs": n_obs,
         "p": p,
@@ -161,6 +141,59 @@ def compute_qof(
         result["eb"] = eb_info
     if chi2_reliable_max is not None:
         result["reliable"] = np.isfinite(chi2v) & (chi2v <= float(chi2_reliable_max))
+    return result
+
+
+def compute_qof(
+    npz_path: Path,
+    *,
+    robust: bool = True,
+    margin_frames: int = 2,
+    checkpoint_path: Optional[Path] = None,
+    chi2_reliable_max: Optional[float] = None,
+    shrink_sigma: bool = False,
+    sigma_dof: Optional[float] = None,
+    clamp_quantile: Optional[float] = 0.999,
+    eb_robust: bool = True,
+) -> Dict[str, Any]:
+    """Compute per-voxel σ (estimator B) and reduced χ² from a post-fit NPZ.
+
+    Thin NPZ loader around :func:`compute_qof_arrays`: reads `ct_voxel_mM`, `voxel_results`,
+    `tumind_0based`, `dimensions_xyz`, derives the bolus window from the sibling `b_out.json`, and
+    adds `tumind`/`dims` to the result. When `shrink_sigma=True`, σ² is moderated by empirical-Bayes
+    shrinkage toward an inverse-gamma prior with a prior-predictive clamp
+    (`dce_sigma.eb_moderate_variance`) before χ²_ν is formed — stabilizing the bulk and restoring
+    χ²_ν at contaminated (e.g. motion) voxels. `sigma_dof` defaults to half the retained-difference
+    count (MA(1) heuristic the clamp is insensitive to).
+    """
+    npz_path = Path(npz_path)
+    with np.load(npz_path) as data:
+        model_name = str(np.asarray(data["model_name"]).reshape(-1)[0])
+        ct = np.asarray(data["ct_voxel_mM"], dtype=np.float64)  # (T, V)
+        timer = np.asarray(data["timer_min"], dtype=np.float64).reshape(-1)
+        voxel_results = np.asarray(data["voxel_results"], dtype=np.float64)  # (V, ncols)
+        tumind = np.asarray(data["tumind_0based"], dtype=np.int64).reshape(-1)
+        dims = (
+            tuple(int(v) for v in np.asarray(data["dimensions_xyz"]).reshape(-1).tolist())
+            if "dimensions_xyz" in data
+            else None
+        )
+
+    n_obs = int(ct.shape[0])
+    if checkpoint_path is None:
+        checkpoint_path = npz_path.parent / "checkpoints" / "b_out.json"
+    window = bolus_window_from_checkpoint(
+        checkpoint_path, n_obs, timer_min0=float(timer[0]) if timer.size else 0.0,
+        margin_frames=margin_frames,
+    )
+
+    result = compute_qof_arrays(
+        model_name, ct, voxel_results, window=window, n_obs=n_obs, robust=robust,
+        chi2_reliable_max=chi2_reliable_max, shrink_sigma=shrink_sigma, sigma_dof=sigma_dof,
+        clamp_quantile=clamp_quantile, eb_robust=eb_robust,
+    )
+    result["tumind"] = tumind
+    result["dims"] = dims
     return result
 
 

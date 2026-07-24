@@ -188,7 +188,25 @@ def test_compute_qof_shrink_sigma_clamps_outlier_voxel(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+def test_compute_qof_arrays_matches_npz_loader(tmp_path: Path) -> None:
+    npz = _write_synthetic_npz(tmp_path)
+    _write_checkpoint(npz)
+    via_npz = dce_qof.compute_qof(npz, shrink_sigma=True)
+    with np.load(npz) as d:
+        ct = np.asarray(d["ct_voxel_mM"])
+        vr = np.asarray(d["voxel_results"])
+    via_arrays = dce_qof.compute_qof_arrays(
+        "tofts", ct, vr, window=via_npz["window"], shrink_sigma=True
+    )
+    np.testing.assert_allclose(via_arrays["sigma"], via_npz["sigma"], equal_nan=True)
+    np.testing.assert_allclose(via_arrays["chi2v"], via_npz["chi2v"], equal_nan=True)
+    assert "tumind" not in via_arrays  # arrays core is volume-agnostic
+
+
+@pytest.mark.unit
 def test_unknown_model_raises(tmp_path: Path) -> None:
     npz = _write_synthetic_npz(tmp_path, model="not_a_model")
     with pytest.raises(ValueError):
         dce_qof.compute_qof(npz)
+    with pytest.raises(ValueError):
+        dce_qof.compute_qof_arrays("not_a_model", np.zeros((5, 3)), np.zeros((3, 4)))

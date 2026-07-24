@@ -77,6 +77,8 @@
     "time_smoothing_window": 0,
     "write_param_maps": true,
     "write_postfit_arrays": false,
+    "write_qof_maps": false,
+    "qof_chi2_max": 6.0,
     "force_cpu": 0,
     "gpu_tolerance": 1e-6,
     "gpu_max_n_iterations": 200,

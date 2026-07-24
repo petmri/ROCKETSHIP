@@ -162,17 +162,20 @@ analysis-only, never a parity-gate input.
 - One-line note (done, above) that single-sided masking is intentional — replaces the dropped
   mask-overlap guard.
 
-**Remaining — data analysis (the real remaining work; mostly greenfield):**
-1. **Pipeline hook (highest value):** write `*_qof_{sigma,chi2nu,reliable}.nii.gz` next to the param
-   maps on a normal run — the pipeline already has `ct_source`, SSE, `tumind`, `spatial_shape`,
-   timer, and injection timing in scope at `_write_param_maps` (~line 3760), so no NPZ round-trip.
-   Gate on a `write_qof_maps` preference.
-2. **Config/CLI surface:** promote `write_qof_maps` + `qof_chi2_max` (τ) to real preferences
-   (`dce_default.json`/`dceprep_default.json`) + `dce_cli.py`, replacing the test-only env knob.
-3. **Batch integration:** `run_dce_bids_batch.py` emits QoF maps per session.
-4. **QoF-aware ROI stats:** exclude unreliable voxels from voxelwise ROI parameter rollups (and/or
+**Remaining — data analysis:**
+1. **Pipeline hook — DONE (2026-07-23).** `dce_pipeline._write_qof_maps` writes
+   `*_qof_{sigma,chi2nu,reliable}.nii.gz` next to the param maps on a normal run, computed from the
+   in-memory `ct_source` + SSE + injection timing (no NPZ round-trip), via
+   `dce_qof.compute_qof_arrays` with `shrink_sigma=True`. **Opt-in** `write_qof_maps` pref (default
+   false); `qof_chi2_max` pref (default 6.0) sets the reliable threshold. Both added to
+   `dce_default.json`/`dceprep_default.json`. Best-effort (never fails the fit).
+2. **Batch integration:** `run_dce_bids_batch.py` should pass `write_qof_maps` through so batch runs
+   emit QoF maps per session (prefs already flow via `stage_overrides` / config template — verify + a
+   convenience flag).
+3. **QoF-aware ROI stats:** exclude unreliable voxels from voxelwise ROI parameter rollups (and/or
    report reliable-fraction per ROI) so nonsense voxels stop polluting ROI means — the original
    motivation.
+4. *(optional)* a `dce_cli.py` flag for `write_qof_maps` (works today via config/`stage_overrides`).
 
 **Done since (2026-07-23):**
 - **σ outlier robustification — eBayes variance moderation** (`dce_sigma.eb_moderate_variance`):

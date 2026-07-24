@@ -3095,6 +3095,83 @@ def _write_param_maps(
     return paths
 
 
+def _write_qof_maps(
+    config: DcePipelineConfig,
+    rootname: str,
+    model_name: str,
+    ct_voxel: np.ndarray,
+    voxel_results: np.ndarray,
+    tumind: np.ndarray,
+    spatial_shape: Optional[Tuple[int, int, int]],
+    timer: np.ndarray,
+    start_injection_min: float,
+    end_injection_min: Optional[float],
+) -> Dict[str, str]:
+    """Write per-voxel quality-of-fit maps (σ, reduced χ², reliable mask) next to the param maps.
+
+    Opt-in via ``stage_overrides.write_qof_maps``. Uses estimator-B σ with eBayes variance
+    moderation (`dce_qof`); ``reliable ⟺ χ²_ν ≤ qof_chi2_max`` (default 6.0). No-op when disabled,
+    the model is unsupported, or there is no spatial reference — never fails the pipeline.
+    """
+    if not _to_bool(_stage_override(config, "write_qof_maps", False), False):
+        return {}
+    if spatial_shape is None:
+        return {}
+    try:
+        import dce_qof  # local import: optional feature, keeps startup light
+
+        ct_arr = np.asarray(ct_voxel, dtype=np.float64)
+        n_obs = int(ct_arr.shape[0])
+        dt = float(timer[1] - timer[0]) if np.asarray(timer).size > 1 else 0.0
+        t0 = float(timer[0]) if np.asarray(timer).size else 0.0
+        window = None
+        if dt > 0:
+            onset = (float(start_injection_min) - t0) / dt
+            duration = 0.0
+            if end_injection_min is not None:
+                duration = max(0.0, (float(end_injection_min) - float(start_injection_min)) / dt)
+            window = dce_qof.bolus_exclude_window(onset, duration, n_obs)
+
+        chi2_max = _safe_float(_stage_override(config, "qof_chi2_max", 6.0), 6.0)
+        res = dce_qof.compute_qof_arrays(
+            model_name, ct_arr, np.asarray(voxel_results, dtype=np.float64),
+            window=window, n_obs=n_obs, shrink_sigma=True, chi2_reliable_max=chi2_max,
+        )
+    except Exception:
+        # QoF is a best-effort diagnostic; an unsupported model or numeric edge case must not
+        # break the fit outputs.
+        return {}
+
+    reference = _try_load_reference_nifti(config)
+    coords = np.unravel_index(np.asarray(tumind, dtype=np.int64), spatial_shape, order="F")
+    layers = {
+        "qof_sigma": res["sigma"],
+        "qof_chi2nu": res["chi2v"],
+        "qof_reliable": res["reliable"].astype(np.float32),
+    }
+    paths: Dict[str, str] = {}
+    for name, values in layers.items():
+        volume = np.full(spatial_shape, np.nan, dtype=np.float32)
+        volume[coords] = np.asarray(values, dtype=np.float32)
+        out_base = f"{rootname}_{model_name}_fit_{name}"
+        if reference is not None:
+            try:
+                import nibabel as nib  # type: ignore
+
+                header = reference["header"].copy()
+                header.set_data_dtype(np.float32)
+                out_path = config.output_dir / f"{out_base}.nii.gz"
+                nib.save(nib.Nifti1Image(volume, reference["affine"], header), str(out_path))
+                paths[name] = str(out_path)
+                continue
+            except Exception:
+                pass
+        out_path = config.output_dir / f"{out_base}.npy"
+        np.save(out_path, volume)
+        paths[name] = str(out_path)
+    return paths
+
+
 def _fit_fxr_curve(
     model_name: str,
     ct: np.ndarray,
@@ -3745,6 +3822,23 @@ def _run_stage_d_real(
             else {}
         )
 
+        qof_map_paths = (
+            _write_qof_maps(
+                config=config,
+                rootname=rootname,
+                model_name=model_name,
+                ct_voxel=ct_source,
+                voxel_results=voxel_results,
+                tumind=tumind,
+                spatial_shape=spatial_shape,
+                timer=timer,
+                start_injection_min=start_injection_min,
+                end_injection_min=stage_b.get("end_injection_min"),
+            )
+            if fit_voxels
+            else {}
+        )
+
         xls_path: Optional[str] = None
         if config.write_xls and roi_results.shape[0] > 0:
             results_base = config.output_dir / f"{rootname}_{model_name}_fit"
@@ -3786,6 +3880,7 @@ def _run_stage_d_real(
             "voxel_result_shape": list(voxel_results.shape),
             "roi_result_shape": list(roi_results.shape),
             "map_paths": map_paths,
+            "qof_map_paths": qof_map_paths,
             "xls_path": xls_path,
             "postfit_arrays_path": postfit_arrays_path,
         }
