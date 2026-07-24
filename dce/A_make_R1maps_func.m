@@ -655,6 +655,13 @@ else
     %No zero index in matlab
     steady_state_time(2) = steady_state_time;
     steady_state_time(1) = 1;
+    % Same as the manual branch above: steady_state_time(2) is the last
+    % baseline frame, so it is also the injection start. Without this the
+    % explicit-steady-state path leaves start_injection/end_injection
+    % undefined and errors out at the Adata assignment below.
+    start_injection = steady_state_time(2);
+    [~, end_injection] = max(DYNAMLV);
+    end_injection = mean(end_injection);
 end
 disp(['Steady state time selected from image ' num2str(steady_state_time(1)) ...
     ' to image ' num2str(steady_state_time(2)) ' ']);

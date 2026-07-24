@@ -149,7 +149,9 @@ parfor voxel_index = 1:spatial_points
             aif_x = aif_x./max(aif_x);
             xdata{voxel_index}.Cp    = aif_x;
             xdata{voxel_index}.timer = timer';
-            xdata{voxel_index}.step = [end_ss end_inject];
+            % end_ss/end_inject are 1-based frame numbers but timer is
+            % 0:time_points-1, so frame f sits at f-1. See B_AIF_fitting_func.
+            xdata{voxel_index}.step = [end_ss-1 end_inject-1];
             % Run fit
             [aif_fitted, ~, ~, rsquare] = AIFbiexpfithelp(xdata{voxel_index}, 0);
             % Remove bad fits
@@ -214,7 +216,8 @@ if ~isempty(aif_index)
     aif_found = aif_found./max(aif_found);
     xdata{1}.Cp    = aif_found;
     xdata{1}.timer = timer';
-    xdata{1}.step = [end_ss end_inject];
+    % Frame numbers -> 0-based timer, as above.
+    xdata{1}.step = [end_ss-1 end_inject-1];
     % Show fit
     [aif_fitted, ~, ~, rsquare] = AIFbiexpfithelp(xdata, 0);
     figure;

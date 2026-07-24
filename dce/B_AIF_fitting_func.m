@@ -69,8 +69,16 @@ rootname = Adata.rootname;
 Cp       = double(Adata.Cp);
 Ct       = double(Adata.Ct);
 if (start_injection == -1 || end_injection == -1)
-    start_injection = Adata.start_injection*time_resolution;
-    end_injection = Adata.end_injection*time_resolution;
+    % Adata.start_injection (= end_ss, the LAST baseline frame) and
+    % Adata.end_injection (= mean peak frame) are 1-based frame numbers, but
+    % timer = 0:time_resolution:... is 0-based, so frame f sits at
+    % (f-1)*time_resolution. Scaling the frame number straight through lands a
+    % full frame late: it puts the end of the baseline on the *first contrast*
+    % frame, and AIFbiexpfithelp bounds t_base_end below by timer(start_index),
+    % which then forces the fitted AIF to zero on a frame that already carries
+    % contrast. Mirrored in python/dce_pipeline.py.
+    start_injection = (Adata.start_injection - 1)*time_resolution;
+    end_injection = (Adata.end_injection - 1)*time_resolution;
 end
 
 % We also load the Rawdata for raw curve fitting if necessary

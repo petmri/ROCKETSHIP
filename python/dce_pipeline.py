@@ -1901,8 +1901,13 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
         end_injection = float(start_injection)
     if end_injection < start_injection:
         end_injection = float(start_injection)
-    start_injection_min_auto = float(start_injection * time_resolution_min)
-    end_injection_min_auto = float(end_injection * time_resolution_min)
+    # Both are 1-based frame numbers, but `timer` is 0-based (`timer[i] = i * dt`), so frame
+    # f sits at (f - 1) * dt. Scaling the frame number straight through lands a full frame
+    # late: it would put the end of the baseline on the *first contrast* frame, and Stage-B
+    # bounds the fitted AIF's `t_base_end` below by that time -- forcing the AIF to zero on a
+    # frame that already carries contrast. Mirrors dce/B_AIF_fitting_func.m.
+    start_injection_min_auto = float(max(0.0, (start_injection - 1.0) * time_resolution_min))
+    end_injection_min_auto = float(max(0.0, (end_injection - 1.0) * time_resolution_min))
 
     figures = _save_stage_a_qc_figures(
         config.output_dir,

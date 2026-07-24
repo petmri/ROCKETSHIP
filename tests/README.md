@@ -156,7 +156,25 @@ baseline = export_parity_baseline();          % writes tests/contracts/baselines
 manifest = generate_synthetic_datasets();     % deterministic synthetic BIDS-like fixtures
 ```
 
-Regenerate the downsampled BBB p19 DCE parity fixture and its MATLAB baseline maps:
+Regenerate the downsampled BBB p19 DCE parity fixture and its MATLAB baseline maps. Include
+`roiList` (whole-brain mask) or the generator's `roi_list` stays empty and it silently skips
+writing `Dyn-1_*_fit_rois.xls` — the ROI-xls baselines then go stale relative to the `.nii`
+maps the very next time only this command (without `roiList`) is rerun after an algorithm
+change (hit in practice: `find_end_ss` -> `find_end_ss_tv` migration regenerated the `.nii`
+maps but left `.xls` on the old detector, breaking `test_bbb_p19_roi_xls_parity` for `tofts`/
+`tissue_uptake` until backfilled). This box's `gpufit` mex is compiled and a GPU is present, so
+also set `force_cpu = 1` in `dce/dce_preferences.txt` before running (revert to `0` after) to
+match the CPU-path reference `test_bbb_p19_roi_xls_parity`/`test_bbb_p19_region_parity` gate
+against — otherwise gpufit's CI zero-padding contaminates the regenerated maps (see `60c43da`).
+Pass every model the parity suite reads (including `2cxm`) for the same reason the `roiList`
+note exists: a partial regeneration leaves the omitted models' maps on the old settings.
+
+Leave `startInjectionMin`/`endInjectionMin` at their `-1` (auto) defaults. The whole point of
+the suite is that both pipelines run the *same* settings, and the Python fixture auto-detects
+its injection window from Stage-A's steady state. Pinning the MATLAB side to fixed minutes
+decouples the two Stage-B inputs — the fitted AIF's onset lands on a different frame — while
+every other setting still matches, which reads as a model disagreement rather than a
+configuration one:
 
 ```bash
 python tests/data/scripts/generate_bbb_p19_downsample.py --clean --factor-x 3 --factor-y 3
@@ -167,5 +185,7 @@ matlab -batch "addpath('tests/matlab'); generate_dce_tofts_parity_map( \
   'brainRoiPath', '$S/derivatives/$sub/$ses/anat/${sub}_${ses}_desc-brain_mask.nii', \
   't1MapPath', '$S/derivatives/$sub/$ses/anat/${sub}_${ses}_space-DCEref_T1map.nii', \
   'noiseRoiPath', '$S/derivatives/$sub/$ses/anat/${sub}_${ses}_desc-noise_mask.nii', \
-  'outputRoot', '$S/derivatives/matlabref/$sub/$ses/dce', 'models', {'tofts', 'patlak'});"
+  'outputRoot', '$S/derivatives/matlabref/$sub/$ses/dce', \
+  'roiList', '$S/derivatives/$sub/$ses/anat/${sub}_${ses}_desc-brain_mask.nii', \
+  'models', {'tofts', 'ex_tofts', 'patlak', 'tissue_uptake', '2cxm'});"
 ```

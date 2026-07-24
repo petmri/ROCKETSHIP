@@ -45,8 +45,15 @@ addParameter(p, 'rootname', 'Dyn-1', @is_text_scalar);
 addParameter(p, 'trMs', 8.29, @isscalar);
 addParameter(p, 'faDeg', 15.0, @isscalar);
 addParameter(p, 'timeResolutionSec', 15.84, @isscalar);
-addParameter(p, 'startInjectionMin', 0.5, @isscalar);
-addParameter(p, 'endInjectionMin', 0.7, @isscalar);
+% -1 = auto: B_AIF_fitting_func derives the injection window from Stage-A's
+% detected steady state, the same way the Python parity fixture does. Pinning
+% these to fixed minutes silently decouples the two pipelines' Stage-B inputs
+% (the AIF onset lands on a different frame) while every other setting matches,
+% which is exactly what the parity suite is meant to be comparing.
+addParameter(p, 'startInjectionMin', -1, @isscalar);
+addParameter(p, 'endInjectionMin', -1, @isscalar);
+% -2 = auto-detect the steady-state end (find_end_ss_tv), matching the Python
+% fixture's steady_state_auto_method = 'tv'.
 addParameter(p, 'steadyStateTime', -2, @isscalar);
 addParameter(p, 'hematocrit', 0.42, @isscalar);
 addParameter(p, 'snrFilter', 5.0, @isscalar);
