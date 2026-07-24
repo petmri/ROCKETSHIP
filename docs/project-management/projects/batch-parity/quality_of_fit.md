@@ -108,9 +108,10 @@ Weight real-data behavior over phantom-gt: phantom-gt's ground truth carries *id
 not the artifacts / poorly-modeled signal QoF exists to catch, so it **overstates** real performance
 and serves only as a sanity tier (see [`sigma_estimators.md`](sigma_estimators.md) for the same caveat
 applied to σ).
-- **Real-data cross-backend divergence (primary — the core problem):** show gpu/cpu/python/matlab
-  disagreement **concentrates in low-QoF voxels** — restricting to high-QoF voxels collapses the parity
-  gap. No ground truth needed. Demonstrate on `sub-10bbbdownsample` + a `RUNNER_DATA` session.
+- **Real-data cross-backend divergence (primary — the core problem): CONFIRMED (2026-07-23).**
+  Restricting to high-QoF voxels collapses the cpu-vs-gpufit gap on both the `sub-10bbbdownsample`
+  fixture and real `RUNNER_DATA/sub-1101743` — and a random-exclusion control shows the gain is the
+  QoF signal, not voxel attrition (see "Remaining — parity" above). No ground truth needed.
 - **Realistic-artifact injection (real curves, not idealized noise):** perturb real voxels with the
   failure modes we care about (motion spikes, baseline drift, truncated wash-in) and confirm QoF flags
   them.
@@ -155,8 +156,14 @@ analysis-only, never a parity-gate input.
   gated checks pass. 27 unit tests.
 
 **Remaining — parity (validation/cleanup; the gate is already live):**
-- Validate on real `RUNNER_DATA`: χ²_ν filtering should collapse the cross-backend gap on a real
-  session, not just the fixture.
+- **RUNNER_DATA validation — DONE (2026-07-23), confirmed.** `sub-1101743/ses-01` (slice 11, 6935
+  voxels, Python cpu vs gpufit; shrunk χ²). QoF **χ²≤6 filtering specifically removes the
+  divergence-driving voxels**: cpu-vs-gpufit Spearman lifts tofts 0.990→0.995 and patlak 0.973→0.982
+  while keeping ~90%. **Controls prove it's the QoF signal, not voxel attrition:** same-fraction
+  *random* exclusion gives *zero* gain (0.990/0.973 unchanged, ±0.0005), and dropping low-|Ktrans|
+  voxels doesn't help (patlak worse). Caveat: per-voxel Spearman(χ², |cpu−auto|) is weak (0.15 tofts /
+  −0.02 patlak) — the χ²↔divergence link is **tail-concentrated**, not smoothly monotonic (exactly
+  what a reliability filter exploits). One slice / one session — widen to more sessions to generalize.
 - Re-enable the **tofts+gm** gate with QoF on and retire that hand-curated exception if QoF
   reproduces it.
 - One-line note (done, above) that single-sided masking is intentional — replaces the dropped
