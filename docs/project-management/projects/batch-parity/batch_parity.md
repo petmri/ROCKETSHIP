@@ -1,6 +1,6 @@
 # Batch Parity Status (MATLAB vs Python DCE)
 
-_Last reviewed: 2026-07-23._
+_Last reviewed: 2026-07-24._
 
 ## Scope
 Parity between the MATLAB reference pipeline and the Python port for DCE parameter maps
@@ -51,9 +51,12 @@ identifiable on this fixture. Suite layout in `tests/README.md`.
   Not yet wired into the pipeline as a normal output — see `quality_of_fit.md` remaining work.
 
 ### Alignment verified (still holds)
-- Stage-A/Stage-B arrays (`timer`, `Ct`, `Cp_use`) match MATLAB to floating-point noise on the
-  clean-reference run; the Patlak core fitter and the CPU / linear-CPU backends match MATLAB
-  almost exactly on sampled voxels.
+- Stage-A arrays (`timer`, `Ct`, and the **measured** `CpROI`) match MATLAB to floating-point
+  noise; the Patlak core fitter and the CPU / linear-CPU backends match MATLAB almost exactly on
+  sampled voxels. Stage-D is in near-exact parity when fed the same AIF (issue #2 table).
+  **`Cp_use` (the *fitted* AIF) is explicitly NOT aligned** — see issue #2 and
+  [`aif_fitting_parity.md`](aif_fitting_parity.md). The earlier "`Cp_use` matches to
+  floating-point noise" claim predates auto-detected injection timing.
 - March-2026 `RUNNER_DATA/sub-1101743` clean-reference check: Python CPU vs MATLAB Patlak Ktrans
   correlated `>0.9999` on active voxels (`|Ktrans|>=1e-5`) in both sessions; lower all-voxel
   correlation (~0.89-0.92) was dominated by near-zero floor voxels, not slope/scale drift.
@@ -74,12 +77,34 @@ and **all 10 gated checks pass** — the principled replacement for a hand-curat
 canonical QoF target). Disable with `ROCKETSHIP_PARITY_QOF_CHI2_MAX=0` (reproduces the old `0.9369`
 failure). Deep-dive on the underlying single-voxel mechanism kept below.
 
-**2. `tofts_roi_xls` / `tissue_uptake_roi_xls` ROI-average failures — not root-caused.**
-Under the `tv` window, `test_bbb_p19_roi_xls_parity` fails for `tofts`
-(`mae=0.0329`, limit `0.03`) and `tissue_uptake` (`mae=0.0290`, limit `0.05` on max_abs_err
-`0.1187`); `ex_tofts` and `patlak` still pass. Both failing models fit from an ROI-averaged
-curve — start by checking whether the `tv`-derived window shifted the ROI-mean baseline/injection
-timing enough to matter for these two specifically.
+**2. `tofts_roi_xls` / `tissue_uptake_roi_xls` ROI-average failures — ROOT-CAUSED 2026-07-24:
+the Stage-B AIF fit differs between the two languages.** Full write-up:
+[`aif_fitting_parity.md`](aif_fitting_parity.md).
+
+Two configuration mismatches were masking a real algorithm difference, and are now fixed
+(commit `192d3c1`, which also regenerated the baseline): (a) `generate_dce_tofts_parity_map.m`
+pinned `startInjectionMin=0.5 /
+endInjectionMin=0.7` while the Python fixture auto-detected them, so the two sides never shared a
+Stage-B input — the generator now defaults both to `-1` (auto); (b) **both** pipelines converted
+`end_ss` (a 1-based *frame number*) to minutes as `end_ss * dt` instead of `(end_ss - 1) * dt`
+(`dce/B_AIF_fitting_func.m:72`, `python/dce_pipeline.py`), landing the injection window a full
+frame late and forcing the fitted AIF to zero on a frame already carrying contrast. `end_ss` is
+otherwise produced and consumed correctly as the last baseline frame on both sides. Also fixed
+alongside: the same frame→time error in `dce/dce_auto_aif.m`, and an unassigned
+`start_injection`/`end_injection` in `A_make_R1maps_func.m`'s explicit-`steadyStateTime` branch
+(that path errored out entirely).
+
+With those fixed and the baseline regenerated, `test_bbb_p19_region_parity` passes and the
+**entire** remaining ROI-xls gap is the fitted AIF: substituting MATLAB's `Cp_use` into Python's
+own Stage-D drops every model to passing (`ex_tofts` 1.2e-5, `patlak` 1.4e-5, `tofts` 0.024,
+`tissue_uptake` 0.026). The two AIFs differ at exactly one frame — the first contrast frame:
+measured `2.3421`, Python `2.1363`, MATLAB `0.9819` — because MATLAB fits `t0_exp` as a free
+parameter (landing at 1.064 min) while Python's default `aif_biexp_timing_method = "legacy_sobel"`
+holds it fixed at 0.792. Both sides zero-weight every frame through the AIF peak, so that value is
+unconstrained by data on either side. **Not yet decided: what both algorithms should be** — see
+the open questions in `aif_fitting_parity.md`. Note this supersedes the "Stage-B `Cp_use` matches
+MATLAB to floating-point noise" claim under "Alignment verified" below, which predates
+auto-detected injection timing.
 
 **3. MATLAB CI maps were zero-width — root-caused and FIXED 2026-07-23 (working tree).**
 The `_ci_metrics()` diagnostics (`ci_norm_absdiff_median/p95`, `prop_py_outside_matlab_ci`;
@@ -146,7 +171,9 @@ compare only final maps (not Stage-B `Cp_use` as a first-class contract); no req
 with no dense-ROI cross-check to separate true drift from mask instability.
 
 - **A. Stage-B AIF contract gate** — lock `Cp_use`/`step`/`baseline`/`max_index` against a
-  reference payload; gate on MAE/corr, not existence.
+  reference payload; gate on MAE/corr, not existence. **Now the highest-value gap:** issue #2 is
+  exactly the failure this gate was designed to catch, and it went undetected for months because
+  parity compares only final maps. A cross-language `Cp_use` check would have caught it on day one.
 - **B. Backend-equivalence gate** — frozen Stage-B arrays from a `RUNNER_DATA` fixture; required
   `cpu` vs `cpufit` map metrics for `patlak`/`tofts`/`ex_tofts`; skip-with-reason if
   `pycpufit` absent.
