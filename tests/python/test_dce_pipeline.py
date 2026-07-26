@@ -484,7 +484,7 @@ class TestDcePipeline:
             assert info["method_requested"] == "glr"
             assert info["method_used"] == "glr"
 
-    def test_resolve_baseline_window_defaults_to_tv_when_no_options_set(self) -> None:
+    def test_resolve_baseline_window_defaults_to_biexp_fit_when_no_options_set(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))
             config.stage_overrides = {
@@ -501,8 +501,10 @@ class TestDcePipeline:
             assert ss_start == 0
             assert 1 <= ss_end <= 12
             assert info["method_requested"] == "none"
-            assert info["method_used"] == "tv"
-            assert info["source"] == "default_auto_method:tv"
+            assert info["method_used"] == "biexp_fit"
+            assert info["source"] == "default_auto_method:biexp_fit"
+            # biexp_fit is seeded by tv and records where it fell back to it.
+            assert info["auto_details"]["seed_method"] == "tv"
 
     def test_resolve_baseline_window_uses_aif_sidecar_when_present(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1338,7 +1340,6 @@ class TestDcePipeline:
             config.stage_overrides = {
                 "stage_b_mode": "real",
                 "aif_curve_mode": "fitted",
-                "aif_biexp_timing_method": "fit_transition_times",
                 "start_time_min": 0.0,
                 "end_time_min": 0.0,
                 "aif_MaxFunEvals": 4000,
@@ -1349,8 +1350,9 @@ class TestDcePipeline:
             assert result["impl"] == "real"
             assert result["aif_name"] == "fitted"
             assert "fit_params_cp" in result
-            assert result["fit_timing_method_cp"] == "fit_transition_times"
-            assert result["fit_timing_method_stlv"] == "fit_transition_times"
+            assert result["fit_robust_mode_cp"] == "bisquare"
+            assert result["fit_robust_mode_stlv"] == "bisquare"
+            assert int(result["fit_robust_iterations_cp"]) >= 1
             assert result["fit_params_cp"].shape == (6,)
             assert result["fit_params_stlv"].shape == (6,)
             assert float(result["fit_t0_exp_cp"]) > float(result["fit_t_base_end_cp"])
@@ -1379,7 +1381,6 @@ class TestDcePipeline:
                 "stage_b_mode": "real",
                 "aif_curve_mode": "raw",
                 "auto_find_injection": 1,
-                "start_injection_min": 0.20,
                 "end_injection_min": 0.30,
             }
             stage_a = _make_stage_a_payload()
@@ -1389,6 +1390,19 @@ class TestDcePipeline:
             result = _run_stage_b_real(config, stage_a)
             assert float(result["start_injection_min"]) == pytest.approx(0.61)
             assert float(result["end_injection_min"]) == pytest.approx(0.96)
+
+    def test_stage_b_real_rejects_start_injection_override(self) -> None:
+        for key in ("start_injection_min", "start_injection"):
+            with tempfile.TemporaryDirectory() as tmp:
+                config = _make_config(Path(tmp))
+                config.stage_overrides = {
+                    "stage_b_mode": "real",
+                    "aif_curve_mode": "raw",
+                    key: 0.20,
+                }
+                stage_a = _make_stage_a_payload()
+                with pytest.raises(ValueError, match=f"{key} was removed"):
+                    _run_stage_b_real(config, stage_a)
 
     def test_stage_b_real_imported_mode_npz(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

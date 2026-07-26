@@ -81,14 +81,30 @@ For options in `stage_overrides`:
   - `piecewise_constant`: MATLAB `find_end_ss`-style two-constant brute-force split with local-min backtrack
   - `glr`: GLR-like one-sided change-in-mean detector (ported from `synthetic_dce` `ismrm_submit/end_baseline_detect.py`)
   - `tv`: total-variation/fused-lasso style denoise + first significant upward jump detector (same source)
-  - Aliases accepted: `legacy`, `dce_auto_aif`, `sobel`, `piecewise`, `find_end_ss`, `edge`, `find_end_ss_edge`, `tv`, `find_end_ss_tv`
+  - `biexp_fit`: 6-parameter biexponential fit to the mean AIF *signal* curve, seeded by
+    `tv`. Unlike the shape heuristics this also reports where the upslope ends, which
+    becomes `end_injection` and the Stage-B fit's start point for the upslope duration.
+    Falls back to its `tv` seed if the fit cannot run or does not converge.
+  - Aliases accepted: `legacy`, `dce_auto_aif`, `sobel`, `piecewise`, `find_end_ss`, `edge`, `find_end_ss_edge`, `tv`, `find_end_ss_tv`, `biexp`, `find_end_ss_biexp`
   - Precedence overall: `steady_state_end` > AIF sidecar `SteadyStateEndTimeIndex` > `steady_state_auto_method`
-  - If none of the above is set, Python defaults to `piecewise_constant` (MATLAB's own
-    default via `A_make_R1maps_func`'s `steadyStateTime=-2` → `find_end_ss`)
+  - If none of the above is set, Python defaults to `biexp_fit`
 - `start_time`, `end_time`, `start_time_min`, `end_time_min`
-- `start_injection_min`, `end_injection_min`
-- MATLAB script aliases: `start_injection`, `end_injection` (min)
+- `end_injection_min` (MATLAB script alias: `end_injection`, min). There is no
+  `start_injection_min`: the injection start is *defined* as the resolved baseline end, so
+  move it with `steady_state_end` / the AIF sidecar / `steady_state_auto_method`. Passing
+  `start_injection_min` or `start_injection` is rejected with an error pointing at those.
 - `injection_duration`
+- `aif_Robust`: robust estimator for the Stage-B AIF fit. `Bisquare` (default) runs a Tukey
+  biweight IRLS with a per-iteration MAD scale and leverage correction, matched between Python
+  and MATLAB; `LAR` maps to scipy `soft_l1`; `off` disables it.
+- `aif_peak_weight_exponent` (default 2): prior de-weighting of the AIF peak sample. The weight
+  is the peak's excess over the median relative to the next largest sample's excess, raised to
+  this exponent; 0 disables it (weight 1). The peak has leverage 1 in the biexponential model,
+  so a residual-based robust scheme cannot see a noise-inflated peak — this weight comes from
+  the curve's shape instead. Applied only to the production fit, never to the Stage-A timing
+  pass, whose whole job is to locate the peak.
+- `save_aif_figure` (default true): write the Stage-B AIF fit figure (`dceAIF_fitting.png`),
+  showing measured vs fitted curves with `t_base_end` and `t0_exp` marked as vertical lines.
 
 ### Stage A concentration conversion
 - `relaxivity`

@@ -125,8 +125,9 @@ def test_force_cpu_preference_overrides_backend_auto(_probe_mock: object) -> Non
 @patch("scipy.optimize.least_squares")
 def test_aif_advanced_preferences_flow_into_fit_kwargs(least_squares_mock: object) -> None:
     class _DummyResult:
-        x = np.array([1.0, 1.0, 1.0, 0.1, 0.3, 0.2], dtype=np.float64)
+        x = np.array([1.0, 1.0, 1.0, 0.1, 0.3], dtype=np.float64)
         success = True
+        jac = np.zeros((8, 5), dtype=np.float64)
 
     least_squares_mock.return_value = _DummyResult()
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -140,7 +141,7 @@ def test_aif_advanced_preferences_flow_into_fit_kwargs(least_squares_mock: objec
                 "aif_Robust = Bisquare",
             ],
         )
-        config = _make_config(tmp, prefs, {"aif_biexp_timing_method": "fit_transition_times"})
+        config = _make_config(tmp, prefs)
         timer = np.linspace(0.0, 1.0, num=8, dtype=np.float64)
         curve = np.array([0.0, 0.0, 0.4, 1.2, 0.8, 0.6, 0.4, 0.3], dtype=np.float64)
 
@@ -158,14 +159,18 @@ def test_aif_advanced_preferences_flow_into_fit_kwargs(least_squares_mock: objec
         assert int(kwargs["max_nfev"]) == 123
         assert float(kwargs["ftol"]) == pytest.approx(1e-8)
         assert float(kwargs["xtol"]) == pytest.approx(1e-9)
-        assert kwargs["loss"] == "cauchy"
-        assert kwargs["x0"].shape == (6,)
-        assert kwargs["bounds"][0].shape == (6,)
-        assert kwargs["bounds"][1].shape == (6,)
+        # aif_Robust=Bisquare drives the hand-written Tukey IRLS loop, which solves an
+        # ordinary weighted least-squares problem each iteration -- so no scipy `loss=` is
+        # passed. scipy's loss functions are not the same estimator as MATLAB's Bisquare.
+        assert "loss" not in kwargs
+        # A, B, c, d, delta -- t_base_end is an input, not a fitted parameter.
+        assert kwargs["x0"].shape == (5,)
+        assert kwargs["bounds"][0].shape == (5,)
+        assert kwargs["bounds"][1].shape == (5,)
 
 
 @pytest.mark.integration
-def test_aif_fit_defaults_to_legacy_transition_window() -> None:
+def test_aif_fit_holds_t_base_end_and_fits_delta() -> None:
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp = Path(tmp_dir)
         prefs = _write_prefs(tmp / "dce_preferences.txt", [])
@@ -182,18 +187,25 @@ def test_aif_fit_defaults_to_legacy_transition_window() -> None:
             fitting_au=False,
         )
 
-        assert result["timing_method"] == "legacy_sobel"
-        assert result["params"].shape == (4,)
+        assert result["fit_t_base_end"] is False
+        # t_base_end is pinned to the resolved baseline end; only delta is free.
         assert float(result["t_base_end"]) == pytest.approx(float(timer[2]))
-        assert float(result["t0_exp"]) == pytest.approx(float(timer[4]))
+        assert float(result["t0_exp"]) > float(result["t_base_end"])
+        # delta bottoms out at one frame, never at zero.
+        dt = float(timer[1] - timer[0])
+        assert float(result["delta"]) >= dt - 1e-12
+        # Coefficients are always reported as MATLAB's [A B c d t_base_end t0_exp].
+        assert result["params"].shape == (6,)
+        assert float(result["params"][4]) == pytest.approx(float(result["t_base_end"]))
+        assert float(result["params"][5]) == pytest.approx(float(result["t0_exp"]))
 
 
 @pytest.mark.integration
-def test_aif_fit_returns_transition_times() -> None:
+def test_aif_timing_pass_fits_t_base_end() -> None:
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp = Path(tmp_dir)
         prefs = _write_prefs(tmp / "dce_preferences.txt", [])
-        config = _make_config(tmp, prefs, {"aif_biexp_timing_method": "fit_transition_times"})
+        config = _make_config(tmp, prefs)
         timer = np.linspace(0.0, 1.0, num=8, dtype=np.float64)
         curve = np.array([0.0, 0.0, 0.2, 1.1, 0.9, 0.6, 0.4, 0.25], dtype=np.float64)
 
@@ -204,10 +216,19 @@ def test_aif_fit_returns_transition_times() -> None:
             start_injection_min=timer[2],
             end_injection_min=timer[4],
             fitting_au=False,
+            fit_t_base_end=True,
         )
 
-        assert result["timing_method"] == "fit_transition_times"
+        assert result["fit_t_base_end"] is True
         assert result["params"].shape == (6,)
-        assert float(result["t_base_end"]) == pytest.approx(float(result["params"][4]))
-        assert float(result["t0_exp"]) == pytest.approx(float(result["params"][5]))
         assert float(result["t0_exp"]) > float(result["t_base_end"])
+
+
+@pytest.mark.integration
+def test_aif_biexp_timing_method_override_is_rejected() -> None:
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp = Path(tmp_dir)
+        prefs = _write_prefs(tmp / "dce_preferences.txt", [])
+        config = _make_config(tmp, prefs, {"aif_biexp_timing_method": "fit_transition_times"})
+        with pytest.raises(ValueError, match="aif_biexp_timing_method was removed"):
+            config.validate()

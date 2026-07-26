@@ -644,7 +644,12 @@ elseif (steady_state_time == -2)
         dimz = dimz;
         % end_ss = dce_auto_aif(DYNAMLV,lvind,dimx,dimy,dimz,injection_duration);
         % [end_ss, end_injection] = find_end_ss(DYNAMLV);
-        [end_ss, end_injection] = find_end_ss_tv(DYNAMLV);
+        % [end_ss, end_injection] = find_end_ss_tv(DYNAMLV);
+        % find_end_ss_biexp fits both transition times together, so unlike the shape
+        % heuristics it also reports where the upslope ends -- which becomes end_injection
+        % and Part B's start point for the upslope duration. It is seeded by (and falls back
+        % to) find_end_ss_tv. Matches Python's default steady_state_auto_method='biexp_fit'.
+        [end_ss, end_injection] = find_end_ss_biexp(DYNAMLV);
     end
     start_injection = end_ss;
     % [~, end_injection] = max(DYNAMLV);

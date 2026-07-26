@@ -127,9 +127,18 @@ The steady-state/baseline window follows its own precedence in `_resolve_baselin
 (`python/dce_pipeline.py`): explicit `stage_overrides.steady_state_end` → a
 `SteadyStateEndTimeIndex` field in the AIF file's JSON sidecar (the documented mechanism
 for a fixed/reproducible run — same discovery convention as the metadata sidecar, `.nii`/
-`.nii.gz` swapped for `.json`) → auto-detect via `stage_overrides.steady_state_auto_method`
-(`piecewise_constant` is the default and is the MATLAB `find_end_ss` port; `legacy_sobel`
-ports the different `dce_auto_aif.m` heuristic; `glr`/`tv` are additional ported detectors).
+`.nii.gz` swapped for `.json`) → auto-detect via `stage_overrides.steady_state_auto_method`.
+`biexp_fit` is the default (MATLAB `dce/find_end_ss_biexp.m`): a 6-parameter biexponential fit
+to the mean AIF *signal* curve, seeded by and falling back to `tv`. Unlike the shape heuristics
+it also reports where the injection ends, which Stage B uses as the start point for the fitted
+upslope duration. `piecewise_constant` ports MATLAB `find_end_ss`; `legacy_sobel` ports the
+different `dce_auto_aif.m` heuristic; `glr`/`tv` are additional ported detectors.
+
+Stage B's AIF fit (`_fit_aif_biexp`, `dce/AIFbiexpfithelp.m`) always holds `t_base_end` at the
+resolved baseline end and always fits the upslope duration as `t0_exp = t_base_end + delta`,
+with `delta` floored at one frame. There is no `start_injection_min` option: the injection start
+*is* the baseline end. Background and rationale:
+`docs/project-management/projects/batch-parity/aif_fitting_parity.md`.
 
 ### Backend selection (Stage D acceleration)
 

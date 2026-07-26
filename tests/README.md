@@ -162,7 +162,13 @@ writing `Dyn-1_*_fit_rois.xls` — the ROI-xls baselines then go stale relative 
 maps the very next time only this command (without `roiList`) is rerun after an algorithm
 change (hit in practice: `find_end_ss` -> `find_end_ss_tv` migration regenerated the `.nii`
 maps but left `.xls` on the old detector, breaking `test_bbb_p19_roi_xls_parity` for `tofts`/
-`tissue_uptake` until backfilled). This box's `gpufit` mex is compiled and a GPU is present, so
+`tissue_uptake` until backfilled).
+
+When regenerating after a Stage-A/B timing change, also check that
+`_make_config`'s `steady_state_auto_method` in `tests/python/test_dce_pipeline_parity_metrics.py`
+still names the same detector `A_make_R1maps_func.m` calls (currently `find_end_ss_biexp` /
+`"biexp_fit"`). A mismatch there compares two different baseline-end algorithms and reads as
+a model disagreement, the same trap the `startInjectionMin` note below describes. This box's `gpufit` mex is compiled and a GPU is present, so
 also set `force_cpu = 1` in `dce/dce_preferences.txt` before running (revert to `0` after) to
 match the CPU-path reference `test_bbb_p19_roi_xls_parity`/`test_bbb_p19_region_parity` gate
 against — otherwise gpufit's CI zero-padding contaminates the regenerated maps (see `60c43da`).

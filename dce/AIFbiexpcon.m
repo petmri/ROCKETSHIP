@@ -26,6 +26,12 @@ if ~fittingAU
     baseline = 0;
 end
 
+% baseline is an offset the whole curve sits on: the upslope climbs A+B above it and the decay
+% relaxes back to it. Writing the upslope as (A-baseline)+(B-baseline) and omitting baseline from
+% the decay left the curve discontinuous at t0_exp by exactly baseline, and decaying to 0 rather
+% than to the baseline. baseline is 0 whenever fittingAU is false, so the concentration fit is
+% identical either way; only the arbitrary-units Stlv fit ever saw the broken form.
+
 Cp = zeros(size(T1));
 for j = 1:numel(T1)
     % Baseline
@@ -33,10 +39,10 @@ for j = 1:numel(T1)
         Cp(j) = baseline;
     % Linear upslope from t_base_end to t0_exp
     elseif T1(j) < t0_exp
-        Cp(j) = baseline + (A-baseline) * ((T1(j)-t_base_end)/(t0_exp-t_base_end)) + (B-baseline) * ((T1(j)-t_base_end)/(t0_exp-t_base_end));
+        Cp(j) = baseline + (A + B) * ((T1(j)-t_base_end)/(t0_exp-t_base_end));
     % Bi-Exponential Decay    
     else
-        Cp(j) = A * exp(-c * (T1(j) - t0_exp)) + B * exp(-d * (T1(j) - t0_exp));
+        Cp(j) = baseline + A * exp(-c * (T1(j) - t0_exp)) + B * exp(-d * (T1(j) - t0_exp));
     end
 end
 % Ensure output is the same shape and size as T1

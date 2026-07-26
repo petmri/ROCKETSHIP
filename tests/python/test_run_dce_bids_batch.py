@@ -83,10 +83,11 @@ def test_batch_config_keeps_injection_windows_when_explicitly_set() -> None:
                 }
             },
             set_overrides={
-                "start_injection_min": "0.75",
                 "end_injection_min": "1.05",
             },
         )
 
-        assert str(config.stage_overrides["start_injection_min"]) == "0.75"
+        # start_injection_min is no longer a pipeline option (the injection start is always the
+        # resolved baseline end), so the template hard-code is dropped rather than carried.
+        assert "start_injection_min" not in config.stage_overrides
         assert str(config.stage_overrides["end_injection_min"]) == "1.05"

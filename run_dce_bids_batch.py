@@ -217,18 +217,22 @@ def _build_session_config(
     # Injection timing should default to automatic Stage-A/B detection unless
     # explicitly provided via CLI --set. Strip template hard-codes here.
     injection_override_keys = {
-        "start_injection",
         "end_injection",
-        "start_injection_min",
         "end_injection_min",
     }
+    # The injection *start* is always the resolved baseline end and is no longer a pipeline
+    # option, so templates carrying it are dropped unconditionally -- keeping it would only
+    # produce a hard error downstream. Move it with `steady_state_end` instead.
+    removed_injection_keys = {"start_injection", "start_injection_min"}
     explicit_injection_override = any(
         str(key).strip().lower() in injection_override_keys for key in set_overrides
     )
-    if not explicit_injection_override:
-        for key in list(base_config["stage_overrides"].keys()):
-            if str(key).strip().lower() in injection_override_keys:
-                base_config["stage_overrides"].pop(key, None)
+    for key in list(base_config["stage_overrides"].keys()):
+        normalized = str(key).strip().lower()
+        if normalized in removed_injection_keys or (
+            not explicit_injection_override and normalized in injection_override_keys
+        ):
+            base_config["stage_overrides"].pop(key, None)
     
     # Helper to resolve file lists from template patterns and optional auto-discovery fallback.
     def _resolve_file_list(
