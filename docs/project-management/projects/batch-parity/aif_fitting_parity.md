@@ -554,6 +554,76 @@ actually identified there, rather than inherited from the Stage-A timing pass. T
 deliberate departure from "keep the pass-2 weighting as it is now" and was **not** done here. It
 is the obvious first thing to try if Phase 6 finds this fragile on real data.
 
+## S10 — Phase 6 first pass: `RUNNER_DATA` (2026-07-25)
+
+Two sessions only (`sub-1101743/{ses-01,ses-02}`, 64 frames each, no AIFArtist ratings), so
+nothing here is statistical. Both are the sharp-rise case S1 anticipated: 2-4 baseline frames and
+a bolus that peaks in a single frame.
+
+`tests/python/run_baseline_end_reliability.py` gained the `biexp_fit` detector, plus a
+`--no-ground-truth` mode (discover masks by filename, report cross-detector agreement instead of
+accuracy) and `--dynamic-pattern` (pin the series when reading a derivatives tree). Stage D ran
+end-to-end on `cpufit_cpu`; both sessions succeeded.
+
+**The peak prior is no longer redundant.** S7 recorded that on `sub-10bbbdownsample` the prior
+changed nothing because leverage-corrected Tukey already zeroed the peak. On real data it bites:
+prior weight 0.084 (ses-01) and 0.147 (ses-02). Combined with the robust estimator the peak is
+effectively discarded — the fitted curve reaches 0.86 of a measured 1.90 mM (ses-01) and 0.92 of
+2.62 mM (ses-02). The rest of both curves is tracked well. **Open question for the user:** whether
+discarding this much peak is right. The AIF's peak height feeds `Ktrans` scaling, so systematically
+under-fitting it biases `Ktrans` high; against that, a one-frame spike at this sampling rate is
+genuinely undersampled and its height is not trustworthy. This is a modelling decision, not a bug.
+
+**Latent bug L3 — the `fit_success` gate discards good non-robust fits. FIXED.** With
+`aif_Robust=off`, `least_squares` on `sub-10bbbdownsample` returns `status=0`, `nfev=1000`,
+`"maximum number of function evaluations is exceeded"` — so `_biexp_fit_baseline_end` reported
+`fallback_fit_not_converged` and silently fell back to `tv`. The fit was *fine*: cost 0.0146,
+`t_base_end=2.000`, `t0_exp=3.000` (exact frame boundaries), adjusted R² 0.9826 against robust's
+0.9550. The cause is D4's tolerances — `aif_TolFun=1e-20` and `aif_TolX=1e-23` clamp to machine
+epsilon and are never satisfiable, so `trf` always exhausts `max_nfev` and reports failure. This
+was misread during S7 as evidence that the non-robust path could not fit at all.
+
+`result.success` is just `status > 0`, i.e. it asks whether a tolerance test fired — which here
+is a question that can never be answered yes. Budget exhaustion is the *expected* terminal state,
+not a failure. `_lsq_result_usable` replaces it: reject only a negative status (improper input) or
+a non-finite solution, and leave fit *quality* to `rsquare_adj`, which is where callers already
+judge it. Applied at both call sites — the non-robust branch of `_fit_aif_biexp` and the inner
+solve of `_tukey_irls`, which had the same latent false negative.
+
+MATLAB never had this gate (`AIFbiexpfithelp.m` ignores `exitflag`), so L3 was a Python-only
+divergence and fixing it moves the two backends together. Behaviour under the shipped default is
+unchanged — with `aif_Robust=Bisquare` the fixture and both `RUNNER_DATA` sessions return the same
+`end_ss` and the same `t_base_end` as before, and all four ROI-xls gates are bit-identical
+(`tofts` 0.005687, `ex_tofts` 0.001675, `patlak` 0.000505, `tissue_uptake` 0.002645). What changes
+is that `aif_Robust=off` now produces `mode=fit` instead of falling back to `tv`.
+
+**The robust estimator hurts the Stage-A timing pass.** Same principle already established for the
+peak prior in S7 — the peak's *height* is unreliable but its *position* is the timing pass's
+primary evidence — except only the prior was exempted, not the estimator. Measured:
+
+| series | robust | `t_base_end` | `t0_exp` | `end_ss` | adj R² |
+|---|---|---|---|---|---|
+| `sub-10bbbdownsample` | Bisquare | 1.802 | 2.820 | 3 | 0.9550 |
+| `sub-10bbbdownsample` | off | **2.000** | **3.000** | 3 | 0.9826 |
+| `ses-01` | Bisquare | 2.549 | 3.994 | 4 | 0.7957 |
+| `ses-01` | off | **2.961** | **4.000** | 4 | 0.9393 |
+| `ses-02` | Bisquare | 0.993 | 2.562 | **2** | 0.6672 |
+| `ses-02` | off | **1.983** | **3.000** | **3** | 0.9463 |
+
+With robust off, `t0_exp` lands on the peak frame exactly in all three cases and `t_base_end` on
+the last baseline sample; with it on, both drift early. On `ses-02` that costs a frame: measured
+baseline is frames 1-3 (104.6, 105.8, 100.6) with the peak at frame 4, so `end_ss=3` is right and
+the robust fit's 2 is wrong. The higher adjusted R² is corroborating, not proof — declining to
+reject points raises R² by construction.
+
+Fixing this means `apply_robust=False` alongside the existing `apply_peak_weight=False` in the
+timing pass. It was blocked on L3, since the non-robust path could not report success; L3 is now
+fixed, so this is unblocked. **Still not done** — it changes a production default on two sessions
+of evidence, and wants more rated data first.
+
+`ses-02` also tripped S3's drift diagnostic (`+0.5186 min`, 0.3999 → 0.9186), which is the
+diagnostic firing exactly as designed: Stage A's timing was wrong, and Stage B disagreed with it.
+
 ## Reproducing
 
 - Regenerated MATLAB baseline (auto steady state + auto injection, all five models, `force_cpu=1`):

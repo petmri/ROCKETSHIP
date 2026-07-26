@@ -1528,6 +1528,12 @@ def _biexp_fit_baseline_end(stlv: np.ndarray, config: "DcePipelineConfig") -> Di
             "fit_delta_frames": float(fit["delta"]),
             "fit_peak_index_0b": int(fit["max_index"]),
             "fit_rsquare_adj": float(fit["rsquare_adj"]),
+            # [A, B, c, d, t_base_end, t0_exp] on the normalised curve, in frame units. Kept
+            # only so a caller can re-evaluate the fitted curve for QC plotting (see
+            # tests/python/baseline_end_reliability_helpers.py); the pipeline itself uses just
+            # the two transition times, since signal saturation distorts the amplitudes and
+            # decay rates. Reverse the normalisation with `normalization_scale`/`baseline_mean`.
+            "fit_params": [float(v) for v in np.asarray(fit["params"], dtype=np.float64)],
             "baseline_mean": baseline_mean,
             "normalization_scale": scale,
         }
@@ -2425,6 +2431,31 @@ TUKEY_MAX_ITERATIONS = 50
 TUKEY_WEIGHT_TOLERANCE = 1e-6
 
 
+def _lsq_result_usable(result: Any) -> bool:
+    """Whether a ``least_squares`` result should be accepted as a fit.
+
+    ``result.success`` is just ``status > 0``: it demands that one of the tolerance tests fired.
+    That is the wrong question for this fit. ``aif_TolFun`` and ``aif_TolX`` are inherited from
+    MATLAB at 1e-20 and 1e-23, below the machine epsilon they get clamped to, so no tolerance test
+    can ever fire and ``trf`` always terminates at ``status == 0`` -- "maximum number of function
+    evaluations is exceeded" -- returning its best point. That point is routinely an excellent fit:
+    on ``sub-10bbbdownsample`` the rejected one had cost 0.0146, ``t_base_end`` and ``t0_exp`` on
+    exact frame boundaries, and adjusted R^2 0.9826, and ``_biexp_fit_baseline_end`` threw it away
+    and fell back to ``tv``. Budget exhaustion is the *expected* terminal state here, not a failure.
+
+    MATLAB never had this gate -- ``AIFbiexpfithelp.m`` ignores ``exitflag`` and uses whatever
+    coefficients come back -- so this was a Python-only divergence.
+
+    A negative status (improper input) or a non-finite solution is still a real failure. This does
+    not certify fit *quality*; callers that care judge that from ``rsquare_adj``.
+    """
+    if result is None:
+        return False
+    if int(getattr(result, "status", -1)) < 0:
+        return False
+    return bool(np.all(np.isfinite(np.asarray(result.x, dtype=np.float64))))
+
+
 def _tukey_irls(
     residual_fn: Callable[[np.ndarray], np.ndarray],
     x0: np.ndarray,
@@ -2461,7 +2492,7 @@ def _tukey_irls(
         sqrt_w = np.sqrt(base * robust)
         result = least_squares(lambda p: residual_fn(p) * sqrt_w, x0=params, **lsq_kwargs)
         params = np.asarray(result.x, dtype=np.float64)
-        success = bool(result.success)
+        success = _lsq_result_usable(result)
 
         resid = np.asarray(residual_fn(params), dtype=np.float64)
         finite = np.isfinite(resid)
@@ -2737,7 +2768,7 @@ def _fit_aif_biexp(
                 lsq_kwargs["loss"] = aif_loss
             result = least_squares(weighted_residual, x0=param_initial, **lsq_kwargs)
             params = np.asarray(result.x, dtype=np.float64)
-            fit_success = bool(result.success)
+            fit_success = _lsq_result_usable(result)
     except Exception:
         fit_success = False
 

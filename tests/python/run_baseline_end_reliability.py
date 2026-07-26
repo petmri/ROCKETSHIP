@@ -4,9 +4,14 @@ ground truth (`SteadyStateEndTimeIndex` in AIF-mask JSON sidecars, e.g. from AIF
 
 On-demand diagnostic tool, not part of the automated test suite: walks a BIDS derivatives
 tree for AIF-mask sidecars with ground truth, finds the matching raw dynamic DCE series in
-a separate BIDS raw tree, runs all 4 auto-detectors (piecewise_constant, legacy_sobel, glr,
-tv) on each session's AIF-mask curve, and writes a per-algorithm accuracy/MSE summary plus
-one figure per session."""
+a separate BIDS raw tree, runs all 5 auto-detectors (piecewise_constant, legacy_sobel, glr,
+tv, biexp_fit) on each session's AIF-mask curve, and writes a per-algorithm accuracy/MSE
+summary plus one figure per session.
+
+`biexp_fit` is the production default. Unlike the other four it is a model fit rather than a
+signal-shape heuristic, so it also yields a fractional injection end (`t0_exp`) and a fitted
+curve; both are overlaid on the per-session figures and its extra diagnostics land in the
+per-session CSV."""
 
 from __future__ import annotations
 
@@ -29,14 +34,23 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "tests" / "python"))
 
 from baseline_end_reliability_helpers import (  # noqa: E402
+    DEFAULT_AIF_MASK_PATTERN,
+    DEFAULT_CONFIG_TEMPLATE,
     DETECTORS,
+    AgreementStats,
     AlgorithmStats,
     SessionResult,
+    biexp_fitted_curve,
     compute_algorithm_stats,
+    compute_detector_agreement,
+    configure_biexp_detector,
+    discover_aif_masks,
     discover_aif_sidecars,
     is_ground_truth_valid,
     process_session,
 )
+
+AGREEMENT_REFERENCE = "biexp_fit"
 
 
 _ALGO_COLORS = {
@@ -44,7 +58,20 @@ _ALGO_COLORS = {
     "legacy_sobel": "#ff7f0e",
     "glr": "#2ca02c",
     "tv": "#9467bd",
+    "biexp_fit": "#1f77b4",
 }
+
+# Extra per-session columns the `biexp_fit` detector produces that the others have no analogue
+# for: (CSV column, key in the detector's details dict).
+_BIEXP_DETAIL_COLUMNS = (
+    ("biexp_mode", "mode"),
+    ("biexp_end_injection_1b", "end_injection_1b"),
+    ("biexp_t_base_end_frames", "fit_t_base_end_frames"),
+    ("biexp_t0_exp_frames", "fit_t0_exp_frames"),
+    ("biexp_delta_frames", "fit_delta_frames"),
+    ("biexp_rsquare_adj", "fit_rsquare_adj"),
+    ("biexp_seed_end_ss_1b", "seed_end_ss_1b"),
+)
 
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
@@ -75,6 +102,36 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         dest="subjects",
         default=None,
         help="Limit to one or more subject IDs (repeatable), e.g. --subject sub-1101608.",
+    )
+    parser.add_argument(
+        "--dynamic-pattern",
+        default=None,
+        help="Glob pinning the dynamic series within each session's dce/ folder, e.g. "
+        "'*desc-bfcz_DCE.nii*'. Required when --raw-root points at a derivatives tree, where "
+        "the default one-dynamic-per-session heuristic has many candidates and picks "
+        "alphabetically. Use the pipeline's own pattern so the detectors see the curve "
+        "production feeds them.",
+    )
+    parser.add_argument(
+        "--no-ground-truth",
+        action="store_true",
+        help="Discover AIF masks by filename instead of requiring a SteadyStateEndTimeIndex "
+        "sidecar. Use on datasets that were never rated in AIFArtist: all detectors still run "
+        "and all figures are still written, but accuracy/MSE are replaced by a cross-detector "
+        f"agreement table against '{AGREEMENT_REFERENCE}'.",
+    )
+    parser.add_argument(
+        "--aif-mask-pattern",
+        default=DEFAULT_AIF_MASK_PATTERN,
+        help=f"Glob for --no-ground-truth mask discovery (default: {DEFAULT_AIF_MASK_PATTERN}, the "
+        "same pattern the pipeline resolves aif_files from).",
+    )
+    parser.add_argument(
+        "--config-template",
+        type=Path,
+        default=DEFAULT_CONFIG_TEMPLATE,
+        help="JSON config whose stage_overrides supply the aif_* settings for the biexp_fit "
+        f"detector (default: {DEFAULT_CONFIG_TEMPLATE}). The other detectors ignore it.",
     )
     parser.add_argument(
         "--tolerance-frames",
@@ -114,6 +171,23 @@ def _plot_session(result: SessionResult, output_dir: Path, *, mode_suffix: str, 
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.plot(frames, curve, color="0.2", linewidth=1.5, label=f"mean {signal_label} signal")
 
+    # The biexponential detector is the only one that produces a fitted curve, so overlay it:
+    # a detector line landing on the right frame for the wrong reason is visible here and
+    # nowhere else. Drawn before the vertical lines so it sits underneath them.
+    biexp_details = result.detector_details.get("biexp_fit", {})
+    fitted = biexp_fitted_curve(biexp_details, n)
+    if fitted is not None:
+        rsq = biexp_details.get("fit_rsquare_adj")
+        rsq_text = f"  (adj R²={float(rsq):.3f})" if isinstance(rsq, (int, float)) else ""
+        ax.plot(
+            frames,
+            fitted,
+            color=_ALGO_COLORS["biexp_fit"],
+            linewidth=1.2,
+            alpha=0.85,
+            label=f"biexp_fit curve{rsq_text}",
+        )
+
     gt_valid = is_ground_truth_valid(result)
     if gt_valid:
         ax.axvline(
@@ -128,7 +202,24 @@ def _plot_session(result: SessionResult, output_dir: Path, *, mode_suffix: str, 
             value, color=_ALGO_COLORS.get(name, "gray"), linestyle="--", linewidth=1.5, label=f"{name}: {value}"
         )
 
-    title = result.id if gt_valid else f"{result.id}  (GT out of range)"
+    # t0_exp is the end of the linear upslope, not a baseline end, so it is not a prediction of
+    # the ground truth and is drawn in a different style to keep that clear.
+    t0_exp_1b = biexp_details.get("end_injection_1b")
+    if isinstance(t0_exp_1b, (int, float)) and np.isfinite(t0_exp_1b):
+        ax.axvline(
+            float(t0_exp_1b),
+            color=_ALGO_COLORS["biexp_fit"],
+            linestyle=":",
+            linewidth=1.5,
+            label=f"biexp_fit t0_exp: {float(t0_exp_1b):.2f}",
+        )
+
+    if gt_valid:
+        title = result.id
+    elif result.ground_truth_1b is None:
+        title = f"{result.id}  (no GT)"
+    else:
+        title = f"{result.id}  (GT out of range)"
     ax.set_title(f"{title}  [{signal_label}]")
     ax.set_xlabel("Frame index (1-based)")
     ax.set_ylabel(f"Mean {signal_label} signal")
@@ -151,6 +242,7 @@ def _write_summary_txt(
     *,
     mode_suffix: str,
     signal_label: str,
+    agreement: Optional[Dict[str, AgreementStats]] = None,
 ) -> Path:
     n_total = len(results)
     n_ok = sum(1 for r in results if r.status == "ok")
@@ -164,37 +256,95 @@ def _write_summary_txt(
     lines.append(f"Derivatives root: {Path(args.derivatives_root).expanduser().resolve()}")
     lines.append(f"Raw root: {Path(args.raw_root).expanduser().resolve()}")
     lines.append(f"Subject filter: {', '.join(args.subjects) if args.subjects else '(none)'}")
+    lines.append(f"biexp_fit config template: {Path(args.config_template).expanduser().resolve()}")
     lines.append("")
-    lines.append(f"Discovered sidecars (with SteadyStateEndTimeIndex): {n_total}")
+    if args.no_ground_truth:
+        lines.append(f"Discovered AIF masks ({args.aif_mask_pattern}, unrated): {n_total}")
+    else:
+        lines.append(f"Discovered sidecars (with SteadyStateEndTimeIndex): {n_total}")
     lines.append(f"  ok: {n_ok}")
     lines.append(f"  skipped: {len(skipped)}")
     for reason, count in sorted(reason_counts.items(), key=lambda kv: -kv[1]):
         lines.append(f"    - {count}x: {reason}")
     lines.append("")
 
-    header = f"{'Algorithm':<20}{'N_valid':>10}{'Accuracy%':>12}{'MSE(frames^2)':>16}"
-    if args.tolerance_frames is not None:
-        header += f"{'Within+/-' + str(args.tolerance_frames) + '%':>14}"
-    lines.append(header)
-    lines.append("-" * len(header))
-    for name in DETECTORS:
-        s = stats[name]
-        row = f"{name:<20}{s.n_valid:>10}{s.accuracy_pct:>12.1f}{s.mse:>16.3f}"
+    if agreement is not None:
+        # No ratings exist, so accuracy is undefined. Report how the detectors relate to each
+        # other instead -- the only comparison the data actually supports.
+        lines.append(f"No ground truth available; comparing detectors against '{AGREEMENT_REFERENCE}'.")
+        lines.append("")
+        header = f"{'Algorithm':<20}{'N_compared':>12}{'Identical%':>12}{'MeanOffset':>12}{'MaxAbsOffset':>14}"
+        lines.append(header)
+        lines.append("-" * len(header))
+        for name in DETECTORS:
+            a = agreement[name]
+            lines.append(
+                f"{name:<20}{a.n_compared:>12}{a.identical_pct:>12.1f}"
+                f"{a.mean_signed_offset:>12.2f}{a.max_abs_offset:>14.1f}"
+            )
+    else:
+        header = f"{'Algorithm':<20}{'N_valid':>10}{'Accuracy%':>12}{'MSE(frames^2)':>16}"
         if args.tolerance_frames is not None:
-            row += f"{(s.tolerance_pct if s.tolerance_pct is not None else float('nan')):>14.1f}"
-        lines.append(row)
+            header += f"{'Within+/-' + str(args.tolerance_frames) + '%':>14}"
+        lines.append(header)
+        lines.append("-" * len(header))
+        for name in DETECTORS:
+            s = stats[name]
+            row = f"{name:<20}{s.n_valid:>10}{s.accuracy_pct:>12.1f}{s.mse:>16.3f}"
+            if args.tolerance_frames is not None:
+                row += f"{(s.tolerance_pct if s.tolerance_pct is not None else float('nan')):>14.1f}"
+            lines.append(row)
+
+    # With so few sessions an aggregate hides more than it shows, so list the raw calls too.
+    if n_ok > 0 and n_ok <= 20:
+        lines.append("")
+        lines.append("Per-session predictions (end_ss, 1-based):")
+        gt_col = "" if args.no_ground_truth else f"{'GT':>6}"
+        lines.append(f"{'Session':<28}{gt_col}" + "".join(f"{name:>20}" for name in DETECTORS))
+        for r in results:
+            if r.status != "ok":
+                continue
+            gt_cell = "" if args.no_ground_truth else f"{r.ground_truth_1b if r.ground_truth_1b is not None else '-':>6}"
+            cells = "".join(f"{str(r.predictions.get(name, '-')):>20}" for name in DETECTORS)
+            lines.append(f"{r.id:<28}{gt_cell}{cells}")
+
+    # Whether biexp_fit actually fitted matters for reading its row above: every fallback is a
+    # silent vote for `tv`, so a high fallback count means the two rows are not independent.
+    biexp_modes = collections.Counter(
+        str(r.detector_details.get("biexp_fit", {}).get("mode", "(not run)")) for r in results if r.status == "ok"
+    )
+    if biexp_modes:
+        lines.append("")
+        lines.append("biexp_fit outcome breakdown (ok sessions):")
+        for mode, count in sorted(biexp_modes.items(), key=lambda kv: -kv[1]):
+            lines.append(f"  - {count}x: {mode}")
 
     lines.append("")
     lines.append("Notes:")
-    lines.append(
-        "- Accuracy% = % of valid sessions (ground truth index within [1, n_timepoints]) where the "
-        "detector's predicted end_ss_1b exactly matches SteadyStateEndTimeIndex."
-    )
-    lines.append(
-        "- MSE is in squared-frame-index units; it is not time-normalized across sessions with "
-        "different temporal resolution."
-    )
+    if agreement is not None:
+        lines.append(
+            f"- Identical% / offsets are measured against '{AGREEMENT_REFERENCE}', not against truth. "
+            "They say how far the detectors are from each other, and say nothing about which is right."
+        )
+        lines.append(
+            "- Offsets are signed (detector - reference) in frames, so a consistent bias is "
+            "distinguishable from scatter."
+        )
+    else:
+        lines.append(
+            "- Accuracy% = % of valid sessions (ground truth index within [1, n_timepoints]) where the "
+            "detector's predicted end_ss_1b exactly matches SteadyStateEndTimeIndex."
+        )
+        lines.append(
+            "- MSE is in squared-frame-index units; it is not time-normalized across sessions with "
+            "different temporal resolution."
+        )
     lines.append("- Sessions with no usable dynamic file (see skip breakdown above) are excluded entirely.")
+    lines.append(
+        "- biexp_fit is seeded from tv and falls back to it when the fit cannot run or does not "
+        "converge, so any mode other than 'fit' above means that session's biexp_fit prediction "
+        "is just tv's."
+    )
 
     summary_path = output_dir / f"baseline_end_summary{mode_suffix}.txt"
     summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -215,6 +365,7 @@ def _write_per_session_csv(results: List[SessionResult], output_dir: Path, *, mo
         "n_timepoints",
         "gt_valid",
         *DETECTORS.keys(),
+        *(column for column, _ in _BIEXP_DETAIL_COLUMNS),
     ]
     with csv_path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=fieldnames)
@@ -234,6 +385,9 @@ def _write_per_session_csv(results: List[SessionResult], output_dir: Path, *, mo
             }
             for name in DETECTORS:
                 row[name] = r.predictions.get(name, "")
+            biexp_details = r.detector_details.get("biexp_fit", {})
+            for column, detail_key in _BIEXP_DETAIL_COLUMNS:
+                row[column] = biexp_details.get(detail_key, "")
             writer.writerow(row)
     return csv_path
 
@@ -243,16 +397,31 @@ def main(argv: Optional[List[str]] = None) -> int:
     output_dir = Path(args.output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Searching for AIF-mask sidecars with SteadyStateEndTimeIndex under {args.derivatives_root}...")
-    records = discover_aif_sidecars(Path(args.derivatives_root), subjects=args.subjects)
-    if not records:
-        print(
-            f"No AIF-mask sidecars with SteadyStateEndTimeIndex found under {args.derivatives_root}",
-            file=sys.stderr,
+    biexp_config = configure_biexp_detector(args.config_template)
+    print(
+        f"biexp_fit settings from {Path(args.config_template).expanduser().resolve()}: "
+        f"aif_Robust={biexp_config.stage_overrides.get('aif_Robust', '(default)')}, "
+        f"aif_peak_weight_exponent={biexp_config.stage_overrides.get('aif_peak_weight_exponent', '(default)')}"
+    )
+
+    if args.no_ground_truth:
+        what = f"AIF masks matching {args.aif_mask_pattern}"
+        print(f"Searching for {what} under {args.derivatives_root}...")
+        records = discover_aif_masks(
+            Path(args.derivatives_root), subjects=args.subjects, pattern=args.aif_mask_pattern
         )
+    else:
+        what = "AIF-mask sidecars with SteadyStateEndTimeIndex"
+        print(f"Searching for {what} under {args.derivatives_root}...")
+        records = discover_aif_sidecars(Path(args.derivatives_root), subjects=args.subjects)
+
+    if not records:
+        print(f"No {what} found under {args.derivatives_root}", file=sys.stderr)
+        if not args.no_ground_truth:
+            print("Hint: pass --no-ground-truth to run the detectors on an unrated dataset.", file=sys.stderr)
         return 1
 
-    print(f"Discovered {len(records)} AIF-mask sidecars with SteadyStateEndTimeIndex under {args.derivatives_root}")
+    print(f"Discovered {len(records)} {what} under {args.derivatives_root}")
 
     mode_suffix = "_allvoxels" if args.use_all_voxels else ""
     signal_label = "all-voxel (whole image)" if args.use_all_voxels else "AIF-mask"
@@ -261,7 +430,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     plotted = 0
     n_records = len(records)
     for i, record in enumerate(records, start=1):
-        result = process_session(record, Path(args.raw_root), use_all_voxels=args.use_all_voxels)
+        result = process_session(
+            record,
+            Path(args.raw_root),
+            use_all_voxels=args.use_all_voxels,
+            dynamic_pattern=args.dynamic_pattern,
+        )
         results.append(result)
         if not args.no_plots and _plot_session(result, output_dir, mode_suffix=mode_suffix, signal_label=signal_label) is not None:
             plotted += 1
@@ -272,7 +446,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"Wrote {plotted} per-session figures to {output_dir}")
 
     stats = compute_algorithm_stats(results, tolerance_frames=args.tolerance_frames)
-    summary_path = _write_summary_txt(results, stats, args, output_dir, mode_suffix=mode_suffix, signal_label=signal_label)
+    agreement = compute_detector_agreement(results, reference=AGREEMENT_REFERENCE) if args.no_ground_truth else None
+    summary_path = _write_summary_txt(
+        results,
+        stats,
+        args,
+        output_dir,
+        mode_suffix=mode_suffix,
+        signal_label=signal_label,
+        agreement=agreement,
+    )
     print(f"Wrote summary: {summary_path}")
 
     if not args.no_per_session_csv:

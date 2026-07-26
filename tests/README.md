@@ -145,6 +145,30 @@ python tests/python/run_baseline_end_reliability.py \
   --output-dir out/baseline_end_reliability   # end-baseline detector accuracy vs AIFArtist-rated GT
 ```
 
+`run_baseline_end_reliability.py` compares five detectors: `piecewise_constant`, `legacy_sobel`,
+`glr`, `tv`, and `biexp_fit` (the production default). `biexp_fit` reads its `aif_*` settings from
+`--config-template` (default `python/dce_default.json`) so the harness measures the configuration
+that actually ships; the other four are pure functions of the signal curve and ignore it. Because
+it is a model fit rather than a shape heuristic it also reports a fractional injection end
+(`t0_exp`) and a fitted curve — both drawn on the per-session figures, with the extra diagnostics
+in `per_session_details.csv`. It is seeded from `tv` and falls back to it, so check the
+`biexp_fit outcome breakdown` in the summary before reading its accuracy row as independent.
+
+For a dataset that was never rated in AIFArtist there is no `SteadyStateEndTimeIndex` to score
+against, so pass `--no-ground-truth` to discover AIF masks by filename instead. Everything still
+runs; the accuracy table is replaced by a cross-detector agreement table. When `--raw-root` points
+at a derivatives tree rather than a raw one, also pass `--dynamic-pattern` so the detectors see the
+series production fits — otherwise the one-dynamic-per-session heuristic picks alphabetically among
+`desc-bfc`, `desc-hmc`, `desc-biases`, and friends:
+
+```bash
+python tests/python/run_baseline_end_reliability.py --no-ground-truth \
+  --derivatives-root RUNNER_DATA/derivatives/dceprep-python \
+  --raw-root RUNNER_DATA/derivatives/dceprep-python \
+  --dynamic-pattern '*desc-bfcz_DCE.nii*' \
+  --output-dir out/baseline_end_reliability_runner
+```
+
 Generate Part E NPZ inputs from Stage D with `stage_overrides.write_postfit_arrays=true`.
 
 ## MATLAB tests and baselines

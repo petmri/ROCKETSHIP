@@ -4,7 +4,7 @@ as produced by tools like AIFArtist)."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 from pathlib import Path
 import re
@@ -18,11 +18,90 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "python"))
 
 from dce_pipeline import (  # noqa: E402
+    DcePipelineConfig,
+    _aif_biexp_con,
+    _biexp_fit_baseline_end,
     _glr_baseline_end,
     _legacy_sobel_baseline_end,
     _piecewise_constant_baseline_end,
     _tv_baseline_end,
 )
+
+
+DEFAULT_CONFIG_TEMPLATE = REPO_ROOT / "python" / "dce_default.json"
+
+_biexp_config: Optional[DcePipelineConfig] = None
+
+
+def configure_biexp_detector(config_template: Optional[Path] = None) -> DcePipelineConfig:
+    """Build the `DcePipelineConfig` the `biexp_fit` detector reads its `aif_*` settings from.
+
+    Unlike the other four detectors -- which are pure functions of the signal curve -- the
+    biexponential fit is governed by the same `aif_lower_limits` / `aif_Robust` /
+    `aif_peak_weight_exponent` settings as the production Stage-B fit. Those live in
+    `stage_overrides`, so the harness loads them from the real config template rather than
+    letting `_stage_override` fall through to its hardcoded defaults; otherwise this would
+    measure a configuration nobody actually runs.
+
+    The three required paths are placeholders: nothing in the fit path touches them (with no
+    `dce_preferences_path` override, `_load_dce_preferences` never reaches the filesystem).
+    """
+    global _biexp_config
+    template = Path(config_template) if config_template is not None else DEFAULT_CONFIG_TEMPLATE
+    overrides: Dict[str, Any] = {}
+    if template.exists():
+        try:
+            payload = json.loads(template.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"WARNING: failed to parse config template {template}: {exc}", file=sys.stderr)
+        else:
+            if isinstance(payload, dict) and isinstance(payload.get("stage_overrides"), dict):
+                overrides = dict(payload["stage_overrides"])
+    else:
+        print(f"WARNING: config template {template} not found; using built-in aif_* defaults", file=sys.stderr)
+
+    _biexp_config = DcePipelineConfig(
+        subject_source_path=Path("."),
+        subject_tp_path=Path("."),
+        output_dir=Path("."),
+        stage_overrides=overrides,
+    )
+    return _biexp_config
+
+
+def _biexp_fit_detector(stlv: np.ndarray) -> Dict[str, Any]:
+    if _biexp_config is None:
+        configure_biexp_detector()
+    return _biexp_fit_baseline_end(stlv, _biexp_config)
+
+
+def biexp_fitted_curve(details: Dict[str, Any], n_timepoints: int) -> Optional[np.ndarray]:
+    """Re-evaluate the `biexp_fit` detector's fitted curve in the original signal units.
+
+    Returns None unless the fit actually ran (`mode == "fit"`). The fit works on a
+    baseline-subtracted, max-normalised curve in frame units, so this undoes that scaling to
+    put the result back on the same axes as the measured mean curve.
+    """
+    if details.get("mode") != "fit":
+        return None
+    params = details.get("fit_params")
+    if params is None or len(params) < 6:
+        return None
+    scale = float(details.get("normalization_scale", 1.0))
+    baseline_mean = float(details.get("baseline_mean", 0.0))
+    timer = np.arange(int(n_timepoints), dtype=np.float64)
+    normalized = _aif_biexp_con(
+        timer,
+        float(params[0]),
+        float(params[1]),
+        float(params[2]),
+        float(params[3]),
+        float(params[4]),
+        float(params[5]),
+        fitting_au=False,
+        baseline=0.0,
+    )
+    return normalized * scale + baseline_mean
 
 
 # Registration order also drives figure legend / summary table order.
@@ -31,6 +110,7 @@ DETECTORS: Dict[str, Callable[[np.ndarray], Dict[str, Any]]] = {
     "legacy_sobel": _legacy_sobel_baseline_end,
     "glr": _glr_baseline_end,
     "tv": _tv_baseline_end,
+    "biexp_fit": _biexp_fit_detector,
 }
 
 _NON_DYNAMIC_TOKENS = ("mask", "t1map", "seg", "roi")
@@ -40,13 +120,18 @@ _SESSION_RE = re.compile(r"^ses-[A-Za-z0-9]+$")
 
 @dataclass(frozen=True)
 class AifSidecarRecord:
-    """A discovered AIF-mask sidecar carrying a human-rated SteadyStateEndTimeIndex."""
+    """A discovered AIF mask, with a human-rated SteadyStateEndTimeIndex when one exists.
+
+    `ground_truth_1b` is None for masks found by `discover_aif_masks` (no rating available).
+    Such sessions still run every detector and still get a figure; they are simply excluded
+    from the accuracy/MSE statistics, which have nothing to score against.
+    """
 
     json_path: Path
     mask_path: Path
     subject: str
     session: Optional[str]
-    ground_truth_1b: int
+    ground_truth_1b: Optional[int]
     input_image: Optional[str]
 
     @property
@@ -69,6 +154,10 @@ class SessionResult:
     n_timepoints: Optional[int]
     predictions: Dict[str, Optional[int]]
     mean_curve: Optional[np.ndarray]
+    # Full per-detector details dicts, keyed the same as `predictions`. Only `biexp_fit`
+    # currently carries anything the reporting layer uses (the fitted coefficients and the
+    # fractional `end_injection_1b`), but every detector's details are kept for diagnosis.
+    detector_details: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     @property
     def id(self) -> str:
@@ -153,20 +242,83 @@ def discover_aif_sidecars(
     return records
 
 
+DEFAULT_AIF_MASK_PATTERN = "*desc-AIF_T1map.nii*"
+
+
+def discover_aif_masks(
+    derivatives_root: Path,
+    *,
+    subjects: Optional[Iterable[str]] = None,
+    pattern: str = DEFAULT_AIF_MASK_PATTERN,
+) -> List[AifSidecarRecord]:
+    """Find AIF masks by filename when no human-rated sidecars exist.
+
+    `discover_aif_sidecars` keys on `SteadyStateEndTimeIndex`, so a dataset that was never
+    opened in AIFArtist yields nothing at all -- including the `RUNNER_DATA` sessions. This
+    discovers the mask directly instead, which still supports everything except the accuracy
+    statistics: the detectors run, the figures are drawn, and the detectors can be compared
+    against each other even though there is no rating to score them on.
+
+    The default pattern is the one the pipeline itself resolves `aif_files` from
+    (`dce_file_discovery.py`), so this selects the same voxels Stage A would.
+    """
+    root = Path(derivatives_root).expanduser().resolve()
+    subject_filter = {str(s).strip() for s in subjects} if subjects else None
+    records: List[AifSidecarRecord] = []
+    for mask_path in sorted(root.rglob(pattern)):
+        if not mask_path.is_file():
+            continue
+        subject = next((part for part in mask_path.parts if _SUBJECT_RE.match(part)), None)
+        if subject is None:
+            print(f"WARNING: could not determine BIDS subject from path {mask_path}", file=sys.stderr)
+            continue
+        if subject_filter is not None and subject not in subject_filter:
+            continue
+        session = next((part for part in mask_path.parts if _SESSION_RE.match(part)), None)
+
+        records.append(
+            AifSidecarRecord(
+                json_path=mask_path,  # no sidecar; keep the mask path so reports stay traceable
+                mask_path=mask_path,
+                subject=subject,
+                session=session,
+                ground_truth_1b=None,
+                input_image=None,
+            )
+        )
+    return records
+
+
 def find_dynamic_file(
     raw_root: Path,
     subject: str,
     session: Optional[str],
     input_image_fallback: Optional[str],
+    dynamic_pattern: Optional[str] = None,
 ) -> Tuple[Optional[Path], str, Optional[str]]:
-    """Locate the raw dynamic 4D DCE series for a subject/session.
+    """Locate the dynamic 4D DCE series for a subject/session.
 
     Returns (path_or_None, source in {"bids","fallback","none"}, optional warning note).
     BIDS-convention discovery under `raw_root/subject/session/dce/` is tried first;
     `input_image_fallback` (AIFArtist's recorded absolute source path) is a fallback only,
     since it can point outside any BIDS raw tree.
+
+    `dynamic_pattern` pins the series explicitly. The default heuristic assumes a *raw* tree
+    holding one dynamic per session; pointed at a derivatives tree it has a dozen candidates
+    (`desc-bfc`, `desc-hmc`, `desc-biases`, ...) and picks alphabetically, which is arbitrary.
+    Since the detectors are meant to be judged on the curve production actually feeds them,
+    pass the pipeline's own pattern (`*desc-bfcz_DCE.nii*`) when reading derivatives.
     """
     dce_dir = Path(raw_root) / subject / (session or "") / "dce"
+    if dynamic_pattern:
+        candidates = sorted(dce_dir.glob(dynamic_pattern)) if dce_dir.is_dir() else []
+        if not candidates:
+            return None, "none", f"no file matching {dynamic_pattern} under {dce_dir}"
+        if len(candidates) > 1:
+            chosen = candidates[0]
+            return chosen, "bids", f"{len(candidates)} files match {dynamic_pattern} in {dce_dir}, chose {chosen.name}"
+        return candidates[0], "bids", None
+
     candidates = sorted(dce_dir.glob("*.nii")) + sorted(dce_dir.glob("*.nii.gz")) if dce_dir.is_dir() else []
     candidates = [c for c in candidates if not any(tok in c.name.lower() for tok in _NON_DYNAMIC_TOKENS)]
 
@@ -187,7 +339,13 @@ def find_dynamic_file(
     return None, "none", f"no dynamic file found under {dce_dir} and no usable InputImage fallback"
 
 
-def process_session(record: AifSidecarRecord, raw_root: Path, *, use_all_voxels: bool = False) -> SessionResult:
+def process_session(
+    record: AifSidecarRecord,
+    raw_root: Path,
+    *,
+    use_all_voxels: bool = False,
+    dynamic_pattern: Optional[str] = None,
+) -> SessionResult:
     """Load one session's data, extract the signal curve, and run all detectors.
 
     By default the curve is the mean over the AIF mask. With `use_all_voxels=True`, the
@@ -210,7 +368,9 @@ def process_session(record: AifSidecarRecord, raw_root: Path, *, use_all_voxels:
             mean_curve=None,
         )
 
-    dyn_path, source, note = find_dynamic_file(raw_root, record.subject, record.session, record.input_image)
+    dyn_path, source, note = find_dynamic_file(
+        raw_root, record.subject, record.session, record.input_image, dynamic_pattern
+    )
     if dyn_path is None:
         return _skip(None, source, note or "no dynamic file found")
     if note:
@@ -252,9 +412,12 @@ def process_session(record: AifSidecarRecord, raw_root: Path, *, use_all_voxels:
     mean_curve = np.mean(stlv, axis=1)
 
     predictions: Dict[str, Optional[int]] = {}
+    detector_details: Dict[str, Dict[str, Any]] = {}
     for name, detector in DETECTORS.items():
         try:
-            predictions[name] = int(detector(stlv)["end_ss_1b"])
+            details = detector(stlv)
+            detector_details[name] = details
+            predictions[name] = int(details["end_ss_1b"])
         except Exception as exc:
             print(f"WARNING: {record.id}: detector '{name}' failed: {exc}", file=sys.stderr)
             predictions[name] = None
@@ -271,7 +434,57 @@ def process_session(record: AifSidecarRecord, raw_root: Path, *, use_all_voxels:
         n_timepoints=n_timepoints,
         predictions=predictions,
         mean_curve=mean_curve,
+        detector_details=detector_details,
     )
+
+
+@dataclass
+class AgreementStats:
+    """How one detector compares to a reference detector, over sessions where both ran."""
+
+    name: str
+    n_compared: int
+    n_identical: int
+    identical_pct: float
+    mean_signed_offset: float
+    max_abs_offset: float
+
+
+def compute_detector_agreement(
+    results: Iterable[SessionResult], *, reference: str = "biexp_fit"
+) -> Dict[str, AgreementStats]:
+    """Pairwise agreement against `reference`, for datasets with no human ratings.
+
+    Without ground truth there is nothing to score accuracy on, but the detectors can still be
+    compared to each other: a detector that tracks the production default everywhere tells a
+    very different story from one that is systematically a frame early. Offsets are signed
+    (`detector - reference`) so a consistent bias is distinguishable from scatter.
+    """
+    results = list(results)
+    stats: Dict[str, AgreementStats] = {}
+    for name in DETECTORS:
+        offsets: List[float] = []
+        n_identical = 0
+        for result in results:
+            if result.status != "ok":
+                continue
+            pred = result.predictions.get(name)
+            ref = result.predictions.get(reference)
+            if pred is None or ref is None:
+                continue
+            offsets.append(float(pred - ref))
+            if pred == ref:
+                n_identical += 1
+        n_compared = len(offsets)
+        stats[name] = AgreementStats(
+            name=name,
+            n_compared=n_compared,
+            n_identical=n_identical,
+            identical_pct=(100.0 * n_identical / n_compared) if n_compared > 0 else float("nan"),
+            mean_signed_offset=float(np.mean(offsets)) if offsets else float("nan"),
+            max_abs_offset=float(np.max(np.abs(offsets))) if offsets else float("nan"),
+        )
+    return stats
 
 
 @dataclass
