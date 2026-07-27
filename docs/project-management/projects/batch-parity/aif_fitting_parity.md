@@ -147,7 +147,9 @@ machine `eps`, but still ~six orders *below* one frame.
 > Correction: an earlier revision of this section claimed Python's epsilon was 0.264 min (a whole
 > frame) and "fifteen orders of magnitude" apart from MATLAB's. That was wrong, and the document
 > contradicted itself — the reported fit `t_base_end = 0.52800023` is only reachable with an
-> epsilon of ~2.6e−7. See `_timer_epsilon` in `python/dce_pipeline.py`.
+> epsilon of ~2.6e−7. (`_timer_epsilon` has since been deleted — the reparameterisation in S1
+> replaced the epsilon floor with `_timer_step`, a one-frame floor on `delta`. It is named here
+> only to describe the pre-fix behaviour.)
 
 Immaterial when a bound is not active; decisive when one is. Here it means Python's `t0_exp` floor
 is *effectively* `t_base_end` itself, which is precisely what lets `t0_exp` collapse toward 0.528.
@@ -616,8 +618,8 @@ baseline is frames 1-3 (104.6, 105.8, 100.6) with the peak at frame 4, so `end_s
 the robust fit's 2 is wrong. The higher adjusted R² is corroborating, not proof — declining to
 reject points raises R² by construction.
 
-Fixing this means `apply_robust=False` alongside the existing `apply_peak_weight=False` in the
-timing pass. It was blocked on L3, since the non-robust path could not report success; L3 is now
+Fixing this means the `fit_pass="timing"` branch of `_fit_aif_biexp` skipping the robust
+estimator as well as the peak prior. It was blocked on L3, since the non-robust path could not report success; L3 is now
 fixed, so this is unblocked. **Still not done** — it changes a production default on two sessions
 of evidence, and wants more rated data first.
 

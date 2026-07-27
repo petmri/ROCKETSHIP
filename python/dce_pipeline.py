@@ -1464,7 +1464,6 @@ def _biexp_fit_baseline_end(stlv: np.ndarray, config: "DcePipelineConfig") -> Di
         "end_ss_1b": seed_end_ss_1b,
         "seed_method": "tv",
         "seed_end_ss_1b": seed_end_ss_1b,
-        "seed_details": seed,
     }
 
     if curves.ndim != 2 or curves.shape[0] < 4:
@@ -1498,8 +1497,7 @@ def _biexp_fit_baseline_end(stlv: np.ndarray, config: "DcePipelineConfig") -> Di
             start_injection_min=start_injection,
             end_injection_min=end_injection,
             fitting_au=False,
-            fit_t_base_end=True,
-            apply_peak_weight=False,
+            fit_pass="timing",
         )
     except Exception as exc:  # scipy missing, or a degenerate curve
         details["mode"] = "fallback_fit_error"
@@ -1526,7 +1524,6 @@ def _biexp_fit_baseline_end(stlv: np.ndarray, config: "DcePipelineConfig") -> Di
             "fit_t_base_end_frames": t_base_end,
             "fit_t0_exp_frames": t0_exp,
             "fit_delta_frames": float(fit["delta"]),
-            "fit_peak_index_0b": int(fit["max_index"]),
             "fit_rsquare_adj": float(fit["rsquare_adj"]),
             # [A, B, c, d, t_base_end, t0_exp] on the normalised curve, in frame units. Kept
             # only so a caller can re-evaluate the fitted curve for QC plotting (see
@@ -2369,17 +2366,6 @@ def _aif_biexp_con(
     return out
 
 
-def _timer_epsilon(timer: np.ndarray) -> float:
-    time = np.asarray(timer, dtype=np.float64).reshape(-1)
-    if time.size < 2:
-        return float(np.finfo(np.float64).eps)
-    diffs = np.diff(np.unique(time))
-    positive = diffs[diffs > 0]
-    if positive.size == 0:
-        return float(np.finfo(np.float64).eps)
-    return max(float(np.min(positive)) * 1e-6, float(np.finfo(np.float64).eps))
-
-
 AIF_PEAK_WEIGHT_FLOOR = 1e-3
 AIF_PEAK_WEIGHT_EXPONENT = 2.0
 
@@ -2461,7 +2447,7 @@ def _tukey_irls(
     x0: np.ndarray,
     base_weights: np.ndarray,
     lsq_kwargs: Dict[str, Any],
-) -> Tuple[np.ndarray, np.ndarray, float, int, bool]:
+) -> Tuple[np.ndarray, float, int, bool]:
     """Tukey biweight IRLS, matching MATLAB's ``fitoptions('Robust','Bisquare')``.
 
     Each iteration solves an ordinary weighted least-squares problem, then rebuilds the weights
@@ -2477,7 +2463,8 @@ def _tukey_irls(
     ``sqrt(1 - h)`` inflates residuals where the fit is most able to chase the data, which is
     what lets the peak be recognised at all.
 
-    Returns ``(params, final_weights, scale, iterations, success)``.
+    Returns ``(params, scale, iterations, success)``. The final per-sample weights stay internal:
+    ``scale`` and ``iterations`` are what the QC output records about how the estimator behaved.
     """
     from scipy.optimize import least_squares  # type: ignore
 
@@ -2526,7 +2513,7 @@ def _tukey_irls(
         if converged:
             break
 
-    return params, robust, scale, iterations, success
+    return params, scale, iterations, success
 
 
 def _jacobian_leverage(jac: np.ndarray, n: int) -> np.ndarray:
@@ -2590,6 +2577,9 @@ def _adjusted_rsquare(y_true: np.ndarray, y_fit: np.ndarray, n_params: int) -> f
     return 1.0 - (1.0 - r2) * ((n - 1.0) / max(1.0, (n - p - 1.0)))
 
 
+AIF_FIT_PASSES = ("production", "timing")
+
+
 def _fit_aif_biexp(
     config: DcePipelineConfig,
     timer: np.ndarray,
@@ -2597,9 +2587,26 @@ def _fit_aif_biexp(
     start_injection_min: float,
     end_injection_min: float,
     fitting_au: bool,
-    fit_t_base_end: bool = False,
-    apply_peak_weight: bool = True,
+    fit_pass: str = "production",
 ) -> Dict[str, Any]:
+    """Fit the biexponential-with-linear-upslope AIF model.
+
+    ``fit_pass`` selects between the two passes this serves, which differ along one axis, not two:
+
+    - ``"production"`` (Stage B) takes ``t_base_end`` as an input -- the baseline-end precedence
+      upstream owns it -- and de-weights the peak, whose *height* is noise-inflated.
+    - ``"timing"`` (the Stage-A ``biexp_fit`` detector) fits ``t_base_end`` as a sixth parameter
+      and weights the peak fully, because the peak's *position* is the evidence it is built on.
+
+    The two settings are not independent: de-weighting the peak while fitting ``t_base_end`` drags
+    the baseline end earlier (measured on sub-10bbbdownsample it moved the fitted end from 1.80
+    frames to 1.16, i.e. end_ss 3 -> 2, which is simply wrong for that series). One named pass
+    keeps that coupling in the signature instead of leaving it to a comment.
+    """
+    if fit_pass not in AIF_FIT_PASSES:
+        raise ValueError(f"Unsupported fit_pass '{fit_pass}'. Allowed: {sorted(AIF_FIT_PASSES)}")
+    fit_t_base_end = fit_pass == "timing"
+
     try:
         from scipy.optimize import least_squares  # type: ignore
     except Exception as exc:
@@ -2643,20 +2650,15 @@ def _fit_aif_biexp(
     dt = _timer_step(timer)
 
     # `t_base_end` is the end of the baseline: `timer[end_ss - 1]`, i.e. `start_injection_min`.
-    # In the production Stage-B fit it is an *input*, not a parameter -- the baseline-end
-    # precedence upstream owns it. Only the Stage-A timing pass fits it, and there it ranges over
-    # the whole pre-peak span rather than the injection window, which can collapse to a single
-    # point when the window spans one frame gap.
+    # The timing pass ranges over the whole pre-peak span rather than the injection window, which
+    # can collapse to a single point when the window spans one frame gap.
     t_base_end_fixed = float(timer[start_idx])
+    t_base_end_lower = t_base_end_upper = t_base_end_fixed
     if fit_t_base_end:
         t_base_end_lower = float(timer[0])
         t_base_end_upper = float(timer[max(0, max_idx - 1)])
         if t_base_end_upper <= t_base_end_lower:
             t_base_end_upper = min(float(timer[-1]), t_base_end_lower + dt)
-    else:
-        t_base_end_lower = t_base_end_fixed
-        t_base_end_upper = t_base_end_fixed
-    t_base_end_init = float(np.clip(t_base_end_fixed, t_base_end_lower, t_base_end_upper))
 
     # `t0_exp = t_base_end + delta`. The reparameterisation keeps the peak strictly after the
     # baseline end for *any* fitted `t_base_end`; MATLAB's constant floor did not. `delta` bottoms
@@ -2680,36 +2682,41 @@ def _fit_aif_biexp(
     # guards the fit against a noise-inflated peak now that weighting is uniform.
     aif_robust_raw = _stage_override(config, "aif_Robust", "Bisquare")
     aif_robust_mode = str(aif_robust_raw).strip().lower()
-    aif_loss = _scipy_loss_from_robust(aif_robust_raw)
 
-    # Every sample carries equal weight except the peak, which gets a prior de-weighting derived
-    # from how far it stands above the rest of the curve. That has to be data-based rather than
-    # residual-based: the peak has leverage 1 here, so the robust estimator (aif_Robust) cannot
-    # see it. See _aif_peak_weight and
+    # Every sample carries equal weight except the peak, which the production pass de-weights by a
+    # prior derived from how far it stands above the rest of the curve. That has to be data-based
+    # rather than residual-based: the peak has leverage 1 here, so the robust estimator
+    # (aif_Robust) cannot see it. See _aif_peak_weight, the `fit_pass` note above, and
     # docs/project-management/projects/batch-parity/aif_fitting_parity.md.
-    peak_weight_exponent = _safe_float(
-        _stage_override(config, "aif_peak_weight_exponent", AIF_PEAK_WEIGHT_EXPONENT),
-        AIF_PEAK_WEIGHT_EXPONENT,
-    )
-    # Only the production fit de-weights the peak. What is unreliable about the peak is its
-    # *height*, not its *position* -- and position is exactly what the Stage-A timing pass is
-    # estimating, with the peak as its primary evidence. De-weighting it there instead drags
-    # `t_base_end` earlier: measured on sub-10bbbdownsample it moved the fitted baseline end
-    # from 1.80 frames to 1.16, i.e. end_ss 3 -> 2, which is simply wrong for that series.
-    peak_weight = _aif_peak_weight(curve, max_idx, peak_weight_exponent) if apply_peak_weight else 1.0
+    peak_weight = 1.0
+    if fit_pass == "production":
+        peak_weight = _aif_peak_weight(
+            curve,
+            max_idx,
+            _safe_float(
+                _stage_override(config, "aif_peak_weight_exponent", AIF_PEAK_WEIGHT_EXPONENT),
+                AIF_PEAK_WEIGHT_EXPONENT,
+            ),
+        )
     weights = np.ones(curve.size, dtype=np.float64)
     weights[max_idx] = peak_weight
     sqrt_weights = np.sqrt(weights)
 
+    # The timing pass carries `t_base_end` as a sixth parameter ahead of `delta`; the production
+    # pass holds it fixed and fits five.
     if fit_t_base_end:
-        param_lower = np.concatenate([lower, np.array([t_base_end_lower, delta_lower], dtype=np.float64)])
-        param_upper = np.concatenate([upper, np.array([t_base_end_upper, delta_upper], dtype=np.float64)])
-        param_initial = np.concatenate([initial, np.array([t_base_end_init, delta_init], dtype=np.float64)])
+        timing_lower = [t_base_end_lower, delta_lower]
+        timing_upper = [t_base_end_upper, delta_upper]
+        timing_initial = [float(np.clip(t_base_end_fixed, t_base_end_lower, t_base_end_upper)), delta_init]
     else:
-        param_lower = np.concatenate([lower, np.array([delta_lower], dtype=np.float64)])
-        param_upper = np.concatenate([upper, np.array([delta_upper], dtype=np.float64)])
-        param_initial = np.concatenate([initial, np.array([delta_init], dtype=np.float64)])
-    param_initial = np.clip(param_initial, param_lower, param_upper)
+        timing_lower = [delta_lower]
+        timing_upper = [delta_upper]
+        timing_initial = [delta_init]
+    param_lower = np.concatenate([lower, np.array(timing_lower, dtype=np.float64)])
+    param_upper = np.concatenate([upper, np.array(timing_upper, dtype=np.float64)])
+    param_initial = np.clip(
+        np.concatenate([initial, np.array(timing_initial, dtype=np.float64)]), param_lower, param_upper
+    )
     fit_param_count = int(param_initial.size)
 
     def unpack_timing(params: np.ndarray) -> Tuple[float, float]:
@@ -2731,12 +2738,8 @@ def _fit_aif_biexp(
             baseline=baseline,
         )
 
-    def weighted_residual(params: np.ndarray) -> np.ndarray:
-        return (predict(params) - curve) * sqrt_weights
-
     robust_scale = float("nan")
     robust_iterations = 0
-    robust_weights = np.ones(curve.size, dtype=np.float64)
 
     fit_success = True
     params = param_initial.copy()
@@ -2757,16 +2760,19 @@ def _fit_aif_biexp(
             # even with a MAD-derived `f_scale` a Cauchy rho never rejects a sample outright the
             # way a bisquare does. Measured on sub-10bbbdynamic that gap moved `tissue_uptake`'s
             # ROI-xls error from 0.049 to 0.099.
-            params, robust_weights, robust_scale, robust_iterations, fit_success = _tukey_irls(
+            params, robust_scale, robust_iterations, fit_success = _tukey_irls(
                 residual_fn=lambda p: predict(p) - curve,
                 x0=param_initial,
                 base_weights=weights,
                 lsq_kwargs=lsq_kwargs,
             )
         else:
+            aif_loss = _scipy_loss_from_robust(aif_robust_raw)
             if aif_loss != "linear":
                 lsq_kwargs["loss"] = aif_loss
-            result = least_squares(weighted_residual, x0=param_initial, **lsq_kwargs)
+            result = least_squares(
+                lambda p: (predict(p) - curve) * sqrt_weights, x0=param_initial, **lsq_kwargs
+            )
             params = np.asarray(result.x, dtype=np.float64)
             fit_success = _lsq_result_usable(result)
     except Exception:
@@ -2799,12 +2805,9 @@ def _fit_aif_biexp(
         "max_index": max_idx,
         "fit_t_base_end": bool(fit_t_base_end),
         "peak_weight": float(peak_weight),
-        "peak_weight_exponent": float(peak_weight_exponent),
         "robust_mode": aif_robust_mode,
-        "robust_loss": aif_loss,
         "robust_scale": robust_scale,
         "robust_iterations": robust_iterations,
-        "robust_weights": robust_weights,
         "t0_exp_drifted": t0_exp_drifted,
         "delta_init": float(delta_init),
         "delta_drift": delta_drift,
@@ -2985,24 +2988,17 @@ def _align_imported_curve(
 def _mark_aif_transition_times(ax: Any, t_base_end: Optional[float], t0_exp: Optional[float]) -> None:
     """Draw the AIF transition times as vertical lines spanning the axes.
 
-    Counterpart to MATLAB's ``plot_aif_transition_lines``. Drawn full-height so they read as
-    event markers, rather than as a data series that is zero everywhere with a spike at each
-    location -- which is what this replaced, and which rescaled the y axis and looked like a
-    signal. The axis limits are captured first and restored after, so the markers never change
-    the scale the data set.
+    Counterpart to MATLAB's ``plot_aif_transition_lines``. Drawn as event markers rather than as a
+    data series that is zero everywhere with a spike at each location -- which is what this
+    replaced, and which rescaled the y axis and looked like a signal. ``axvline`` spans the axes in
+    axes coordinates, so it stays full-height and contributes nothing to the y data limits.
     """
-    low, high = ax.get_ylim()
-    if t_base_end is not None and math.isfinite(float(t_base_end)):
-        ax.plot(
-            [t_base_end, t_base_end], [low, high],
-            "--", color="#d95319", linewidth=1.5, label="End of baseline (t_base_end)",
-        )
-    if t0_exp is not None and math.isfinite(float(t0_exp)):
-        ax.plot(
-            [t0_exp, t0_exp], [low, high],
-            ":", color="#7e2f8e", linewidth=1.5, label="End of injection (t0_exp)",
-        )
-    ax.set_ylim(low, high)
+    for value, style, color, label in (
+        (t_base_end, "--", "#d95319", "End of baseline (t_base_end)"),
+        (t0_exp, ":", "#7e2f8e", "End of injection (t0_exp)"),
+    ):
+        if value is not None and math.isfinite(float(value)):
+            ax.axvline(float(value), linestyle=style, color=color, linewidth=1.5, label=label)
 
 
 def _save_stage_b_qc_figure(
@@ -3113,7 +3109,10 @@ def _run_stage_b_real(config: DcePipelineConfig, stage_a: Dict[str, Any]) -> Dic
             "fit_robust_iterations_stlv": int(fit_stlv["robust_iterations"]),
             "fit_delta_cp": float(fit_cp["delta"]),
             "fit_delta_stlv": float(fit_stlv["delta"]),
-            "fit_delta_init": float(end_injection_min - start_injection_min),
+            # The fit's own seed, i.e. after clipping to the delta bounds -- so `fit_delta_cp`
+            # minus this is exactly the drift the warning below reports. The raw
+            # `end_injection_min - start_injection_min` would not match when clipping bit.
+            "fit_delta_init": float(fit_cp["delta_init"]),
             "fit_t0_exp_drifted_cp": bool(fit_cp["t0_exp_drifted"]),
             "fit_t0_exp_drifted_stlv": bool(fit_stlv["t0_exp_drifted"]),
             "fit_success_cp": bool(fit_cp["fit_success"]),

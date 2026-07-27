@@ -278,7 +278,7 @@ def test_aif_timing_pass_fits_t_base_end() -> None:
             start_injection_min=timer[2],
             end_injection_min=timer[4],
             fitting_au=False,
-            fit_t_base_end=True,
+            fit_pass="timing",
         )
 
         assert result["fit_t_base_end"] is True

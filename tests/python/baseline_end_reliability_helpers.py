@@ -17,6 +17,13 @@ import numpy as np
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "python"))
 
+# The pipeline's own discovery globs, so the harness selects the files production would rather
+# than a copy of the naming convention. PIPELINE_DYNAMIC_PATTERN is re-exported for the CLI's
+# --dynamic-pattern help text; it has no use inside this module.
+from dce_file_discovery import (  # noqa: E402,F401
+    AIF_MASK_PATTERN as DEFAULT_AIF_MASK_PATTERN,
+    DYNAMIC_PATTERN as PIPELINE_DYNAMIC_PATTERN,
+)
 from dce_pipeline import (  # noqa: E402
     DcePipelineConfig,
     _aif_biexp_con,
@@ -30,11 +37,9 @@ from dce_pipeline import (  # noqa: E402
 
 DEFAULT_CONFIG_TEMPLATE = REPO_ROOT / "python" / "dce_default.json"
 
-_biexp_config: Optional[DcePipelineConfig] = None
 
-
-def configure_biexp_detector(config_template: Optional[Path] = None) -> DcePipelineConfig:
-    """Build the `DcePipelineConfig` the `biexp_fit` detector reads its `aif_*` settings from.
+def load_biexp_config(config_template: Optional[Path] = None) -> DcePipelineConfig:
+    """Load the `DcePipelineConfig` the `biexp_fit` detector reads its `aif_*` settings from.
 
     Unlike the other four detectors -- which are pure functions of the signal curve -- the
     biexponential fit is governed by the same `aif_lower_limits` / `aif_Robust` /
@@ -43,36 +48,38 @@ def configure_biexp_detector(config_template: Optional[Path] = None) -> DcePipel
     letting `_stage_override` fall through to its hardcoded defaults; otherwise this would
     measure a configuration nobody actually runs.
 
-    The three required paths are placeholders: nothing in the fit path touches them (with no
-    `dce_preferences_path` override, `_load_dce_preferences` never reaches the filesystem).
+    The template's three required paths are placeholders here: nothing in the fit path touches
+    them (with no `dce_preferences_path` override, `_load_dce_preferences` never reaches the
+    filesystem).
     """
-    global _biexp_config
     template = Path(config_template) if config_template is not None else DEFAULT_CONFIG_TEMPLATE
-    overrides: Dict[str, Any] = {}
-    if template.exists():
-        try:
-            payload = json.loads(template.read_text(encoding="utf-8"))
-        except Exception as exc:
-            print(f"WARNING: failed to parse config template {template}: {exc}", file=sys.stderr)
-        else:
-            if isinstance(payload, dict) and isinstance(payload.get("stage_overrides"), dict):
-                overrides = dict(payload["stage_overrides"])
-    else:
-        print(f"WARNING: config template {template} not found; using built-in aif_* defaults", file=sys.stderr)
-
-    _biexp_config = DcePipelineConfig(
-        subject_source_path=Path("."),
-        subject_tp_path=Path("."),
-        output_dir=Path("."),
-        stage_overrides=overrides,
-    )
-    return _biexp_config
+    try:
+        return DcePipelineConfig.from_dict(json.loads(template.read_text(encoding="utf-8")))
+    except Exception as exc:
+        print(
+            f"WARNING: could not load config template {template} ({exc}); using built-in aif_* defaults",
+            file=sys.stderr,
+        )
+        return DcePipelineConfig(
+            subject_source_path=Path("."), subject_tp_path=Path("."), output_dir=Path(".")
+        )
 
 
-def _biexp_fit_detector(stlv: np.ndarray) -> Dict[str, Any]:
-    if _biexp_config is None:
-        configure_biexp_detector()
-    return _biexp_fit_baseline_end(stlv, _biexp_config)
+def build_detectors(config: DcePipelineConfig) -> Dict[str, Callable[[np.ndarray], Dict[str, Any]]]:
+    """Detector registry, in `DETECTOR_NAMES` order.
+
+    `biexp_fit` needs the fit settings that the other four have no use for, so the registry is
+    built per-run rather than being a module constant. Binding it here keeps the config an
+    explicit argument: a module-level global with a lazy default would let an importer silently
+    run against different settings than the summary header reports.
+    """
+    return {
+        "piecewise_constant": _piecewise_constant_baseline_end,
+        "legacy_sobel": _legacy_sobel_baseline_end,
+        "glr": _glr_baseline_end,
+        "tv": _tv_baseline_end,
+        "biexp_fit": lambda stlv: _biexp_fit_baseline_end(stlv, config),
+    }
 
 
 def biexp_fitted_curve(details: Dict[str, Any], n_timepoints: int) -> Optional[np.ndarray]:
@@ -105,13 +112,7 @@ def biexp_fitted_curve(details: Dict[str, Any], n_timepoints: int) -> Optional[n
 
 
 # Registration order also drives figure legend / summary table order.
-DETECTORS: Dict[str, Callable[[np.ndarray], Dict[str, Any]]] = {
-    "piecewise_constant": _piecewise_constant_baseline_end,
-    "legacy_sobel": _legacy_sobel_baseline_end,
-    "glr": _glr_baseline_end,
-    "tv": _tv_baseline_end,
-    "biexp_fit": _biexp_fit_detector,
-}
+DETECTOR_NAMES = ("piecewise_constant", "legacy_sobel", "glr", "tv", "biexp_fit")
 
 _NON_DYNAMIC_TOKENS = ("mask", "t1map", "seg", "roi")
 _SUBJECT_RE = re.compile(r"^sub-[A-Za-z0-9]+$")
@@ -186,6 +187,26 @@ def _swap_json_to_mask(json_path: Path) -> Optional[Path]:
     return None
 
 
+def _bids_entities(
+    path: Path, subject_filter: Optional[set]
+) -> Optional[Tuple[str, Optional[str]]]:
+    """Pull `sub-*`/`ses-*` out of a path, or None when it should be skipped.
+
+    Shared by both discovery routes so the two cannot drift on what counts as a subject.
+    """
+    subject = next((part for part in path.parts if _SUBJECT_RE.match(part)), None)
+    if subject is None:
+        print(f"WARNING: could not determine BIDS subject from path {path}", file=sys.stderr)
+        return None
+    if subject_filter is not None and subject not in subject_filter:
+        return None
+    return subject, next((part for part in path.parts if _SESSION_RE.match(part)), None)
+
+
+def _subject_filter(subjects: Optional[Iterable[str]]) -> Optional[set]:
+    return {str(s).strip() for s in subjects} if subjects else None
+
+
 def discover_aif_sidecars(
     derivatives_root: Path, *, subjects: Optional[Iterable[str]] = None
 ) -> List[AifSidecarRecord]:
@@ -197,7 +218,7 @@ def discover_aif_sidecars(
     `derivatives_root` at a single pipeline folder to avoid that).
     """
     root = Path(derivatives_root).expanduser().resolve()
-    subject_filter = {str(s).strip() for s in subjects} if subjects else None
+    subject_filter = _subject_filter(subjects)
     records: List[AifSidecarRecord] = []
     for json_path in sorted(root.rglob("*.json")):
         try:
@@ -213,13 +234,10 @@ def discover_aif_sidecars(
             print(f"WARNING: no paired mask file (.nii/.nii.gz) for sidecar {json_path}", file=sys.stderr)
             continue
 
-        subject = next((part for part in json_path.parts if _SUBJECT_RE.match(part)), None)
-        if subject is None:
-            print(f"WARNING: could not determine BIDS subject from path {json_path}", file=sys.stderr)
+        entity = _bids_entities(json_path, subject_filter)
+        if entity is None:
             continue
-        if subject_filter is not None and subject not in subject_filter:
-            continue
-        session = next((part for part in json_path.parts if _SESSION_RE.match(part)), None)
+        subject, session = entity
 
         try:
             # AIFArtist writes SteadyStateEndTimeIndex as a 0-based frame index; convert to
@@ -242,9 +260,6 @@ def discover_aif_sidecars(
     return records
 
 
-DEFAULT_AIF_MASK_PATTERN = "*desc-AIF_T1map.nii*"
-
-
 def discover_aif_masks(
     derivatives_root: Path,
     *,
@@ -263,18 +278,15 @@ def discover_aif_masks(
     (`dce_file_discovery.py`), so this selects the same voxels Stage A would.
     """
     root = Path(derivatives_root).expanduser().resolve()
-    subject_filter = {str(s).strip() for s in subjects} if subjects else None
+    subject_filter = _subject_filter(subjects)
     records: List[AifSidecarRecord] = []
     for mask_path in sorted(root.rglob(pattern)):
         if not mask_path.is_file():
             continue
-        subject = next((part for part in mask_path.parts if _SUBJECT_RE.match(part)), None)
-        if subject is None:
-            print(f"WARNING: could not determine BIDS subject from path {mask_path}", file=sys.stderr)
+        entity = _bids_entities(mask_path, subject_filter)
+        if entity is None:
             continue
-        if subject_filter is not None and subject not in subject_filter:
-            continue
-        session = next((part for part in mask_path.parts if _SESSION_RE.match(part)), None)
+        subject, session = entity
 
         records.append(
             AifSidecarRecord(
@@ -342,11 +354,15 @@ def find_dynamic_file(
 def process_session(
     record: AifSidecarRecord,
     raw_root: Path,
+    detectors: Dict[str, Callable[[np.ndarray], Dict[str, Any]]],
     *,
     use_all_voxels: bool = False,
     dynamic_pattern: Optional[str] = None,
 ) -> SessionResult:
     """Load one session's data, extract the signal curve, and run all detectors.
+
+    `detectors` is the registry from `build_detectors`, passed in rather than read from module
+    state so a caller cannot silently run against different settings than it reports.
 
     By default the curve is the mean over the AIF mask. With `use_all_voxels=True`, the
     mask is ignored entirely and the curve is the mean over every voxel in the dynamic
@@ -413,7 +429,7 @@ def process_session(
 
     predictions: Dict[str, Optional[int]] = {}
     detector_details: Dict[str, Dict[str, Any]] = {}
-    for name, detector in DETECTORS.items():
+    for name, detector in detectors.items():
         try:
             details = detector(stlv)
             detector_details[name] = details
@@ -462,7 +478,7 @@ def compute_detector_agreement(
     """
     results = list(results)
     stats: Dict[str, AgreementStats] = {}
-    for name in DETECTORS:
+    for name in DETECTOR_NAMES:
         offsets: List[float] = []
         n_identical = 0
         for result in results:
@@ -504,7 +520,7 @@ def compute_algorithm_stats(
     """Per-algorithm exact-match accuracy % and MSE (frame-index units) over valid sessions."""
     results = list(results)
     stats: Dict[str, AlgorithmStats] = {}
-    for name in DETECTORS:
+    for name in DETECTOR_NAMES:
         errors: List[float] = []
         n_exact = 0
         n_within_tol = 0

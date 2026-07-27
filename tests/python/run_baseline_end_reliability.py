@@ -36,15 +36,17 @@ sys.path.insert(0, str(REPO_ROOT / "tests" / "python"))
 from baseline_end_reliability_helpers import (  # noqa: E402
     DEFAULT_AIF_MASK_PATTERN,
     DEFAULT_CONFIG_TEMPLATE,
-    DETECTORS,
+    DETECTOR_NAMES,
+    PIPELINE_DYNAMIC_PATTERN,
     AgreementStats,
     AlgorithmStats,
     SessionResult,
     biexp_fitted_curve,
+    build_detectors,
     compute_algorithm_stats,
     compute_detector_agreement,
-    configure_biexp_detector,
     discover_aif_masks,
+    load_biexp_config,
     discover_aif_sidecars,
     is_ground_truth_valid,
     process_session,
@@ -107,8 +109,8 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         "--dynamic-pattern",
         default=None,
         help="Glob pinning the dynamic series within each session's dce/ folder, e.g. "
-        "'*desc-bfcz_DCE.nii*'. Required when --raw-root points at a derivatives tree, where "
-        "the default one-dynamic-per-session heuristic has many candidates and picks "
+        f"'{PIPELINE_DYNAMIC_PATTERN}'. Required when --raw-root points at a derivatives tree, "
+        "where the default one-dynamic-per-session heuristic has many candidates and picks "
         "alphabetically. Use the pipeline's own pattern so the detectors see the curve "
         "production feeds them.",
     )
@@ -194,7 +196,7 @@ def _plot_session(result: SessionResult, output_dir: Path, *, mode_suffix: str, 
             result.ground_truth_1b, color="black", linestyle="-", linewidth=2.0, label=f"GT: {result.ground_truth_1b}"
         )
 
-    for name in DETECTORS:
+    for name in DETECTOR_NAMES:
         value = result.predictions.get(name)
         if value is None:
             continue
@@ -236,7 +238,7 @@ def _plot_session(result: SessionResult, output_dir: Path, *, mode_suffix: str, 
 
 def _write_summary_txt(
     results: List[SessionResult],
-    stats: Dict[str, AlgorithmStats],
+    stats: Optional[Dict[str, AlgorithmStats]],
     args: argparse.Namespace,
     output_dir: Path,
     *,
@@ -244,6 +246,7 @@ def _write_summary_txt(
     signal_label: str,
     agreement: Optional[Dict[str, AgreementStats]] = None,
 ) -> Path:
+    """Write the summary. Exactly one of `stats` / `agreement` is populated."""
     n_total = len(results)
     n_ok = sum(1 for r in results if r.status == "ok")
     skipped = [r for r in results if r.status == "skipped"]
@@ -276,7 +279,7 @@ def _write_summary_txt(
         header = f"{'Algorithm':<20}{'N_compared':>12}{'Identical%':>12}{'MeanOffset':>12}{'MaxAbsOffset':>14}"
         lines.append(header)
         lines.append("-" * len(header))
-        for name in DETECTORS:
+        for name in DETECTOR_NAMES:
             a = agreement[name]
             lines.append(
                 f"{name:<20}{a.n_compared:>12}{a.identical_pct:>12.1f}"
@@ -288,7 +291,7 @@ def _write_summary_txt(
             header += f"{'Within+/-' + str(args.tolerance_frames) + '%':>14}"
         lines.append(header)
         lines.append("-" * len(header))
-        for name in DETECTORS:
+        for name in DETECTOR_NAMES:
             s = stats[name]
             row = f"{name:<20}{s.n_valid:>10}{s.accuracy_pct:>12.1f}{s.mse:>16.3f}"
             if args.tolerance_frames is not None:
@@ -300,12 +303,12 @@ def _write_summary_txt(
         lines.append("")
         lines.append("Per-session predictions (end_ss, 1-based):")
         gt_col = "" if args.no_ground_truth else f"{'GT':>6}"
-        lines.append(f"{'Session':<28}{gt_col}" + "".join(f"{name:>20}" for name in DETECTORS))
+        lines.append(f"{'Session':<28}{gt_col}" + "".join(f"{name:>20}" for name in DETECTOR_NAMES))
         for r in results:
             if r.status != "ok":
                 continue
             gt_cell = "" if args.no_ground_truth else f"{r.ground_truth_1b if r.ground_truth_1b is not None else '-':>6}"
-            cells = "".join(f"{str(r.predictions.get(name, '-')):>20}" for name in DETECTORS)
+            cells = "".join(f"{str(r.predictions.get(name, '-')):>20}" for name in DETECTOR_NAMES)
             lines.append(f"{r.id:<28}{gt_cell}{cells}")
 
     # Whether biexp_fit actually fitted matters for reading its row above: every fallback is a
@@ -364,7 +367,7 @@ def _write_per_session_csv(results: List[SessionResult], output_dir: Path, *, mo
         "ground_truth_1b",
         "n_timepoints",
         "gt_valid",
-        *DETECTORS.keys(),
+        *DETECTOR_NAMES,
         *(column for column, _ in _BIEXP_DETAIL_COLUMNS),
     ]
     with csv_path.open("w", newline="", encoding="utf-8") as fh:
@@ -383,7 +386,7 @@ def _write_per_session_csv(results: List[SessionResult], output_dir: Path, *, mo
                 "n_timepoints": r.n_timepoints if r.n_timepoints is not None else "",
                 "gt_valid": is_ground_truth_valid(r),
             }
-            for name in DETECTORS:
+            for name in DETECTOR_NAMES:
                 row[name] = r.predictions.get(name, "")
             biexp_details = r.detector_details.get("biexp_fit", {})
             for column, detail_key in _BIEXP_DETAIL_COLUMNS:
@@ -397,7 +400,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     output_dir = Path(args.output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    biexp_config = configure_biexp_detector(args.config_template)
+    biexp_config = load_biexp_config(args.config_template)
+    detectors = build_detectors(biexp_config)
     print(
         f"biexp_fit settings from {Path(args.config_template).expanduser().resolve()}: "
         f"aif_Robust={biexp_config.stage_overrides.get('aif_Robust', '(default)')}, "
@@ -433,6 +437,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         result = process_session(
             record,
             Path(args.raw_root),
+            detectors,
             use_all_voxels=args.use_all_voxels,
             dynamic_pattern=args.dynamic_pattern,
         )
@@ -445,8 +450,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not args.no_plots:
         print(f"Wrote {plotted} per-session figures to {output_dir}")
 
-    stats = compute_algorithm_stats(results, tolerance_frames=args.tolerance_frames)
-    agreement = compute_detector_agreement(results, reference=AGREEMENT_REFERENCE) if args.no_ground_truth else None
+    # Exactly one of the two tables applies: without ratings there is no accuracy to compute.
+    if args.no_ground_truth:
+        stats, agreement = None, compute_detector_agreement(results, reference=AGREEMENT_REFERENCE)
+    else:
+        stats, agreement = compute_algorithm_stats(results, tolerance_frames=args.tolerance_frames), None
     summary_path = _write_summary_txt(
         results,
         stats,
