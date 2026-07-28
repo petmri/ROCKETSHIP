@@ -1,6 +1,6 @@
 # Batch Parity Status (MATLAB vs Python DCE)
 
-_Last reviewed: 2026-07-24._
+_Last reviewed: 2026-07-27._
 
 ## Scope
 Parity between the MATLAB reference pipeline and the Python port for DCE parameter maps
@@ -101,10 +101,19 @@ own Stage-D drops every model to passing (`ex_tofts` 1.2e-5, `patlak` 1.4e-5, `t
 measured `2.3421`, Python `2.1363`, MATLAB `0.9819` — because MATLAB fits `t0_exp` as a free
 parameter (landing at 1.064 min) while Python's default `aif_biexp_timing_method = "legacy_sobel"`
 holds it fixed at 0.792. Both sides zero-weight every frame through the AIF peak, so that value is
-unconstrained by data on either side. **Not yet decided: what both algorithms should be** — see
-the open questions in `aif_fitting_parity.md`. Note this supersedes the "Stage-B `Cp_use` matches
+unconstrained by data on either side. Note this supersedes the "Stage-B `Cp_use` matches
 MATLAB to floating-point noise" claim under "Alignment verified" below, which predates
 auto-detected injection timing.
+
+**RESOLVED 2026-07-27 (S1-S11 of `aif_fitting_parity.md`).** Both languages now run the same
+5-parameter fit with `t_base_end` supplied by Stage A and `delta` reparameterised, uniform
+weighting, `aif_Robust = off`, and `find_end_ss_tv` / `steady_state_auto_method = "tv"` as the
+baseline-end detector on both sides. Baseline regenerated. All four ROI-xls gates pass:
+`tofts` 0.001440, `ex_tofts` 0.000013, `patlak` 0.000013, `tissue_uptake` 0.002235 (ex-`Fp`,
+see S8) — a ~100x improvement on `ex_tofts`/`patlak` over where this issue started. The detector
+choice was settled on 280 human-rated sessions rather than on the fixture: `tv` 95.0% against
+`biexp_fit`'s 74.6%, and S11's R3 records why goodness-of-fit cannot be used to choose between
+them.
 
 **3. MATLAB CI maps were zero-width — root-caused and FIXED 2026-07-23 (working tree).**
 The `_ci_metrics()` diagnostics (`ci_norm_absdiff_median/p95`, `prop_py_outside_matlab_ci`;

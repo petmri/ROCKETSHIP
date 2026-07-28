@@ -84,19 +84,29 @@ For options in `stage_overrides`:
   - `biexp_fit`: 6-parameter biexponential fit to the mean AIF *signal* curve, seeded by
     `tv`. Unlike the shape heuristics this also reports where the upslope ends, which
     becomes `end_injection` and the Stage-B fit's start point for the upslope duration.
-    Falls back to its `tv` seed if the fit cannot run or does not converge.
+    Falls back to its `tv` seed if the fit cannot run or does not converge. **Not the
+    default**: on 280 human-rated sessions it is right 74.6% of the time against `tv`'s
+    95.0%, always erring one frame late (S11 in
+    `docs/project-management/projects/batch-parity/aif_fitting_parity.md`).
   - Aliases accepted: `legacy`, `dce_auto_aif`, `sobel`, `piecewise`, `find_end_ss`, `edge`, `find_end_ss_edge`, `tv`, `find_end_ss_tv`, `biexp`, `find_end_ss_biexp`
   - Precedence overall: `steady_state_end` > AIF sidecar `SteadyStateEndTimeIndex` > `steady_state_auto_method`
-  - If none of the above is set, Python defaults to `biexp_fit`
+  - If none of the above is set, Python defaults to `tv` (MATLAB `find_end_ss_tv`)
 - `start_time`, `end_time`, `start_time_min`, `end_time_min`
 - `end_injection_min` (MATLAB script alias: `end_injection`, min). There is no
   `start_injection_min`: the injection start is *defined* as the resolved baseline end, so
   move it with `steady_state_end` / the AIF sidecar / `steady_state_auto_method`. Passing
   `start_injection_min` or `start_injection` is rejected with an error pointing at those.
 - `injection_duration`
-- `aif_Robust`: robust estimator for the Stage-B AIF fit. `Bisquare` (default) runs a Tukey
-  biweight IRLS with a per-iteration MAD scale and leverage correction, matched between Python
-  and MATLAB; `LAR` maps to scipy `soft_l1`; `off` disables it.
+- `aif_Robust`: robust estimator for the Stage-B AIF fit. `off` (default) is plain least
+  squares; `Bisquare` runs a Tukey biweight IRLS with a per-iteration MAD scale and leverage
+  correction, matched between Python and MATLAB; `LAR` maps to scipy `soft_l1`. `Bisquare` was
+  the default until S11 measured it making the production fit worse across 265 sessions
+  (adjusted R² mean 0.882 against 0.944 off, and a worst case of -1.46 -- a fit worse than a
+  horizontal line).
+- `aif_Robust_timing`: same values, applied only to the Stage-A `biexp_fit` timing pass.
+  Defaults to `aif_Robust`. Exists because the peak's *height* is unreliable while its
+  *position* is exactly what the timing pass estimates, so rejecting it there costs the pass
+  its primary evidence.
 - `aif_peak_weight_exponent` (default 2): prior de-weighting of the AIF peak sample. The weight
   is the peak's excess over the median relative to the next largest sample's excess, raised to
   this exponent; 0 disables it (weight 1). The peak has leverage 1 in the biexponential model,

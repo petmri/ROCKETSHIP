@@ -110,8 +110,8 @@ def _make_config(
         "tr_ms": 8.29,
         "fa_deg": 15.0,
         "time_resolution_sec": 15.84,
-        # Must match A_make_R1maps_func.m, which now calls find_end_ss_biexp.
-        "steady_state_auto_method": "biexp_fit",
+        # Must match A_make_R1maps_func.m, which calls find_end_ss_tv.
+        "steady_state_auto_method": "tv",
         "auto_find_injection": 1,
         "relaxivity": 3.6,
         "hematocrit": 0.42,

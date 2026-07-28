@@ -4,14 +4,19 @@ ground truth (`SteadyStateEndTimeIndex` in AIF-mask JSON sidecars, e.g. from AIF
 
 On-demand diagnostic tool, not part of the automated test suite: walks a BIDS derivatives
 tree for AIF-mask sidecars with ground truth, finds the matching raw dynamic DCE series in
-a separate BIDS raw tree, runs all 5 auto-detectors (piecewise_constant, legacy_sobel, glr,
-tv, biexp_fit) on each session's AIF-mask curve, and writes a per-algorithm accuracy/MSE
-summary plus one figure per session.
+a separate BIDS raw tree, runs the auto-detectors on each session's AIF-mask curve, and
+writes a per-algorithm accuracy/MSE summary plus one figure per session.
 
-`biexp_fit` is the production default. Unlike the other four it is a model fit rather than a
-signal-shape heuristic, so it also yields a fractional injection end (`t0_exp`) and a fitted
-curve; both are overlaid on the per-session figures and its extra diagnostics land in the
-per-session CSV."""
+By default only `biexp_fit` (the production detector) and `tv` (the seed it seeds from and
+falls back to) run; the three superseded signal-shape heuristics -- piecewise_constant,
+legacy_sobel, glr -- are behind `--heuristic-detectors`.
+
+Unlike the heuristics, `biexp_fit` is a model fit, so it also yields a fractional injection
+end (`t0_exp`), a fitted curve, and an adjusted R². All three are reported: the curve is
+overlaid on the per-session figures, the R² distribution goes in the summary, and per-session
+diagnostics land in the CSV. A second, production-pass fit of the same curve is run alongside
+it (`--no-production-probe` to skip), which is what makes Stage-B-only settings observable
+here -- the detectors themselves exercise only the timing pass."""
 
 from __future__ import annotations
 
@@ -36,15 +41,19 @@ sys.path.insert(0, str(REPO_ROOT / "tests" / "python"))
 from baseline_end_reliability_helpers import (  # noqa: E402
     DEFAULT_AIF_MASK_PATTERN,
     DEFAULT_CONFIG_TEMPLATE,
+    DEFAULT_DETECTOR_NAMES,
     DETECTOR_NAMES,
+    HEURISTIC_DETECTOR_NAMES,
     PIPELINE_DYNAMIC_PATTERN,
     AgreementStats,
     AlgorithmStats,
+    RsquareStats,
     SessionResult,
     biexp_fitted_curve,
     build_detectors,
     compute_algorithm_stats,
     compute_detector_agreement,
+    compute_rsquare_stats,
     discover_aif_masks,
     load_biexp_config,
     discover_aif_sidecars,
@@ -64,7 +73,8 @@ _ALGO_COLORS = {
 }
 
 # Extra per-session columns the `biexp_fit` detector produces that the others have no analogue
-# for: (CSV column, key in the detector's details dict).
+# for: (CSV column, key in the detector's details dict). The `prod_*` block comes from the
+# optional production-pass probe and is empty when it is disabled.
 _BIEXP_DETAIL_COLUMNS = (
     ("biexp_mode", "mode"),
     ("biexp_end_injection_1b", "end_injection_1b"),
@@ -73,6 +83,16 @@ _BIEXP_DETAIL_COLUMNS = (
     ("biexp_delta_frames", "fit_delta_frames"),
     ("biexp_rsquare_adj", "fit_rsquare_adj"),
     ("biexp_seed_end_ss_1b", "seed_end_ss_1b"),
+    ("prod_mode", "production_mode"),
+    ("prod_seed", "production_seed"),
+    ("prod_seed_end_ss_1b", "production_seed_end_ss_1b"),
+    ("prod_seed_end_injection_1b", "production_seed_end_injection_1b"),
+    ("prod_rsquare_adj", "production_rsquare_adj"),
+    ("prod_t0_exp_frames", "production_t0_exp_frames"),
+    ("prod_delta_frames", "production_delta_frames"),
+    ("prod_delta_drift", "production_delta_drift"),
+    ("prod_peak_weight", "production_peak_weight"),
+    ("prod_robust_mode", "production_robust_mode"),
 )
 
 
@@ -136,6 +156,33 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         f"detector (default: {DEFAULT_CONFIG_TEMPLATE}). The other detectors ignore it.",
     )
     parser.add_argument(
+        "--heuristic-detectors",
+        action="store_true",
+        help="Also run the three superseded signal-shape heuristics "
+        f"({', '.join(HEURISTIC_DETECTOR_NAMES)}). Off by default: only "
+        f"{' and '.join(DEFAULT_DETECTOR_NAMES)} run, which keeps the figures readable and the "
+        "run short.",
+    )
+    parser.add_argument(
+        "--no-production-probe",
+        action="store_true",
+        help="Skip the Stage-B (production-pass) re-fit of each session's curve. The probe is what "
+        "makes production-pass settings (aif_Robust, aif_peak_weight_exponent) observable here -- "
+        "the detectors themselves only exercise the timing pass, so without it those settings "
+        "produce byte-identical output. It fits the normalised signal curve, not Cp, so its "
+        "R² is a proxy for a real Stage-B fit rather than a substitute.",
+    )
+    parser.add_argument(
+        "--production-probe-seed",
+        default="biexp_fit",
+        choices=list(DETECTOR_NAMES),
+        help="Detector whose end_ss the production-pass probe is conditioned on (default: "
+        "biexp_fit). Set to 'tv' to measure the fits a tv-only pipeline would produce. NOTE: "
+        "adjusted R² cannot rank two seeds against each other -- a later (wrong) baseline end "
+        "fits better by construction, so a lower R² here is not evidence the seed is worse. Use "
+        "it to screen for broken fits, not to choose a detector.",
+    )
+    parser.add_argument(
         "--tolerance-frames",
         type=int,
         default=None,
@@ -162,7 +209,14 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _plot_session(result: SessionResult, output_dir: Path, *, mode_suffix: str, signal_label: str) -> Optional[Path]:
+def _plot_session(
+    result: SessionResult,
+    output_dir: Path,
+    *,
+    mode_suffix: str,
+    signal_label: str,
+    detector_names: List[str],
+) -> Optional[Path]:
     if result.status != "ok" or result.mean_curve is None:
         return None
 
@@ -190,13 +244,29 @@ def _plot_session(result: SessionResult, output_dir: Path, *, mode_suffix: str, 
             label=f"biexp_fit curve{rsq_text}",
         )
 
+    # The production pass fits the same curve with t_base_end pinned and the peak de-weighted, so
+    # the gap between the two curves is what the production-only settings are doing.
+    production = biexp_fitted_curve(biexp_details, n, params_key="production_params")
+    if production is not None:
+        prod_rsq = biexp_details.get("production_rsquare_adj")
+        prod_text = f"  (adj R²={float(prod_rsq):.3f})" if isinstance(prod_rsq, (int, float)) else ""
+        ax.plot(
+            frames,
+            production,
+            color="#8c564b",
+            linewidth=1.2,
+            alpha=0.85,
+            linestyle=(0, (5, 2)),
+            label=f"production curve{prod_text}",
+        )
+
     gt_valid = is_ground_truth_valid(result)
     if gt_valid:
         ax.axvline(
             result.ground_truth_1b, color="black", linestyle="-", linewidth=2.0, label=f"GT: {result.ground_truth_1b}"
         )
 
-    for name in DETECTOR_NAMES:
+    for name in detector_names:
         value = result.predictions.get(name)
         if value is None:
             continue
@@ -244,6 +314,8 @@ def _write_summary_txt(
     *,
     mode_suffix: str,
     signal_label: str,
+    detector_names: List[str],
+    rsquare: List[RsquareStats],
     agreement: Optional[Dict[str, AgreementStats]] = None,
 ) -> Path:
     """Write the summary. Exactly one of `stats` / `agreement` is populated."""
@@ -260,6 +332,12 @@ def _write_summary_txt(
     lines.append(f"Raw root: {Path(args.raw_root).expanduser().resolve()}")
     lines.append(f"Subject filter: {', '.join(args.subjects) if args.subjects else '(none)'}")
     lines.append(f"biexp_fit config template: {Path(args.config_template).expanduser().resolve()}")
+    lines.append(f"Detectors run: {', '.join(detector_names)}")
+    lines.append(
+        "Production-pass probe: off"
+        if args.no_production_probe
+        else f"Production-pass probe: on, seeded from '{args.production_probe_seed}'"
+    )
     lines.append("")
     if args.no_ground_truth:
         lines.append(f"Discovered AIF masks ({args.aif_mask_pattern}, unrated): {n_total}")
@@ -279,7 +357,7 @@ def _write_summary_txt(
         header = f"{'Algorithm':<20}{'N_compared':>12}{'Identical%':>12}{'MeanOffset':>12}{'MaxAbsOffset':>14}"
         lines.append(header)
         lines.append("-" * len(header))
-        for name in DETECTOR_NAMES:
+        for name in detector_names:
             a = agreement[name]
             lines.append(
                 f"{name:<20}{a.n_compared:>12}{a.identical_pct:>12.1f}"
@@ -291,7 +369,7 @@ def _write_summary_txt(
             header += f"{'Within+/-' + str(args.tolerance_frames) + '%':>14}"
         lines.append(header)
         lines.append("-" * len(header))
-        for name in DETECTOR_NAMES:
+        for name in detector_names:
             s = stats[name]
             row = f"{name:<20}{s.n_valid:>10}{s.accuracy_pct:>12.1f}{s.mse:>16.3f}"
             if args.tolerance_frames is not None:
@@ -303,12 +381,12 @@ def _write_summary_txt(
         lines.append("")
         lines.append("Per-session predictions (end_ss, 1-based):")
         gt_col = "" if args.no_ground_truth else f"{'GT':>6}"
-        lines.append(f"{'Session':<28}{gt_col}" + "".join(f"{name:>20}" for name in DETECTOR_NAMES))
+        lines.append(f"{'Session':<28}{gt_col}" + "".join(f"{name:>20}" for name in detector_names))
         for r in results:
             if r.status != "ok":
                 continue
             gt_cell = "" if args.no_ground_truth else f"{r.ground_truth_1b if r.ground_truth_1b is not None else '-':>6}"
-            cells = "".join(f"{str(r.predictions.get(name, '-')):>20}" for name in DETECTOR_NAMES)
+            cells = "".join(f"{str(r.predictions.get(name, '-')):>20}" for name in detector_names)
             lines.append(f"{r.id:<28}{gt_cell}{cells}")
 
     # Whether biexp_fit actually fitted matters for reading its row above: every fallback is a
@@ -321,6 +399,29 @@ def _write_summary_txt(
         lines.append("biexp_fit outcome breakdown (ok sessions):")
         for mode, count in sorted(biexp_modes.items(), key=lambda kv: -kv[1]):
             lines.append(f"  - {count}x: {mode}")
+
+    populated = [r for r in rsquare if r.n > 0]
+    if populated:
+        lines.append("")
+        lines.append("Fit quality -- adjusted R² of the biexponential fit:")
+        rsq_header = (
+            f"{'Pass':<14}{'N':>6}{'Mean':>9}{'Median':>9}{'P10':>9}{'Min':>9}{'Max':>9}"
+            f"{'<' + format(populated[0].threshold, '.2f'):>8}"
+        )
+        lines.append(rsq_header)
+        lines.append("-" * len(rsq_header))
+        for r in populated:
+            lines.append(
+                f"{r.label:<14}{r.n:>6}{r.mean:>9.4f}{r.median:>9.4f}"
+                f"{r.p10:>9.4f}{r.minimum:>9.4f}{r.maximum:>9.4f}{r.n_below_threshold:>8}"
+            )
+        for r in populated:
+            if not r.worst:
+                continue
+            lines.append("")
+            lines.append(f"Lowest {r.label} adjusted R² ({len(r.worst)} sessions):")
+            for session_id, value in r.worst:
+                lines.append(f"  {value:>8.4f}  {session_id}")
 
     lines.append("")
     lines.append("Notes:")
@@ -348,13 +449,32 @@ def _write_summary_txt(
         "converge, so any mode other than 'fit' above means that session's biexp_fit prediction "
         "is just tv's."
     )
+    if populated:
+        lines.append(
+            "- Adjusted R² is UNWEIGHTED over all frames, so a robust estimator scores lower by "
+            "construction (it declines to chase points that a non-robust fit would). A higher R² "
+            "with aif_Robust off is therefore corroborating, not proof."
+        )
+        lines.append(
+            "- The 'production' pass re-fits the same normalised SIGNAL curve with t_base_end "
+            "pinned to the detected end_ss and the peak prior applied. Real Stage B fits Cp, "
+            "which does not exist until R1 maps are built, so this is a proxy: the timing is "
+            "comparable, the amplitudes and R² are not."
+        )
+    if set(detector_names) != set(DETECTOR_NAMES):
+        lines.append(
+            "- Detectors not listed above were not run this pass (see --heuristic-detectors): "
+            f"{', '.join(n for n in DETECTOR_NAMES if n not in detector_names)}."
+        )
 
     summary_path = output_dir / f"baseline_end_summary{mode_suffix}.txt"
     summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return summary_path
 
 
-def _write_per_session_csv(results: List[SessionResult], output_dir: Path, *, mode_suffix: str) -> Path:
+def _write_per_session_csv(
+    results: List[SessionResult], output_dir: Path, *, mode_suffix: str, detector_names: List[str]
+) -> Path:
     csv_path = output_dir / f"per_session_details{mode_suffix}.csv"
     fieldnames = [
         "subject",
@@ -367,7 +487,7 @@ def _write_per_session_csv(results: List[SessionResult], output_dir: Path, *, mo
         "ground_truth_1b",
         "n_timepoints",
         "gt_valid",
-        *DETECTOR_NAMES,
+        *detector_names,
         *(column for column, _ in _BIEXP_DETAIL_COLUMNS),
     ]
     with csv_path.open("w", newline="", encoding="utf-8") as fh:
@@ -386,7 +506,7 @@ def _write_per_session_csv(results: List[SessionResult], output_dir: Path, *, mo
                 "n_timepoints": r.n_timepoints if r.n_timepoints is not None else "",
                 "gt_valid": is_ground_truth_valid(r),
             }
-            for name in DETECTOR_NAMES:
+            for name in detector_names:
                 row[name] = r.predictions.get(name, "")
             biexp_details = r.detector_details.get("biexp_fit", {})
             for column, detail_key in _BIEXP_DETAIL_COLUMNS:
@@ -401,12 +521,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     biexp_config = load_biexp_config(args.config_template)
-    detectors = build_detectors(biexp_config)
+    selected_names = DETECTOR_NAMES if args.heuristic_detectors else DEFAULT_DETECTOR_NAMES
+    detectors = build_detectors(biexp_config, selected_names)
+    detector_names = list(detectors)
+    overrides = biexp_config.stage_overrides
     print(
         f"biexp_fit settings from {Path(args.config_template).expanduser().resolve()}: "
-        f"aif_Robust={biexp_config.stage_overrides.get('aif_Robust', '(default)')}, "
-        f"aif_peak_weight_exponent={biexp_config.stage_overrides.get('aif_peak_weight_exponent', '(default)')}"
+        f"aif_Robust={overrides.get('aif_Robust', '(default)')}, "
+        f"aif_Robust_timing={overrides.get('aif_Robust_timing', '(inherits aif_Robust)')}, "
+        f"aif_peak_weight_exponent={overrides.get('aif_peak_weight_exponent', '(default)')}"
     )
+    print(f"Detectors: {', '.join(detector_names)}")
 
     if args.no_ground_truth:
         what = f"AIF masks matching {args.aif_mask_pattern}"
@@ -440,9 +565,17 @@ def main(argv: Optional[List[str]] = None) -> int:
             detectors,
             use_all_voxels=args.use_all_voxels,
             dynamic_pattern=args.dynamic_pattern,
+            production_probe_config=None if args.no_production_probe else biexp_config,
+            production_probe_seed=args.production_probe_seed,
         )
         results.append(result)
-        if not args.no_plots and _plot_session(result, output_dir, mode_suffix=mode_suffix, signal_label=signal_label) is not None:
+        if not args.no_plots and _plot_session(
+            result,
+            output_dir,
+            mode_suffix=mode_suffix,
+            signal_label=signal_label,
+            detector_names=detector_names,
+        ) is not None:
             plotted += 1
         if i % 10 == 0 or i == n_records:
             print(f"Processed {i}/{n_records} sessions...")
@@ -452,9 +585,20 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # Exactly one of the two tables applies: without ratings there is no accuracy to compute.
     if args.no_ground_truth:
-        stats, agreement = None, compute_detector_agreement(results, reference=AGREEMENT_REFERENCE)
+        stats = None
+        agreement = compute_detector_agreement(results, names=detector_names, reference=AGREEMENT_REFERENCE)
     else:
-        stats, agreement = compute_algorithm_stats(results, tolerance_frames=args.tolerance_frames), None
+        stats = compute_algorithm_stats(
+            results, names=detector_names, tolerance_frames=args.tolerance_frames
+        )
+        agreement = None
+
+    rsquare = [compute_rsquare_stats(results, detail_key="fit_rsquare_adj", label="timing")]
+    if not args.no_production_probe:
+        rsquare.append(
+            compute_rsquare_stats(results, detail_key="production_rsquare_adj", label="production")
+        )
+
     summary_path = _write_summary_txt(
         results,
         stats,
@@ -462,12 +606,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         output_dir,
         mode_suffix=mode_suffix,
         signal_label=signal_label,
+        detector_names=detector_names,
+        rsquare=rsquare,
         agreement=agreement,
     )
     print(f"Wrote summary: {summary_path}")
 
     if not args.no_per_session_csv:
-        csv_path = _write_per_session_csv(results, output_dir, mode_suffix=mode_suffix)
+        csv_path = _write_per_session_csv(
+            results, output_dir, mode_suffix=mode_suffix, detector_names=detector_names
+        )
         print(f"Wrote per-session details: {csv_path}")
 
     return 0

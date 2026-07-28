@@ -35,7 +35,7 @@ aif_TolX = 10^(-23)
 aif_MaxIter = 1000
 aif_MaxFunEvals = 1000
 %robust options no quotes: "off" "LAR" "Bisquare"
-aif_Robust = Bisquare
+aif_Robust = off
 aif_peak_weight_exponent = 2
 
 % Voxel fitting options

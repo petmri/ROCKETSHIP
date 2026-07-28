@@ -626,6 +626,233 @@ of evidence, and wants more rated data first.
 `ses-02` also tripped S3's drift diagnostic (`+0.5186 min`, 0.3999 → 0.9186), which is the
 diagnostic firing exactly as designed: Stage A's timing was wrong, and Stage B disagreed with it.
 
+## S11 — Phase 6 at scale: 280 rated sessions (2026-07-27)
+
+S10 drew conclusions from three series. This section replaces them with a properly powered
+measurement: every AIFArtist-rated session reachable from
+`derivatives/AIFArtist` — 265 at the start of the day, 280 by the end (15 were rated while the
+work was in progress, which turned into a free held-out sample; see the last subsection).
+
+Two production defaults changed as a result: the steady-state detector went back to `tv`, and
+`aif_Robust` now defaults to `off`.
+
+### The starting point
+
+`tests/python/run_baseline_end_reliability.py`, 265 rated sessions, all detectors:
+
+| detector | accuracy | MSE |
+|---|---|---|
+| `glr` | 88.7% | 0.181 |
+| `tv` | 88.3% | 0.174 |
+| **`biexp_fit`** (then the default) | **75.5%** | **0.257** |
+| `legacy_sobel` | 1.1% | 1.891 |
+| `piecewise_constant` | 0.0% | 197.287 |
+
+All 265 reached `mode=fit`, so this is not fallback contamination: the production detector was
+genuinely losing to the seed it is built on. (`legacy_sobel` and `piecewise_constant` are so far
+off that they are no longer run by default — see the harness note below.)
+
+### R1 — the robust estimator was not the problem
+
+S10 predicted that dropping the robust estimator from the timing pass would fix the timing. It
+does what S10 said, and it is not enough:
+
+| offset (pred − GT) | `aif_Robust=Bisquare` | `aif_Robust_timing=off` |
+|---|---|---|
+| −1 (early) | 13 | **0** |
+| 0 | 200 | 202 |
+| +1 (late) | 51 | **62** |
+| +2 | 1 | 1 |
+
+Accuracy 75.5% → 76.2%. Every early error disappears, confirming S10's mechanism exactly — but
+only ~2 of those 13 land on the right answer; the rest cross straight over to late. The robust
+estimator was *masking* a systematic late bias, which is the whole error budget once it is gone.
+
+New preference `aif_Robust_timing` (Python) selects the estimator for the timing pass
+independently, defaulting to `aif_Robust`. It exists because the two passes are separable in
+principle; with both now defaulting to `off` it only matters if `aif_Robust` is re-enabled.
+
+### R2 — the robust estimator *was* hurting the production fit
+
+The detectors only ever run the timing pass, so production-pass settings are invisible to this
+harness. The new production-pass probe (below) makes them measurable. Same 265 sessions, same
+curves, `t_base_end` pinned and `delta` seeded exactly as Stage B does:
+
+| production-pass adjusted R² | `aif_Robust=Bisquare` | `aif_Robust=off` |
+|---|---|---|
+| mean | 0.8823 | **0.9444** |
+| median | 0.9201 | **0.9584** |
+| P10 | 0.7796 | **0.8922** |
+| min | **−1.4637** | 0.5742 |
+| below 0.90 | **106**/265 | **30**/265 |
+
+Some of that gap is by construction — an unweighted R² always rises when the estimator stops
+rejecting points. The tail is not: a *negative* adjusted R² is a fit worse than a horizontal
+line, i.e. broken rather than conservative, and it is gone. **`aif_Robust` now defaults to `off`
+in both languages** (`dce/dce_preferences.txt`, `python/dce_default.json`,
+`python/dceprep_default.json`, and `_fit_aif_biexp`'s fallback). It remains selectable.
+
+### R3 — goodness-of-fit cannot choose the baseline end
+
+This is the load-bearing negative result, and it invalidates using R² to tune the detector.
+
+On the continuous fit, the sessions `biexp_fit` gets **wrong** score *higher* than the ones it
+gets right — adjusted R² median 0.9665 across the 63 late sessions against 0.9651 across the 202
+correct ones. Constraining `t_base_end` to the integer grid and fitting the remaining five
+parameters at each candidate (`fit_pass="production"` with the peak prior disabled) sharpens the
+picture rather than softening it:
+
+- accuracy 76.2% → **79.2%** — real, but small.
+- in **all 55** misses the true `end_ss` *is* on the grid, and ranks **2nd**.
+- it loses by a median adjusted-R² margin of **0.082**; only 5 of 55 are within 0.01, one within
+  0.001.
+
+So the R² landscape is not flat between candidates — it is decisively peaked on the wrong one.
+Any criterion built on goodness-of-fit will pick the late frame *more* confidently as the fit
+improves. (A discretisation fix was also ruled out: `floor(t_base_end) + 1` scores 41.5%, because
+on correct sessions the fitted value lands just *below* the target integer. `round` is right.)
+
+### R4 — why: a definitional mismatch with the rater
+
+Typical miss, normalised to the peak:
+
+```
+frame :   0      1      2      3      4
+meas  : -0.02  -0.01   0.02   0.006  1.000     GT end_ss = 3, biexp_fit says 4
+```
+
+Frame 3 carries 0.6% of peak. Across the 55 misses the disputed frame carries a median of **9%**
+of peak; across the correct ones the equivalent frame carries **100%**. The model's `t_base_end`
+is where the linear ramp *starts*, and absorbing a barely-enhanced frame into the baseline costs
+almost nothing in SSE — so it does. The human rater excludes any frame showing the first hint of
+contrast.
+
+Neither is wrong; they answer different questions. But `end_ss` defines the baseline averaging
+window for R1/S0, so a frame carrying 9% of peak enhancement inside it biases the whole
+concentration curve. **The rater's convention is the operationally correct one**, and it is not
+recoverable from the fit.
+
+### R5 — a real bug in `tv`, found while diagnosing its one catastrophic failure
+
+`tv` returned `end_ss = 1` on `sub-1102140_ses-01` (GT 5) — its only error worse than one frame.
+The curve is unremarkable:
+
+```
+frame:   0     1     2     3     4      5      6      7      8
+value: 51.8  53.4  51.2  54.8  59.5  291.0  659.0  478.6  359.0
+diff :      1.6  -2.2   3.6   4.7  231.5  368.0 -180.3 -119.6
+```
+
+Three things compound:
+
+1. The jump threshold was calibrated over `x[:min(n, max(5, 0.2·n))]` = the first **12** frames —
+   which contains the bolus, its peak and its washout. That returned `baseline_jump_mad = 76.0`
+   against a true baseline scatter of **2.5**, inflating the threshold to **267.7**.
+2. The real onset jump (231.5) therefore fell *below* the threshold and was never considered.
+3. The only surviving jump (368.0, at the peak) was rejected by the validity test, which requires
+   `next_jump > −mad` or `jump > 2·threshold`: the next jump is the ordinary washout at −180.2,
+   and 368.0 < 535.3.
+
+`valid_jumps` came back empty, and the empty branch returns `end_ss_0b = 0` → `end_ss = 1` — the
+*no-jump-found fallback*, silently indistinguishable from a real detection. What singles this
+session out is that its bolus rises over **two** frames (231.5 then 368.0), so neither half clears
+the inflated bar; a single-frame rise concentrates the step into one jump large enough to pass
+`2·threshold` outright.
+
+**Fix:** take the threshold's median and MAD from the full smoothed-jump series instead of a
+leading window, and raise the multiplier from 3.5 to `TV_JUMP_THRESHOLD_SIGMA = 5.0`. The global
+MAD is robust for the same reason `lambda_tv` already uses one — contrast frames are a small
+minority of a DCE series. Landed identically in `python/dce_pipeline.py:_tv_baseline_end` and
+`dce/find_end_ss_tv.m`.
+
+| `tv` | accuracy | MSE | worst error |
+|---|---|---|---|
+| before | 88.3% | 0.174 | −4 |
+| global MAD, σ=3.5 | 94.7% | 0.087 | −2 |
+| **global MAD, σ=5.0 (shipped)** | **95.1%** | **0.049** | **−1** |
+
+σ=3.5 and σ=5 sit on a plateau, so the choice is not load-bearing; 5 was taken because it
+tolerates the large first-point blips some series carry. Held out on an odd/even split the two
+halves select 3.5 and 5 and score 91.7% / 96.2%, both far above the 88.3% baseline.
+
+### R6 — the detector default goes back to `tv`
+
+Re-running the harness after the `tv` fix, `biexp_fit` moved on **zero** of the 265 sessions. It
+seeds from `tv` but then fits `t_base_end` freely and converges to the same place regardless, so
+a better seed cannot reach it — independent confirmation that R4's bias is the model, not the
+seeding.
+
+Final standing, 280 sessions:
+
+| detector | accuracy | MSE |
+|---|---|---|
+| **`tv`** | **95.0%** | **0.050** |
+| `biexp_fit` | 74.6% | 0.264 |
+
+`A_make_R1maps_func.m` calls `find_end_ss_tv` again, and `steady_state_auto_method` defaults to
+`"tv"` in `dce_default.json`, `dceprep_default.json`, `DEFAULT_STEADY_STATE_AUTO_METHOD`, and the
+parity fixture. `find_end_ss_biexp` / `biexp_fit` are kept and remain selectable — the work in
+S1–S9 that unified the *fit* stands; only its use as a detector is withdrawn.
+
+The fallback idea (`tv` primary, `biexp_fit` on a drift warning) was considered and dropped: after
+R5 there is nothing left for it to rescue.
+
+### The 15 late-arriving sessions
+
+Ratings were added between the 09:25 and 16:20 harness runs. All 265 originals are unchanged, so
+every comparison above holds; the 15 new ones amount to an unplanned held-out sample:
+
+| detector | correct |
+|---|---|
+| `tv` | **14 / 15** |
+| `biexp_fit` | 7 / 15 |
+
+All 8 of `biexp_fit`'s misses are the same +1 late error. R4 reproduces on data none of these
+decisions were made against.
+
+### Harness changes supporting this section
+
+- **Adjusted R² in the summary** — distribution (N / mean / median / P10 / min / max / count below
+  0.90) plus the ten worst sessions by name, per fit pass.
+- **Production-pass probe** — re-fits each session's curve with `fit_pass="production"`,
+  `t_base_end` pinned to the detected `end_ss` and `delta` seeded from the fractional
+  `end_injection`. Without it, production-only settings produce byte-identical harness output.
+  `--production-probe-seed` chooses which detector conditions it. **It fits the normalised signal
+  curve, not `Cp`** (which does not exist until R1 maps are built), so its timing is comparable to
+  a real Stage-B fit but its amplitudes and R² are a proxy.
+- **Heuristic detectors off by default** — `piecewise_constant`, `legacy_sobel` and `glr` are
+  behind `--heuristic-detectors`. `tv` stays on because `biexp_fit`'s row is unreadable without
+  the row it falls back to.
+
+Raw outputs: `out/6param`, `out/no_robust_timing`, `out/no_robust_both`, `out/tv_seed_production`,
+`out/tv_fixed`, `out/integer_grid`, each with the `config_template.json` it ran under.
+
+### Result: parity after S11
+
+Baseline regenerated with `find_end_ss_tv` and `aif_Robust = off` (`force_cpu = 1` during the
+run, reverted after). `max_abs_err` over every gated column of `Dyn-1_<model>_fit_rois.xls`:
+
+| model | original | after S1-S6 | after S7-S8 | **after S11** | gate |
+|---|---|---|---|---|---|
+| `tofts` | 0.036054 **FAIL** | 0.016489 | 0.005687 | **0.001440** | 0.03 |
+| `ex_tofts` | 0.007399 | 0.003312 | 0.001675 | **0.000013** | 0.01 |
+| `patlak` | 0.003443 | 0.001534 | 0.000505 | **0.000013** | 0.01 |
+| `tissue_uptake` | 0.097563 **FAIL** | 0.049170 | 0.002645 | **0.002235** (ex-`Fp`) | 0.05 |
+
+`ex_tofts` and `patlak` land at ~1.3e-5 — the level the AIF-swap experiment at the top of this
+document predicted for two pipelines running genuinely the same algorithm, and roughly a
+hundredfold better than where this workstream started. `tofts` improves 4x.
+
+Python 243 passed / 3 skipped / 2 xfailed; MATLAB 28 passed / 0 failed (incl. integration);
+`test_bbb_p19_region_parity` and `test_bbb_p19_roi_xls_parity` both pass.
+
+Two tests asserted the old defaults and were updated rather than the code:
+`test_resolve_baseline_window_defaults_to_biexp_fit_when_no_options_set` became `..._to_tv_...`,
+and `test_stage_b_real_fitted_mode` now pins `aif_Robust: "Bisquare"` explicitly. Both changes
+would otherwise have silently dropped coverage of code that is still shipped, so
+`test_resolve_baseline_window_biexp_fit_is_selectable` was added to keep exercising
+`_biexp_fit_baseline_end` now that nothing reaches it by default.
+
 ## Reproducing
 
 - Regenerated MATLAB baseline (auto steady state + auto injection, all five models, `force_cpu=1`):

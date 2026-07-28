@@ -128,11 +128,14 @@ The steady-state/baseline window follows its own precedence in `_resolve_baselin
 `SteadyStateEndTimeIndex` field in the AIF file's JSON sidecar (the documented mechanism
 for a fixed/reproducible run — same discovery convention as the metadata sidecar, `.nii`/
 `.nii.gz` swapped for `.json`) → auto-detect via `stage_overrides.steady_state_auto_method`.
-`biexp_fit` is the default (MATLAB `dce/find_end_ss_biexp.m`): a 6-parameter biexponential fit
-to the mean AIF *signal* curve, seeded by and falling back to `tv`. Unlike the shape heuristics
-it also reports where the injection ends, which Stage B uses as the start point for the fitted
-upslope duration. `piecewise_constant` ports MATLAB `find_end_ss`; `legacy_sobel` ports the
-different `dce_auto_aif.m` heuristic; `glr`/`tv` are additional ported detectors.
+`tv` is the default (MATLAB `dce/find_end_ss_tv.m`): a total-variation denoise followed by the
+first significant upward jump. `biexp_fit` (MATLAB `dce/find_end_ss_biexp.m`) fits a 6-parameter
+biexponential to the mean AIF *signal* curve and, unlike the shape heuristics, also reports where
+the injection ends — but on 280 human-rated sessions it is right 74.6% of the time against `tv`'s
+95.0%, always erring one frame late, so it is selectable rather than default (see S11 in
+`docs/project-management/projects/batch-parity/aif_fitting_parity.md`). `piecewise_constant` ports
+MATLAB `find_end_ss`; `legacy_sobel` ports the different `dce_auto_aif.m` heuristic; `glr` is an
+additional ported detector.
 
 Stage B's AIF fit (`_fit_aif_biexp`, `dce/AIFbiexpfithelp.m`) always holds `t_base_end` at the
 resolved baseline end and always fits the upslope duration as `t0_exp = t_base_end + delta`,

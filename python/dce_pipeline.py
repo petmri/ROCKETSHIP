@@ -39,8 +39,11 @@ ALLOWED_STAGE_A_MODES = {"real", "scaffold"}
 ALLOWED_STAGE_B_MODES = {"real", "scaffold", "auto"}
 ALLOWED_STAGE_D_MODES = {"real", "scaffold", "auto"}
 ALLOWED_STEADY_STATE_AUTO_METHODS = {"none", "legacy_sobel", "piecewise_constant", "glr", "tv", "biexp_fit"}
-DEFAULT_STEADY_STATE_AUTO_METHOD = "biexp_fit"
+DEFAULT_STEADY_STATE_AUTO_METHOD = "tv"
 PIECEWISE_CONSTANT_BASELINE_FORWARD_DELTA_FRACTION = 0.01
+# How many robust sigmas above the median a jump must clear to count as the contrast onset.
+# Mirrored in dce/find_end_ss_tv.m -- keep the two in step.
+TV_JUMP_THRESHOLD_SIGMA = 5.0
 
 MODEL_SELECTION_ORDER = [
     ("tofts", "tofts"),
@@ -1306,28 +1309,34 @@ def _tv_baseline_end(stlv: np.ndarray) -> Dict[str, Any]:
             break
 
     jumps = np.diff(x)
-    baseline_len = min(n, max(5, int(0.2 * n)))
-    baseline_segment = x[:baseline_len]
-    baseline_jumps = np.diff(baseline_segment)
-    if baseline_jumps.size > 0:
-        baseline_jump_mad = float(np.median(np.abs(baseline_jumps - np.median(baseline_jumps))))
-        baseline_jump_median = float(np.median(baseline_jumps))
+    # The threshold has to be calibrated on baseline noise, so it must not be measured over a
+    # stretch that contains contrast. A leading window (`min(n, max(5, 0.2*n))`, previously used
+    # here) is not that stretch: it spans 12 frames of a 64-frame series, and the bolus usually
+    # peaks well inside it. Calibrating there measures the bolus instead of the noise -- on
+    # sub-1102140_ses-01 it returned a MAD of 76.0 against a true baseline scatter of 2.5,
+    # inflating the threshold ~40x, which pushed the real onset jump (231.5) below it and left
+    # the detector with no jump to report at all. The MAD over *all* jumps is robust for the
+    # same reason `lambda_tv` above uses it: contrast frames are a small minority of a DCE
+    # series, so the median absolute deviation still reflects the flat part of the curve.
+    if jumps.size > 0:
+        jump_median = float(np.median(jumps))
+        jump_mad = float(np.median(np.abs(jumps - jump_median)))
     else:
-        baseline_jump_mad = 0.0
-        baseline_jump_median = 0.0
-    if baseline_jump_mad < 1e-6:
-        baseline_jump_mad = 0.01 * float(np.std(global_time_curve[:baseline_len]))
-        if baseline_jump_mad < 1e-6:
-            baseline_jump_mad = 0.01
+        jump_median = 0.0
+        jump_mad = 0.0
+    if jump_mad < 1e-6:
+        jump_mad = 0.01 * float(np.std(global_time_curve))
+        if jump_mad < 1e-6:
+            jump_mad = 0.01
 
-    jump_threshold = baseline_jump_median + 3.5 * baseline_jump_mad
+    jump_threshold = jump_median + TV_JUMP_THRESHOLD_SIGMA * jump_mad
     significant_jumps = np.where(jumps > jump_threshold)[0]
     valid_jumps: List[int] = []
     for idx in significant_jumps:
         i = int(idx)
         if i < jumps.size - 1:
             next_jump = float(jumps[i + 1])
-            if next_jump > -baseline_jump_mad or float(jumps[i]) > 2.0 * jump_threshold:
+            if next_jump > -jump_mad or float(jumps[i]) > 2.0 * jump_threshold:
                 valid_jumps.append(i)
         else:
             if float(jumps[i]) > 1.5 * jump_threshold:
@@ -1355,8 +1364,7 @@ def _tv_baseline_end(stlv: np.ndarray) -> Dict[str, Any]:
         "mode": "tv_jump",
         "lambda_tv": float(lambda_tv),
         "tv_iterations": int(n_iter),
-        "baseline_len": int(baseline_len),
-        "baseline_jump_mad": float(baseline_jump_mad),
+        "jump_mad": float(jump_mad),
         "jump_threshold": float(jump_threshold),
         "detected_jump": float(detected_jump),
         "strength": float(strength),
@@ -2678,9 +2686,20 @@ def _fit_aif_biexp(
     max_nfev = int(_safe_float(_stage_override(config, "aif_MaxFunEvals", aif_maxiter), aif_maxiter))
     aif_tol_fun = max(_safe_float(_stage_override(config, "aif_TolFun", 1e-20), 1e-20), np.finfo(np.float64).eps)
     aif_tol_x = max(_safe_float(_stage_override(config, "aif_TolX", 1e-23), 1e-23), np.finfo(np.float64).eps)
-    # Default matches dce_preferences.txt / dce_default.json: the robust estimator is what
-    # guards the fit against a noise-inflated peak now that weighting is uniform.
-    aif_robust_raw = _stage_override(config, "aif_Robust", "Bisquare")
+    # Default matches dce_preferences.txt / dce_default.json. `Bisquare` was the default while
+    # the peak prior was the only guard against a noise-inflated peak; measured across 265
+    # sessions it made the production fit worse, not better -- adjusted R² mean 0.882 against
+    # 0.944 with it off, 106 sessions below 0.90 against 30, and a worst case of -1.46 (a fit
+    # worse than a horizontal line) against +0.57. It is still selectable. See S11 in
+    # docs/project-management/projects/batch-parity/aif_fitting_parity.md.
+    aif_robust_raw = _stage_override(config, "aif_Robust", "off")
+    if fit_pass == "timing":
+        # The timing pass can opt out separately, and had to while `aif_Robust` defaulted to
+        # Bisquare: what is unreliable about the peak is its *height*, and rejecting it costs
+        # the timing pass its primary evidence for the peak's *position*, pulling both
+        # transition times early (S10). Now that both default to off this only matters when
+        # someone re-enables `aif_Robust` and wants the timing pass left alone.
+        aif_robust_raw = _stage_override(config, "aif_Robust_timing", aif_robust_raw)
     aif_robust_mode = str(aif_robust_raw).strip().lower()
 
     # Every sample carries equal weight except the peak, which the production pass de-weights by a

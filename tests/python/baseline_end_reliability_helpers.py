@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 import re
 import sys
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -28,6 +28,7 @@ from dce_pipeline import (  # noqa: E402
     DcePipelineConfig,
     _aif_biexp_con,
     _biexp_fit_baseline_end,
+    _fit_aif_biexp,
     _glr_baseline_end,
     _legacy_sobel_baseline_end,
     _piecewise_constant_baseline_end,
@@ -65,33 +66,56 @@ def load_biexp_config(config_template: Optional[Path] = None) -> DcePipelineConf
         )
 
 
-def build_detectors(config: DcePipelineConfig) -> Dict[str, Callable[[np.ndarray], Dict[str, Any]]]:
-    """Detector registry, in `DETECTOR_NAMES` order.
+def build_detectors(
+    config: DcePipelineConfig, names: Optional[Sequence[str]] = None
+) -> Dict[str, Callable[[np.ndarray], Dict[str, Any]]]:
+    """Detector registry for `names`, in `DETECTOR_NAMES` order.
 
     `biexp_fit` needs the fit settings that the other four have no use for, so the registry is
     built per-run rather than being a module constant. Binding it here keeps the config an
     explicit argument: a module-level global with a lazy default would let an importer silently
     run against different settings than the summary header reports.
+
+    `names` defaults to `DEFAULT_DETECTOR_NAMES` -- the production detector and the seed it falls
+    back to. The three signal-shape heuristics are opt-in: they are superseded, and running them
+    on every session costs time and three extra lines on every figure.
     """
-    return {
+    registry: Dict[str, Callable[[np.ndarray], Dict[str, Any]]] = {
         "piecewise_constant": _piecewise_constant_baseline_end,
         "legacy_sobel": _legacy_sobel_baseline_end,
         "glr": _glr_baseline_end,
         "tv": _tv_baseline_end,
         "biexp_fit": lambda stlv: _biexp_fit_baseline_end(stlv, config),
     }
+    selected = resolve_detector_names(names)
+    return {name: registry[name] for name in selected}
 
 
-def biexp_fitted_curve(details: Dict[str, Any], n_timepoints: int) -> Optional[np.ndarray]:
-    """Re-evaluate the `biexp_fit` detector's fitted curve in the original signal units.
+def resolve_detector_names(names: Optional[Sequence[str]] = None) -> Tuple[str, ...]:
+    """Normalise a detector selection to registry order, rejecting unknown names."""
+    if names is None:
+        return DEFAULT_DETECTOR_NAMES
+    requested = {str(name).strip() for name in names}
+    unknown = requested - set(DETECTOR_NAMES)
+    if unknown:
+        raise ValueError(f"Unknown detector(s): {sorted(unknown)}. Known: {list(DETECTOR_NAMES)}")
+    return tuple(name for name in DETECTOR_NAMES if name in requested)
 
-    Returns None unless the fit actually ran (`mode == "fit"`). The fit works on a
-    baseline-subtracted, max-normalised curve in frame units, so this undoes that scaling to
-    put the result back on the same axes as the measured mean curve.
+
+def biexp_fitted_curve(
+    details: Dict[str, Any], n_timepoints: int, *, params_key: str = "fit_params"
+) -> Optional[np.ndarray]:
+    """Re-evaluate a `biexp_fit` fitted curve in the original signal units.
+
+    Returns None unless the timing fit actually ran (`mode == "fit"`); the normalisation constants
+    this undoes are only recorded on that branch. The fit works on a baseline-subtracted,
+    max-normalised curve in frame units, so this puts the result back on the same axes as the
+    measured mean curve. `params_key` selects which fit's six coefficients to evaluate --
+    `"fit_params"` for the timing pass, `"production_params"` for the probe below.
     """
     if details.get("mode") != "fit":
         return None
-    params = details.get("fit_params")
+    params = details.get(params_key)
     if params is None or len(params) < 6:
         return None
     scale = float(details.get("normalization_scale", 1.0))
@@ -111,8 +135,91 @@ def biexp_fitted_curve(details: Dict[str, Any], n_timepoints: int) -> Optional[n
     return normalized * scale + baseline_mean
 
 
+def run_production_probe(
+    details: Dict[str, Any],
+    mean_curve: np.ndarray,
+    config: DcePipelineConfig,
+    *,
+    end_ss_1b: int,
+    end_injection_1b: float,
+    seed_label: str = "biexp_fit",
+) -> None:
+    """Re-fit the same curve with the Stage-B (`fit_pass="production"`) pass, recording `production_*`.
+
+    `end_ss_1b` / `end_injection_1b` are the Stage-A answers this fit is conditioned on; the caller
+    chooses which detector supplies them (`seed_label` records that choice). They are an *input* to
+    the production pass, never fitted, which is what makes "same fit, different detector" a
+    measurable comparison.
+
+    The detectors only exercise the *timing* pass, so a run that changes production-pass settings
+    (`aif_Robust`, `aif_peak_weight_exponent`) produces byte-identical detector output and there is
+    nothing to compare. This probe makes those settings observable: `t_base_end` fixed at the
+    timing pass's `end_ss`, `delta` seeded from its fractional `end_injection`, peak prior applied
+    -- exactly what Stage B does.
+
+    **It is a proxy, not Stage B.** Production fits the *concentration* curve `CpROI`, which does
+    not exist until R1 maps have been built; this fits the same normalised *signal* curve the
+    timing pass used. Transition times are invariant to that rescaling, but amplitudes, decay
+    rates, and hence the reported R² are not directly comparable to a real Stage-B run.
+
+    Mutates `details` in place. Skipped (with a reason) unless the timing pass reached `mode="fit"`,
+    since the normalisation constants it needs are recorded only on that branch.
+    """
+    if details.get("mode") != "fit":
+        details["production_mode"] = "skipped_no_timing_fit"
+        return
+
+    scale = float(details.get("normalization_scale", 1.0))
+    baseline_mean = float(details.get("baseline_mean", 0.0))
+    if not np.isfinite(scale) or scale <= 0.0:
+        details["production_mode"] = "skipped_no_enhancement"
+        return
+
+    curve = np.asarray(mean_curve, dtype=np.float64).reshape(-1)
+    normalized = (curve - baseline_mean) / scale
+    n = int(normalized.size)
+    end_ss_1b = int(max(1, min(int(end_ss_1b), n)))
+    end_injection_1b = float(min(max(float(end_injection_1b), float(end_ss_1b)), float(n)))
+
+    try:
+        fit = _fit_aif_biexp(
+            config,
+            timer=np.arange(n, dtype=np.float64),
+            curve=normalized,
+            start_injection_min=float(end_ss_1b - 1),
+            end_injection_min=float(end_injection_1b - 1),
+            fitting_au=False,
+            fit_pass="production",
+        )
+    except Exception as exc:
+        details["production_mode"] = "fit_error"
+        details["production_error"] = f"{type(exc).__name__}: {exc}"
+        return
+
+    details.update(
+        {
+            "production_mode": "fit" if fit["fit_success"] else "fit_not_converged",
+            "production_seed": seed_label,
+            "production_seed_end_ss_1b": end_ss_1b,
+            "production_seed_end_injection_1b": end_injection_1b,
+            "production_rsquare_adj": float(fit["rsquare_adj"]),
+            "production_t0_exp_frames": float(fit["t0_exp"]),
+            "production_delta_frames": float(fit["delta"]),
+            "production_delta_drift": float(fit["delta_drift"]),
+            "production_peak_weight": float(fit["peak_weight"]),
+            "production_robust_mode": str(fit["robust_mode"]),
+            "production_params": [float(v) for v in np.asarray(fit["params"], dtype=np.float64)],
+        }
+    )
+
+
 # Registration order also drives figure legend / summary table order.
 DETECTOR_NAMES = ("piecewise_constant", "legacy_sobel", "glr", "tv", "biexp_fit")
+# Superseded signal-shape heuristics, kept runnable but off by default.
+HEURISTIC_DETECTOR_NAMES = ("piecewise_constant", "legacy_sobel", "glr")
+# The production detector plus the seed it is built on and falls back to. `tv` is not optional
+# here: `biexp_fit`'s accuracy row is only readable next to the row it degrades to.
+DEFAULT_DETECTOR_NAMES = tuple(n for n in DETECTOR_NAMES if n not in HEURISTIC_DETECTOR_NAMES)
 
 _NON_DYNAMIC_TOKENS = ("mask", "t1map", "seg", "roi")
 _SUBJECT_RE = re.compile(r"^sub-[A-Za-z0-9]+$")
@@ -358,11 +465,18 @@ def process_session(
     *,
     use_all_voxels: bool = False,
     dynamic_pattern: Optional[str] = None,
+    production_probe_config: Optional[DcePipelineConfig] = None,
+    production_probe_seed: str = "biexp_fit",
 ) -> SessionResult:
     """Load one session's data, extract the signal curve, and run all detectors.
 
     `detectors` is the registry from `build_detectors`, passed in rather than read from module
     state so a caller cannot silently run against different settings than it reports.
+
+    `production_probe_config` enables `run_production_probe` on the `biexp_fit` details; pass the
+    same config the detectors were built from. `production_probe_seed` names the detector whose
+    `end_ss` the production fit is conditioned on -- the point of the probe is to hold the fit
+    fixed and vary the Stage-A answer, so it need not be `biexp_fit`.
 
     By default the curve is the mean over the AIF mask. With `use_all_voxels=True`, the
     mask is ignored entirely and the curve is the mean over every voxel in the dynamic
@@ -438,6 +552,26 @@ def process_session(
             print(f"WARNING: {record.id}: detector '{name}' failed: {exc}", file=sys.stderr)
             predictions[name] = None
 
+    if production_probe_config is not None and "biexp_fit" in detector_details:
+        biexp = detector_details["biexp_fit"]
+        seed_details = detector_details.get(production_probe_seed, biexp)
+        seed_end_ss = int(seed_details.get("end_ss_1b", 1))
+        seed_end_injection = seed_details.get("end_injection_1b")
+        if seed_end_injection is None:
+            # `tv` reports no injection end, so Stage A falls back to the mean per-voxel peak
+            # frame -- dce_pipeline.py's `mean(peak_indices_1b)`, mirroring find_end_ss_tv.m.
+            # Reproduce that here rather than substituting the mean curve's argmax, which is a
+            # different statistic and would not be the number production feeds Stage B.
+            seed_end_injection = float(np.mean(np.argmax(stlv, axis=0) + 1))
+        run_production_probe(
+            biexp,
+            mean_curve,
+            production_probe_config,
+            end_ss_1b=seed_end_ss,
+            end_injection_1b=float(seed_end_injection),
+            seed_label=production_probe_seed,
+        )
+
     return SessionResult(
         subject=record.subject,
         session=record.session,
@@ -467,7 +601,10 @@ class AgreementStats:
 
 
 def compute_detector_agreement(
-    results: Iterable[SessionResult], *, reference: str = "biexp_fit"
+    results: Iterable[SessionResult],
+    *,
+    names: Optional[Sequence[str]] = None,
+    reference: str = "biexp_fit",
 ) -> Dict[str, AgreementStats]:
     """Pairwise agreement against `reference`, for datasets with no human ratings.
 
@@ -478,7 +615,7 @@ def compute_detector_agreement(
     """
     results = list(results)
     stats: Dict[str, AgreementStats] = {}
-    for name in DETECTOR_NAMES:
+    for name in resolve_detector_names(names):
         offsets: List[float] = []
         n_identical = 0
         for result in results:
@@ -504,6 +641,62 @@ def compute_detector_agreement(
 
 
 @dataclass
+class RsquareStats:
+    """Distribution of one fit pass's adjusted R² across sessions."""
+
+    label: str
+    n: int
+    mean: float
+    median: float
+    minimum: float
+    p10: float
+    maximum: float
+    n_below_threshold: int
+    threshold: float
+    # (session id, R²) for the worst sessions, ascending. Which sessions fit badly is the
+    # actionable part; the aggregate only says whether to go looking.
+    worst: List[Tuple[str, float]] = field(default_factory=list)
+
+
+def compute_rsquare_stats(
+    results: Iterable[SessionResult],
+    *,
+    detail_key: str,
+    label: str,
+    threshold: float = 0.90,
+    n_worst: int = 10,
+) -> RsquareStats:
+    """Summarise `detail_key` from every ok session's `biexp_fit` details.
+
+    Sessions where the fit did not run contribute nothing, so `n` is also the count of sessions
+    that actually produced a fit -- read it alongside the outcome breakdown rather than assuming
+    it equals the number of ok sessions.
+    """
+    pairs: List[Tuple[str, float]] = []
+    for result in results:
+        if result.status != "ok":
+            continue
+        value = result.detector_details.get("biexp_fit", {}).get(detail_key)
+        if isinstance(value, (int, float)) and np.isfinite(value):
+            pairs.append((result.id, float(value)))
+
+    values = np.array([v for _, v in pairs], dtype=np.float64)
+    nan = float("nan")
+    return RsquareStats(
+        label=label,
+        n=int(values.size),
+        mean=float(np.mean(values)) if values.size else nan,
+        median=float(np.median(values)) if values.size else nan,
+        minimum=float(np.min(values)) if values.size else nan,
+        p10=float(np.percentile(values, 10)) if values.size else nan,
+        maximum=float(np.max(values)) if values.size else nan,
+        n_below_threshold=int(np.count_nonzero(values < threshold)),
+        threshold=float(threshold),
+        worst=sorted(pairs, key=lambda kv: kv[1])[:n_worst],
+    )
+
+
+@dataclass
 class AlgorithmStats:
     name: str
     n_valid: int
@@ -515,12 +708,15 @@ class AlgorithmStats:
 
 
 def compute_algorithm_stats(
-    results: Iterable[SessionResult], *, tolerance_frames: Optional[int] = None
+    results: Iterable[SessionResult],
+    *,
+    names: Optional[Sequence[str]] = None,
+    tolerance_frames: Optional[int] = None,
 ) -> Dict[str, AlgorithmStats]:
     """Per-algorithm exact-match accuracy % and MSE (frame-index units) over valid sessions."""
     results = list(results)
     stats: Dict[str, AlgorithmStats] = {}
-    for name in DETECTOR_NAMES:
+    for name in resolve_detector_names(names):
         errors: List[float] = []
         n_exact = 0
         n_within_tol = 0

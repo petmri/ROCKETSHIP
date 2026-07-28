@@ -484,7 +484,7 @@ class TestDcePipeline:
             assert info["method_requested"] == "glr"
             assert info["method_used"] == "glr"
 
-    def test_resolve_baseline_window_defaults_to_biexp_fit_when_no_options_set(self) -> None:
+    def test_resolve_baseline_window_defaults_to_tv_when_no_options_set(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))
             config.stage_overrides = {
@@ -501,8 +501,34 @@ class TestDcePipeline:
             assert ss_start == 0
             assert 1 <= ss_end <= 12
             assert info["method_requested"] == "none"
+            assert info["method_used"] == "tv"
+            assert info["source"] == "default_auto_method:tv"
+
+    def test_resolve_baseline_window_biexp_fit_is_selectable(self) -> None:
+        """`biexp_fit` is no longer the default (S11) but is still shipped and selectable.
+
+        Without this, the only coverage of `_biexp_fit_baseline_end` here was incidental --
+        it came from being the default, and vanished with it.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            config.stage_overrides = {
+                "stage_a_mode": "scaffold",
+                "use_dce_preferences": False,
+                "steady_state_auto_method": "biexp_fit",
+            }
+            mean_curve = np.full(24, 100.0, dtype=np.float64)
+            mean_curve[8:12] = np.linspace(100.0, 140.0, 4)
+            mean_curve[12:] = 140.0
+            stlv = np.tile(mean_curve[:, np.newaxis], (1, 4))
+
+            ss_start, ss_end, info = _resolve_baseline_window(config, n_timepoints=24, stlv=stlv)
+
+            assert ss_start == 0
+            assert 1 <= ss_end <= 12
+            assert info["method_requested"] == "biexp_fit"
             assert info["method_used"] == "biexp_fit"
-            assert info["source"] == "default_auto_method:biexp_fit"
+            assert info["source"] == "steady_state_auto_method:biexp_fit"
             # biexp_fit is seeded by tv and records where it fell back to it.
             assert info["auto_details"]["seed_method"] == "tv"
 
@@ -1343,6 +1369,9 @@ class TestDcePipeline:
                 "start_time_min": 0.0,
                 "end_time_min": 0.0,
                 "aif_MaxFunEvals": 4000,
+                # Pinned rather than inherited: `aif_Robust` now defaults to `off` (S11), and
+                # this test is the only coverage of the Tukey IRLS path, which is still shipped.
+                "aif_Robust": "Bisquare",
             }
             stage_a = _make_stage_a_payload()
 
