@@ -110,6 +110,7 @@ def _make_config(
         "tr_ms": 8.29,
         "fa_deg": 15.0,
         "time_resolution_sec": 15.84,
+        # Must match A_make_R1maps_func.m, which calls find_end_ss_tv.
         "steady_state_auto_method": "tv",
         "auto_find_injection": 1,
         "relaxivity": 3.6,
@@ -209,11 +210,10 @@ def _make_config(
 
 def _make_tofts_post_8ef4988_config(paths: dict, out_dir: Path, *, backend: str) -> DcePipelineConfig:
     # _make_config's defaults already auto-detect steady-state end + injection timing
-    # (the "post-8ef4988 timing policy"); this wrapper only layers the fitted-AIF timing
-    # method on top for the tofts-only runtime-parity comparison.
-    config = _make_config(paths, out_dir, backend=backend, models=["tofts"])
-    config.stage_overrides = {**config.stage_overrides, "aif_biexp_timing_method": "fit_transition_times"}
-    return config
+    # (the "post-8ef4988 timing policy"), which is now all this tofts-only runtime-parity
+    # comparison needs: the Stage-B AIF fit always holds t_base_end at the resolved baseline
+    # end and always fits the upslope duration, so there is no timing method left to layer on.
+    return _make_config(paths, out_dir, backend=backend, models=["tofts"])
 
 
 def _load_nifti(path: Path) -> np.ndarray:
@@ -303,7 +303,7 @@ def _metrics(
     # high-leverage voxel (e.g. a non-identifiable fit pinned at a parameter bound) can
     # collapse it even though every other voxel agrees closely -- observed on real fixtures
     # (patlak brain corr ~-0.007 from one degenerate-seed voxel out of 237; see
-    # docs/project-management/projects/batch-parity/batch_parity.md, "Tabled" section, and
+    # docs/project-management/projects/archived/batch-parity/batch_parity.md, "Tabled" section, and
     # the same fix already applied to tests/contracts/check_matlabref_map_drift.py). A
     # genuine algorithm change still collapses Spearman to ~0/negative.
     corr = float(spearmanr(x, y).correlation) if np.std(x) > 0 and np.std(y) > 0 else float("nan")
@@ -332,14 +332,19 @@ def _ci_metrics(
     Returns the CI-normalized absolute difference (median + p95) using the MATLAB CI
     as the denominator, and the proportion of voxels falling outside the other side's CI.
 
-    NOTE (2026-07-22): on the sub-10bbbdownsample fixture, MATLAB's Ktrans CI maps are
-    currently zero-width (ci_low == ci_high == 0.0) for every voxel across every model
-    checked (tofts, patlak, ex_tofts), making ci_norm_absdiff_median NaN (no positive-width
-    voxels) and prop_py_outside_matlab_ci a meaningless ~1.0 (a zero-width "interval" makes
-    almost any Python value trivially "outside" it -- this metric doesn't currently exclude
-    degenerate widths the way ci_norm_absdiff_median does). Not yet root-caused; tracked as
-    a TODO in docs/project-management/projects/batch-parity/batch_parity.md. Do not gate on
-    either field until that's fixed and re-verified as non-degenerate on real fixture data.
+    Zero-width intervals are excluded from every field here (see below); `n_zero_ci_width`
+    and `n_zero_py_ci_width` report how many there were, so a degenerate reference shows up
+    as a count rather than as fake agreement or fake disagreement.
+
+    HISTORY (resolved 2026-07-23): MATLAB's CI maps on the sub-10bbbdownsample fixture were
+    zero-width for every voxel and every model, which made these metrics non-functional. The
+    cause was that commit a9d78b6 regenerated the baseline on a GPU machine, and the gpufit
+    path zero-pads CI columns (FXLfit_generic.m) -- only the CPU fit()/confint() path produces
+    real intervals. Fixed by regenerating with force_cpu=1; the generator now refuses to run
+    otherwise. The maps carry real widths today and these fields are live.
+
+    Still reported-only, never gated: the fields are diagnostics, and no threshold for them
+    has been calibrated.
     """
     mask = (
         np.isfinite(py_map)
@@ -368,15 +373,24 @@ def _ci_metrics(
     else:
         out["ci_norm_absdiff_median"] = float("nan")
         out["ci_norm_absdiff_p95"] = float("nan")
-    if x.size:
-        out["prop_py_outside_matlab_ci"] = float(np.mean((x < lo) | (x > hi)))
+    # Restrict to positive-width intervals, as ci_norm_absdiff already does. A zero-width
+    # "interval" makes almost any value trivially "outside" it, which turns a degenerate CI
+    # into a fake ~1.0 disagreement rather than the missing datum it actually is.
+    if np.any(positive_width):
+        out["prop_py_outside_matlab_ci"] = float(
+            np.mean((x[positive_width] < lo[positive_width]) | (x[positive_width] > hi[positive_width]))
+        )
     else:
         out["prop_py_outside_matlab_ci"] = float("nan")
     if py_ci_low is not None and py_ci_high is not None:
         plo = py_ci_low[mask]
         phi = py_ci_high[mask]
-        if x.size:
-            out["prop_matlab_outside_py_ci"] = float(np.mean((y < plo) | (y > phi)))
+        py_positive_width = (phi - plo) > 0
+        out["n_zero_py_ci_width"] = int(np.count_nonzero(~py_positive_width))
+        if np.any(py_positive_width):
+            out["prop_matlab_outside_py_ci"] = float(
+                np.mean((y[py_positive_width] < plo[py_positive_width]) | (y[py_positive_width] > phi[py_positive_width]))
+            )
         else:
             out["prop_matlab_outside_py_ci"] = float("nan")
     return out
@@ -446,6 +460,20 @@ def _canonical_roi_token(name: str) -> str:
     return text
 
 
+# Columns excluded from the ROI-xls gate, per model.
+#
+# tissue_uptake's Fp (plasma flow) is not reliably estimable on this fixture: at 15.84 s frames
+# the bolus rise occupies a single sample, and Fp is determined almost entirely by that leading
+# edge. It is also the parameter most exposed to how the AIF's peak is fitted, which is exactly
+# the thing the data cannot pin down (the peak has leverage 1 in the biexponential model -- see
+# docs/project-management/projects/archived/batch-parity/aif_fitting_parity.md). Python and MATLAB have
+# never agreed on it here; every other tissue_uptake column agrees to <0.004. Gating on Fp
+# measures the fixture's temporal resolution, not the port's correctness.
+ROI_XLS_EXCLUDED_COLUMNS = {
+    "tissue_uptake": ("fp", "fp 95% low", "fp 95% high"),
+}
+
+
 def _compare_roi_table_against_reference(
     *,
     model_name: str,
@@ -468,6 +496,13 @@ def _compare_roi_table_against_reference(
     )
     assert len(py_rows) > 0, f"{model_name}: ROI XLS has no data rows"
 
+    excluded = {c.strip().lower() for c in ROI_XLS_EXCLUDED_COLUMNS.get(model_name, ())}
+    value_names = [str(c).strip().lower() for c in py_header[2:]]
+    keep_mask = np.asarray([name not in excluded for name in value_names], dtype=bool)
+    dropped = sorted(excluded.intersection(value_names))
+    if dropped:
+        _parity_log(f"{model_name}_roi_xls: excluding column(s) {dropped} from the gate")
+
     abs_errors: list[float] = []
     for row_idx, (py_row, ref_row) in enumerate(zip(py_rows, ref_rows)):
         assert len(py_row) == len(ref_row), (
@@ -482,8 +517,8 @@ def _compare_roi_table_against_reference(
             f"python={py_roi_name!r} ref={ref_roi_name!r}"
         )
 
-        py_vals = np.asarray([float(v) for v in py_row[2:]], dtype=np.float64)
-        ref_vals = np.asarray([float(v) for v in ref_row[2:]], dtype=np.float64)
+        py_vals = np.asarray([float(v) for v in py_row[2:]], dtype=np.float64)[keep_mask]
+        ref_vals = np.asarray([float(v) for v in ref_row[2:]], dtype=np.float64)[keep_mask]
         both_nan = np.isnan(py_vals) & np.isnan(ref_vals)
         both_finite = np.isfinite(py_vals) & np.isfinite(ref_vals)
         valid = both_nan | both_finite
@@ -717,11 +752,12 @@ def test_bbb_p19_region_parity(
                 cpu_excl = auto_excl = cpu_auto_excl = None
 
             for region_name, region_mask in regions.items():
-                # Tofts Ktrans is non-identifiable in the GM ROI (a clustered patch of noisy,
-                # weakly-enhancing voxels where the objective is flat along Ktrans; Python SSE
-                # is equal-or-better than MATLAB). Gate tofts on brain+WM only; GM reported-only.
-                # Patlak is identifiable everywhere, so it gates on all regions.
-                ktrans_gated = gated_model and not (model_name == "tofts" and region_name == "gm")
+                # Every gated model gates on every region. The former tofts+GM exception (GM
+                # reported-only, on the grounds that tofts Ktrans was non-identifiable there)
+                # was retired 2026-07-28: the Stage-B AIF fix (aif_fitting_parity.md S11) lifted
+                # tofts_ktrans_gm to corr 0.980 (cpu) / 0.992 (auto) against a 0.95 floor, so the
+                # hand-curated exception no longer describes anything real.
+                ktrans_gated = gated_model
                 run_check(
                     py_cpu_ktrans, matlab_ktrans,
                     label=f"{model_name}_ktrans_{region_name}_cpu_vs_matlab",

@@ -3,7 +3,7 @@
 Consumes a Stage-D `*_postfit_arrays.npz` (written when `write_postfit_arrays=true`) plus, when
 available, the sibling Stage-B checkpoint `checkpoints/b_out.json`, and produces per-voxel
 **reduced χ²** and **noise-σ** maps using estimator B (`dce_sigma`). Reduced χ² is the first QoF
-signal in `docs/project-management/projects/batch-parity/sigma_estimators.md`.
+signal in `docs/project-management/projects/archived/batch-parity/sigma_estimators.md`.
 
 σ is estimated from `ct_voxel_mM` (per-voxel `C(t)`) by the successive-difference method, with the
 bolus wash-in excised using the injection timing in `b_out.json`. Reduced χ² is then

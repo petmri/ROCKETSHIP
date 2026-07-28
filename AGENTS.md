@@ -127,9 +127,21 @@ The steady-state/baseline window follows its own precedence in `_resolve_baselin
 (`python/dce_pipeline.py`): explicit `stage_overrides.steady_state_end` → a
 `SteadyStateEndTimeIndex` field in the AIF file's JSON sidecar (the documented mechanism
 for a fixed/reproducible run — same discovery convention as the metadata sidecar, `.nii`/
-`.nii.gz` swapped for `.json`) → auto-detect via `stage_overrides.steady_state_auto_method`
-(`piecewise_constant` is the default and is the MATLAB `find_end_ss` port; `legacy_sobel`
-ports the different `dce_auto_aif.m` heuristic; `glr`/`tv` are additional ported detectors).
+`.nii.gz` swapped for `.json`) → auto-detect via `stage_overrides.steady_state_auto_method`.
+`tv` is the default (MATLAB `dce/find_end_ss_tv.m`): a total-variation denoise followed by the
+first significant upward jump. `biexp_fit` (MATLAB `dce/find_end_ss_biexp.m`) fits a 6-parameter
+biexponential to the mean AIF *signal* curve and, unlike the shape heuristics, also reports where
+the injection ends — but on 280 human-rated sessions it is right 74.6% of the time against `tv`'s
+95.0%, always erring one frame late, so it is selectable rather than default (see S11 in
+`docs/project-management/projects/archived/batch-parity/aif_fitting_parity.md`). `piecewise_constant` ports
+MATLAB `find_end_ss`; `legacy_sobel` ports the different `dce_auto_aif.m` heuristic; `glr` is an
+additional ported detector.
+
+Stage B's AIF fit (`_fit_aif_biexp`, `dce/AIFbiexpfithelp.m`) always holds `t_base_end` at the
+resolved baseline end and always fits the upslope duration as `t0_exp = t_base_end + delta`,
+with `delta` floored at one frame. There is no `start_injection_min` option: the injection start
+*is* the baseline end. Background and rationale:
+`docs/project-management/projects/archived/batch-parity/aif_fitting_parity.md`.
 
 ### Backend selection (Stage D acceleration)
 
@@ -202,7 +214,7 @@ Do not leave important caveats only in commit messages or chat; record them in t
 When you discover a problem that cannot be fixed immediately, document it before moving on:
 - Write it up under `docs/project-management/projects/<initiative>/` -- integrate it into
   an existing initiative folder if the problem clearly belongs to one (e.g. a Stage-D
-  backend divergence found while working on batch parity goes in `projects/batch-parity/`),
+  backend divergence found while working on batch parity goes in `projects/archived/batch-parity/`),
   or create a new `projects/<slug>/` folder if it doesn't fit any existing initiative.
   Include what's confirmed (root cause, evidence), what's still open, and any agreed
   near-term mitigation, so the next person (or your future self) doesn't have to

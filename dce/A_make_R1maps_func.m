@@ -644,6 +644,16 @@ elseif (steady_state_time == -2)
         dimz = dimz;
         % end_ss = dce_auto_aif(DYNAMLV,lvind,dimx,dimy,dimz,injection_duration);
         % [end_ss, end_injection] = find_end_ss(DYNAMLV);
+        % [end_ss, end_injection] = find_end_ss_biexp(DYNAMLV);
+        % find_end_ss_tv is the default. find_end_ss_biexp fits both transition times
+        % together and so also reports a fractional upslope end, which is attractive -- but
+        % measured against 280 human-rated sessions it lands on the right baseline end 74.6%
+        % of the time against find_end_ss_tv's 95.0%, and every one of its errors is one
+        % frame late. It absorbs the first lightly-enhanced frame into the baseline because
+        % doing so costs almost nothing in SSE, and no goodness-of-fit criterion can correct
+        % that: the late answer genuinely fits *better*. See S11 in
+        % docs/project-management/projects/archived/batch-parity/aif_fitting_parity.md.
+        % Matches Python's default steady_state_auto_method='tv'.
         [end_ss, end_injection] = find_end_ss_tv(DYNAMLV);
     end
     start_injection = end_ss;

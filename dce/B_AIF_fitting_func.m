@@ -345,13 +345,17 @@ end
 
 b = figure;
 subplot(1,2,1)
-plot(timer, CpROI, 'r.');
+plot(timer, CpROI, 'r.', 'DisplayName', 'Measured plasma curve');
 hold on;
-plot(timer, Cp_use, 'b');
+plot(timer, Cp_use, 'b', 'DisplayName', M{2});  % 'Fitted Curve' / 'Using Raw Curve' / ...
+% Mark the fitted transition times when they exist (fit_aif==1 populates xAIF).
+if exist('xAIF', 'var') && numel(xAIF) >= 6
+    plot_aif_transition_lines(xAIF(5), xAIF(6));
+end
 if (fit_aif==5)
     legend({'Original Plasma Curve', 'Smoothed Curve (rlowess)'});
 else
-    legend(M);
+    legend('show', 'Location', 'best');
 end
 disp('AIF mmol:')
 perLine = 14;
@@ -366,13 +370,16 @@ ylabel('Concentration (mM)');
 xlabel('Time (min)');
 
 subplot(1,2,2)
-plot(timer, StlvROI, 'r.');
+plot(timer, StlvROI, 'r.', 'DisplayName', 'Measured signal curve');
 hold on;
-plot(timer, Stlv_use, 'b');
+plot(timer, Stlv_use, 'b', 'DisplayName', M{2});
+if exist('xAIF', 'var') && numel(xAIF) >= 6
+    plot_aif_transition_lines(xAIF(5), xAIF(6));
+end
 if (fit_aif==5)
     legend({'Original Plasma Curve: Raw data', 'Smoothed Curve (rlowess)'});
 else
-    legend(M);
+    legend('show', 'Location', 'best');
 end
 hold off;
 title([root_modified ' - AIF Bi-Exponential, Linear Upslope'], 'Interpreter', 'none');

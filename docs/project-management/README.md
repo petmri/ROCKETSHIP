@@ -11,10 +11,6 @@ This folder contains canonical planning and status documents for the Python tran
 
 ## Project Folders
 
-- `projects/batch-parity/`
-  - `batch_parity.md`: MATLAB vs Python batch parity tracking and diagnostics.
-  - `quality_of_fit.md`: per-voxel quality-of-fit metric (reduced χ²) to exclude unreliable voxels — status + remaining work (parity side landed `153728e`; data-analysis usability next).
-  - `sigma_estimators.md`: noise-σ estimation sub-plan for the reduced-χ² QoF signal (estimators B/C, calibration, σ-outlier robustification).
 - `projects/osipi-verification/`
   - `osipi_summary.md`: OSIPI accuracy summary and peer-comparison snapshot.
 - `projects/qualification/`
@@ -23,6 +19,22 @@ This folder contains canonical planning and status documents for the Python tran
   - `PHANTOM_GT_QUALIFICATION_STATUS.md`: synthetic phantom GT qualification status.
 - `projects/large-data-distribution/`
   - `large_data_distribution.md`: options for distributing large test/parity data outside the main git repo.
+
+## Archived Projects
+
+Historical snapshots under `projects/archived/`. Each carries a status header saying what was
+completed and where any residual open work went. **They are not live tracking docs** — read them
+for how something was built and why, not for what is outstanding.
+
+- `projects/archived/batch-parity/` — MATLAB vs Python DCE parity (archived 2026-07-28, complete:
+  12/12 gated voxelwise + 4/4 ROI-xls, no hand-curated exceptions). Contains `batch_parity.md`
+  (the parent), `aif_fitting_parity.md` (Stage-B AIF algorithm unification), `quality_of_fit.md`
+  (per-voxel reduced-χ² reliability) and `sigma_estimators.md` (noise-σ estimation). Residuals
+  live in `TODO.md`: parity testing gaps A/B, QoF-aware ROI stats, `shrink_sigma` default.
+- `projects/archived/steady-state-tv-default/` — choosing and rolling out the `tv` baseline-end
+  detector.
+- `projects/archived/stage-d-fit-consolidation/` — Stage-D fit-backend consolidation across all
+  five models.
 
 ## Update Policy
 

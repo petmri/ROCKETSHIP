@@ -7,6 +7,27 @@ Do not track open items in this file; active work belongs in `docs/project-manag
 
 Completed items moved from `TODO.md` on 2026-03-05 to keep the active backlog short.
 
+## Completed Recent Updates (2026-07-28)
+- [x] **DCE batch-parity project complete and archived** to
+  `docs/project-management/projects/archived/batch-parity/`. MATLAB-vs-Python DCE parity now
+  stands at **12/12 gated voxelwise checks** and **4/4 ROI-xls checks**, with **no hand-curated
+  exceptions** — the last one (tofts+GM reported-only) was retired once the Stage-B AIF fix made
+  it unnecessary (corr 0.980 cpu / 0.992 auto against a 0.95 floor). ROI-xls `max_abs_err`:
+  `tofts` 0.001440, `ex_tofts` 0.000013, `patlak` 0.000013, `tissue_uptake` 0.002235 — roughly a
+  hundredfold better than where the project started, with `ex_tofts`/`patlak` at the ~1.3e-5 level
+  predicted for two pipelines running genuinely the same algorithm. Four numbered issues closed:
+  patlak+brain non-identifiability (QoF χ² masking), the Stage-B AIF algorithm difference
+  (S1–S12 of `aif_fitting_parity.md`: unified 5-parameter fit, `tv` detector at 95.0% on 280
+  human-rated sessions, `aif_Robust` off), zero-width MATLAB CI maps (CPU regeneration; the
+  generator now refuses to run with `force_cpu ~= 1`), and batch-regression coverage (won't-do).
+  Sub-projects `quality_of_fit.md` (per-voxel reduced-χ² reliability, shipped and validated) and
+  `sigma_estimators.md` (estimator B + eBayes variance moderation, accepted) archived alongside.
+  Residual open work moved to `TODO.md`: parity testing gaps A (Stage-B AIF contract gate) and B
+  (backend-equivalence gate), QoF-aware ROI stats, and the `shrink_sigma` default decision.
+  Two silent-wrong-answer hazards were closed in the same pass — `tv`'s no-detection fallback now
+  reports a distinct mode instead of a plausible `end_ss = 1`, and the CI parity metrics now
+  exclude zero-width intervals instead of scoring them as total disagreement.
+
 ## Completed Recent Updates (2026-07-22)
 - [x] **Stage-D fit-backend consolidation, archived.** All five accelerated-eligible
   models (`patlak`, `tofts`, `ex_tofts`, `tissue_uptake`, `2cxm`) migrated onto one shared
@@ -22,7 +43,7 @@ Completed items moved from `TODO.md` on 2026-03-05 to keep the active backlog sh
   gate. Verified throughout: full `pytest tests/python -q` (195 passed) and `-m osipi`
   green after every pass. One known residual (patlak+brain-ROI non-identifiability at a
   `vp` bound) was tabled, not fixed by this project -- folded into the ongoing
-  `docs/project-management/projects/batch-parity/batch_parity.md` tracking. Archived to
+  `docs/project-management/projects/archived/batch-parity/batch_parity.md` tracking. Archived to
   `docs/project-management/projects/archived/stage-d-fit-consolidation/`.
 - [x] **`tv` steady-state-end detector ported to MATLAB and made the default in both
   languages** (`dce/find_end_ss_tv.m`, `python/dce_pipeline.py`'s `_resolve_baseline_window`
@@ -36,7 +57,7 @@ Completed items moved from `TODO.md` on 2026-03-05 to keep the active backlog sh
   typo), both confirmed independent of the steady-state change. **Not yet committed**:
   flipping the default surfaced parity-gate failures (`patlak_ktrans_brain`,
   `tofts`/`tissue_uptake` ROI-xls) -- root-cause hypothesis and next steps folded into
-  `docs/project-management/projects/batch-parity/batch_parity.md` (the brain-ROI one
+  `docs/project-management/projects/archived/batch-parity/batch_parity.md` (the brain-ROI one
   looks like the same already-tabled non-identifiability issue from the Stage-D
   consolidation above). Archived to
   `docs/project-management/projects/archived/steady-state-tv-default/`.

@@ -96,6 +96,23 @@ for i = 1:numel(required)
     end
 end
 
+% The committed baseline must come from the CPU fit()/confint() path, not gpufit.
+% This is not a preference: gpufit zero-pads the CI columns (FXLfit_generic.m), so a
+% GPU-generated baseline silently ships all-zero *_ci_low/*_ci_high maps, and its
+% parameter values diverge from MATLAB CPU (see the parity-backend-divergence note).
+% That is exactly what happened at commit a9d78b6 and went undetected for months --
+% see issue #3 in docs/project-management/projects/archived/batch-parity/batch_parity.md.
+% Checked here rather than set here on purpose: dce_preferences.txt is a tracked CRLF
+% file, and having a generator rewrite it is its own corruption hazard. Fail fast,
+% before Stage A/B burn an hour, and make the operator perform the documented step.
+cpu_prefs = parse_preference_file('dce_preferences.txt', 0, {'force_cpu'}, {0});
+if ~isequal(str2num(cpu_prefs.force_cpu), 1) %#ok<ST2NM>
+    error(['generate_dce_tofts_parity_map:ForceCpuRequired\n' ...
+        'dce/dce_preferences.txt has force_cpu = %s, but parity baselines must be\n' ...
+        'generated on the CPU path. Set "force_cpu = 1", re-run, then revert it to 0.\n' ...
+        'Full recipe: tests/README.md.'], strtrim(cpu_prefs.force_cpu));
+end
+
 filevolume = 1;
 noise_pathpick = true;
 noise_pixsize = 16;

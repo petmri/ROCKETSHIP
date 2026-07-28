@@ -32,6 +32,14 @@ class DceInputs:
         return all(p.exists() for p in [self.dynamic, self.aif_mask, self.roi_mask, self.t1_map])
 
 
+# dceprep naming convention. Exported so tooling that has to select the same files the pipeline
+# would (e.g. tests/python/run_baseline_end_reliability.py) can share the pattern instead of
+# keeping a copy of the string that silently stops matching if the convention changes.
+DYNAMIC_PATTERN = "*desc-bfcz_DCE.nii*"
+DYNAMIC_FALLBACK_PATTERN = "*DCE.nii*"
+AIF_MASK_PATTERN = "*desc-AIF_T1map.nii*"
+
+
 def _find_one(parent: Path, pattern: str) -> Optional[Path]:
     """Find first file matching glob pattern in directory (sorted)."""
     if not parent.is_dir():
@@ -62,12 +70,12 @@ def discover_dce_inputs(session: BidsSession) -> DceInputs:
     anat_deriv = session.derivatives_path / "anat"
 
     # Dynamic image
-    dynamic = _find_one(dce_deriv, "*desc-bfcz_DCE.nii*")
+    dynamic = _find_one(dce_deriv, DYNAMIC_PATTERN)
     if dynamic is None:
-        dynamic = _find_one(dce_deriv, "*DCE.nii*")
+        dynamic = _find_one(dce_deriv, DYNAMIC_FALLBACK_PATTERN)
 
     # AIF mask
-    aif = _find_one(dce_deriv, "*desc-AIF_T1map.nii*")
+    aif = _find_one(dce_deriv, AIF_MASK_PATTERN)
 
     # ROI mask
     roi = _find_one(anat_deriv, "*space-DCEref_desc-brain_mask.nii*")

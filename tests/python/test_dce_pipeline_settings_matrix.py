@@ -63,7 +63,10 @@ def _make_config(root: Path, output_dir: Path, extra_overrides: dict | None = No
         "tr_ms": float(meta["tr_ms"]),
         "fa_deg": float(meta["fa_deg"]),
         "time_resolution_sec": float(meta["time_resolution_sec"]),
-        "start_injection_min": float(meta["start_injection_min"]),
+        # The injection start is always the resolved baseline end, so it is pinned via
+        # steady_state_end rather than overridden directly.
+        "steady_state_end": int(round(float(meta["start_injection_min"])
+                                      / (float(meta["time_resolution_sec"]) / 60.0))) + 1,
         "end_injection_min": float(meta["end_injection_min"]),
         "relaxivity": float(meta["relaxivity"]),
         "hematocrit": float(meta["hematocrit"]),
@@ -311,18 +314,21 @@ def test_script_level_aif_type_and_injection_aliases(tiny_root: Path) -> None:
             Path(tmp) / "alias_aif",
             {
                 "aif_type": 2,
-                "start_injection": 0.75,
+                "steady_state_end": 4,
                 "end_injection": 1.05,
             },
         )
-        _drop_stage_overrides(config, "aif_curve_mode", "start_injection_min", "end_injection_min")
+        _drop_stage_overrides(config, "aif_curve_mode", "end_injection_min")
 
         stage_a = _run_stage_a_real(config)
         stage_b = _run_stage_b_real(config, stage_a)
 
         assert stage_b["aif_mode"] == "raw"
         assert stage_b["aif_name"] == "raw"
-        assert float(stage_b["start_injection_min"]) == pytest.approx(0.75)
+        # start_injection is derived: steady_state_end = 4 (1-based last baseline frame) sits at
+        # timer[3], not overridden independently.
+        dt = float(stage_a["time_resolution_min"])
+        assert float(stage_b["start_injection_min"]) == pytest.approx(3.0 * dt)
         assert float(stage_b["end_injection_min"]) == pytest.approx(1.05)
         assert np.allclose(stage_b["arrays"]["Cp_use"], stage_b["arrays"]["CpROI"])
 

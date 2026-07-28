@@ -427,6 +427,24 @@ class TestDcePipeline:
         assert 8 <= int(out["end_ss_1b"]) <= 12
         assert out["lambda_tv"] >= 0.0
         assert 0.0 <= out["strength"] <= 1.0
+        assert int(out["valid_jump_count"]) >= 1
+
+    def test_tv_baseline_end_reports_no_jump_distinctly_from_a_frame_1_detection(self) -> None:
+        # A curve with no contrast at all must not come back looking like a confident
+        # detection of a bolus arriving on frame 2. Both cases return end_ss_1b == 1, so the
+        # mode is the only thing that separates "I found nothing" from "I found it at 1".
+        rng = np.random.default_rng(0)
+        flat = 95.0 + rng.normal(0.0, 0.1, size=48)
+        stlv = np.tile(flat[:, np.newaxis], (1, 5))
+
+        out = _tv_baseline_end(stlv)
+
+        assert out["method"] == "tv"
+        assert out["mode"] == "fallback_no_jump_detected"
+        assert int(out["end_ss_1b"]) == 1
+        assert int(out["valid_jump_count"]) == 0
+        # Confidence must agree with the mode rather than being computed from a zero jump.
+        assert out["strength"] == 0.0
 
     def test_resolve_baseline_window_uses_selected_auto_method_when_end_not_manual(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -503,6 +521,34 @@ class TestDcePipeline:
             assert info["method_requested"] == "none"
             assert info["method_used"] == "tv"
             assert info["source"] == "default_auto_method:tv"
+
+    def test_resolve_baseline_window_biexp_fit_is_selectable(self) -> None:
+        """`biexp_fit` is no longer the default (S11) but is still shipped and selectable.
+
+        Without this, the only coverage of `_biexp_fit_baseline_end` here was incidental --
+        it came from being the default, and vanished with it.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            config.stage_overrides = {
+                "stage_a_mode": "scaffold",
+                "use_dce_preferences": False,
+                "steady_state_auto_method": "biexp_fit",
+            }
+            mean_curve = np.full(24, 100.0, dtype=np.float64)
+            mean_curve[8:12] = np.linspace(100.0, 140.0, 4)
+            mean_curve[12:] = 140.0
+            stlv = np.tile(mean_curve[:, np.newaxis], (1, 4))
+
+            ss_start, ss_end, info = _resolve_baseline_window(config, n_timepoints=24, stlv=stlv)
+
+            assert ss_start == 0
+            assert 1 <= ss_end <= 12
+            assert info["method_requested"] == "biexp_fit"
+            assert info["method_used"] == "biexp_fit"
+            assert info["source"] == "steady_state_auto_method:biexp_fit"
+            # biexp_fit is seeded by tv and records where it fell back to it.
+            assert info["auto_details"]["seed_method"] == "tv"
 
     def test_resolve_baseline_window_uses_aif_sidecar_when_present(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1338,10 +1384,12 @@ class TestDcePipeline:
             config.stage_overrides = {
                 "stage_b_mode": "real",
                 "aif_curve_mode": "fitted",
-                "aif_biexp_timing_method": "fit_transition_times",
                 "start_time_min": 0.0,
                 "end_time_min": 0.0,
                 "aif_MaxFunEvals": 4000,
+                # Pinned rather than inherited: `aif_Robust` now defaults to `off` (S11), and
+                # this test is the only coverage of the Tukey IRLS path, which is still shipped.
+                "aif_Robust": "Bisquare",
             }
             stage_a = _make_stage_a_payload()
 
@@ -1349,8 +1397,9 @@ class TestDcePipeline:
             assert result["impl"] == "real"
             assert result["aif_name"] == "fitted"
             assert "fit_params_cp" in result
-            assert result["fit_timing_method_cp"] == "fit_transition_times"
-            assert result["fit_timing_method_stlv"] == "fit_transition_times"
+            assert result["fit_robust_mode_cp"] == "bisquare"
+            assert result["fit_robust_mode_stlv"] == "bisquare"
+            assert int(result["fit_robust_iterations_cp"]) >= 1
             assert result["fit_params_cp"].shape == (6,)
             assert result["fit_params_stlv"].shape == (6,)
             assert float(result["fit_t0_exp_cp"]) > float(result["fit_t_base_end_cp"])
@@ -1379,7 +1428,6 @@ class TestDcePipeline:
                 "stage_b_mode": "real",
                 "aif_curve_mode": "raw",
                 "auto_find_injection": 1,
-                "start_injection_min": 0.20,
                 "end_injection_min": 0.30,
             }
             stage_a = _make_stage_a_payload()
@@ -1389,6 +1437,19 @@ class TestDcePipeline:
             result = _run_stage_b_real(config, stage_a)
             assert float(result["start_injection_min"]) == pytest.approx(0.61)
             assert float(result["end_injection_min"]) == pytest.approx(0.96)
+
+    def test_stage_b_real_rejects_start_injection_override(self) -> None:
+        for key in ("start_injection_min", "start_injection"):
+            with tempfile.TemporaryDirectory() as tmp:
+                config = _make_config(Path(tmp))
+                config.stage_overrides = {
+                    "stage_b_mode": "real",
+                    "aif_curve_mode": "raw",
+                    key: 0.20,
+                }
+                stage_a = _make_stage_a_payload()
+                with pytest.raises(ValueError, match=f"{key} was removed"):
+                    _run_stage_b_real(config, stage_a)
 
     def test_stage_b_real_imported_mode_npz(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

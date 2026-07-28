@@ -35,18 +35,23 @@ single **`--parity-suite`** selector and split into **gated** vs **reported-only
 - **`--parity-suite=all`**: union of the above.
 
 **Regions and the gated set.** Each model/param is evaluated over three ROIs — whole **brain** (sparse),
-**GM**, and **WM**. Patlak Ktrans gates on all three. Tofts Ktrans gates on **brain + WM only**; **tofts-GM
-is reported-only** because Tofts Ktrans is non-identifiable in that GM patch (flat objective along Ktrans;
-Python's fit is equal-or-better than MATLAB's by SSE — see `docs/parity-testing-improvement-plan.md`).
-Non-Ktrans params (ve/vp/fp) and backend-consistency (auto-vs-cpu) are always reported, never gated.
+**GM**, and **WM**. Both gated models (tofts, patlak) gate Ktrans on all three regions: **12 gated checks,
+no exceptions.** The former tofts-GM exception (reported-only, on the grounds that Tofts Ktrans was
+non-identifiable in that GM patch) was retired 2026-07-28 — the Stage-B AIF fix lifted tofts-GM to
+`corr` 0.980 (cpu) / 0.992 (auto) against a 0.95 floor. Non-Ktrans params (ve/vp/fp) and
+backend-consistency (auto-vs-cpu) are always reported, never gated.
 
 **Reported metrics.** Every check logs `corr` (Spearman rank correlation, not Pearson — robust to the
 single high-leverage/non-identifiable voxel that can otherwise dominate a sum-of-products statistic;
-see `docs/project-management/projects/batch-parity/batch_parity.md`) and `rmse`; each Python-vs-MATLAB
+see `docs/project-management/projects/archived/batch-parity/batch_parity.md`) and `rmse`; each Python-vs-MATLAB
 parameter check also logs CI-aware diagnostics — **`ci_norm_absdiff_p95`** (p95 of `|py−matlab| /
 CI-width`, both sides are 95% CI) and **proportion outside the CI**. These CI-aware fields are
-reported-only, not gated — and are currently non-functional (always degenerate) on the downsample
-fixture, see the note in `_ci_metrics()`. A full summary JSON is written to `--parity-summary-dir`.
+reported-only, never gated. They were non-functional until 2026-07-23 (the MATLAB reference had been
+regenerated on GPU, and gpufit zero-pads CI columns); the reference is CPU-generated again and the
+MATLAB-side fields are live. The Python-side `prop_matlab_outside_py_ci` is still `NaN` on `auto`
+runs for the same underlying reason — gpufit produces no CIs — and now reports that honestly via
+`n_zero_py_ci_width` rather than as a spurious 100% disagreement. See `_ci_metrics()`.
+A full summary JSON is written to `--parity-summary-dir`.
 
 `test_bbb_p19_region_parity` replaced the former per-scenario voxelwise parity tests
 (`*_tofts_ktrans`, `*_primary_models_ktrans_cpu`). Gated checks whose masks collapse to `<2` valid
@@ -145,6 +150,30 @@ python tests/python/run_baseline_end_reliability.py \
   --output-dir out/baseline_end_reliability   # end-baseline detector accuracy vs AIFArtist-rated GT
 ```
 
+`run_baseline_end_reliability.py` compares five detectors: `piecewise_constant`, `legacy_sobel`,
+`glr`, `tv`, and `biexp_fit` (the production default). `biexp_fit` reads its `aif_*` settings from
+`--config-template` (default `python/dce_default.json`) so the harness measures the configuration
+that actually ships; the other four are pure functions of the signal curve and ignore it. Because
+it is a model fit rather than a shape heuristic it also reports a fractional injection end
+(`t0_exp`) and a fitted curve — both drawn on the per-session figures, with the extra diagnostics
+in `per_session_details.csv`. It is seeded from `tv` and falls back to it, so check the
+`biexp_fit outcome breakdown` in the summary before reading its accuracy row as independent.
+
+For a dataset that was never rated in AIFArtist there is no `SteadyStateEndTimeIndex` to score
+against, so pass `--no-ground-truth` to discover AIF masks by filename instead. Everything still
+runs; the accuracy table is replaced by a cross-detector agreement table. When `--raw-root` points
+at a derivatives tree rather than a raw one, also pass `--dynamic-pattern` so the detectors see the
+series production fits — otherwise the one-dynamic-per-session heuristic picks alphabetically among
+`desc-bfc`, `desc-hmc`, `desc-biases`, and friends:
+
+```bash
+python tests/python/run_baseline_end_reliability.py --no-ground-truth \
+  --derivatives-root RUNNER_DATA/derivatives/dceprep-python \
+  --raw-root RUNNER_DATA/derivatives/dceprep-python \
+  --dynamic-pattern '*desc-bfcz_DCE.nii*' \
+  --output-dir out/baseline_end_reliability_runner
+```
+
 Generate Part E NPZ inputs from Stage D with `stage_overrides.write_postfit_arrays=true`.
 
 ## MATLAB tests and baselines
@@ -162,7 +191,13 @@ writing `Dyn-1_*_fit_rois.xls` — the ROI-xls baselines then go stale relative 
 maps the very next time only this command (without `roiList`) is rerun after an algorithm
 change (hit in practice: `find_end_ss` -> `find_end_ss_tv` migration regenerated the `.nii`
 maps but left `.xls` on the old detector, breaking `test_bbb_p19_roi_xls_parity` for `tofts`/
-`tissue_uptake` until backfilled). This box's `gpufit` mex is compiled and a GPU is present, so
+`tissue_uptake` until backfilled).
+
+When regenerating after a Stage-A/B timing change, also check that
+`_make_config`'s `steady_state_auto_method` in `tests/python/test_dce_pipeline_parity_metrics.py`
+still names the same detector `A_make_R1maps_func.m` calls (currently `find_end_ss_tv` /
+`"tv"`). A mismatch there compares two different baseline-end algorithms and reads as
+a model disagreement, the same trap the `startInjectionMin` note below describes. This box's `gpufit` mex is compiled and a GPU is present, so
 also set `force_cpu = 1` in `dce/dce_preferences.txt` before running (revert to `0` after) to
 match the CPU-path reference `test_bbb_p19_roi_xls_parity`/`test_bbb_p19_region_parity` gate
 against — otherwise gpufit's CI zero-padding contaminates the regenerated maps (see `60c43da`).
