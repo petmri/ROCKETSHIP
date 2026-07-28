@@ -96,22 +96,12 @@ for i = 1:numel(required)
     end
 end
 
-% The committed baseline must come from the CPU fit()/confint() path, not gpufit.
-% This is not a preference: gpufit zero-pads the CI columns (FXLfit_generic.m), so a
-% GPU-generated baseline silently ships all-zero *_ci_low/*_ci_high maps, and its
-% parameter values diverge from MATLAB CPU (see the parity-backend-divergence note).
-% That is exactly what happened at commit a9d78b6 and went undetected for months --
-% see issue #3 in docs/project-management/projects/archived/batch-parity/batch_parity.md.
-% Checked here rather than set here on purpose: dce_preferences.txt is a tracked CRLF
-% file, and having a generator rewrite it is its own corruption hazard. Fail fast,
-% before Stage A/B burn an hour, and make the operator perform the documented step.
-%
-% What is checked is whether this run would *actually* reach gpufit, mirroring the
-% USE_GPU decision in FXLfit_generic.m and D_fit_voxels_func.m: gpufit is used only when
-% CUDA is available AND force_cpu is off. Checking the preference alone is wrong -- on a
-% machine without CUDA (every CI runner) the fit is already on the CPU path, and demanding
-% force_cpu = 1 there blocks a correct run. That is exactly what broke the parity_checks
-% job on 2026-07-28.
+% Baselines must come from the CPU fit()/confint() path: gpufit zero-pads the CI columns and
+% diverges from MATLAB CPU, which shipped all-zero CI maps undetected for months (issue #3,
+% docs/project-management/projects/archived/batch-parity/batch_parity.md).
+% Mirrors the fitter's own USE_GPU test (FXLfit_generic.m) -- checking force_cpu alone fires
+% on CUDA-less machines already on the CPU path. Checked, not set: dce_preferences.txt is
+% tracked CRLF, so a generator rewriting it is its own hazard.
 try
     gpu_available = GpufitCudaAvailableMex;
 catch

@@ -247,6 +247,19 @@ This is an academic software project. Favor:
 - transparent algorithm choices and testable interfaces
 - documentation that makes assumptions and limitations explicit
 
+### Comment style
+Keep code comments brief — one or two lines is the norm, and prefer none over restating
+what the code already says. Explain *why*, not *what*.
+
+Multi-line comment blocks need to earn their length. A short pointer to the durable record
+beats an inline retelling: cite the commit, the issue, or the file in
+`docs/project-management/` and let that carry the detail. Narrative belongs in those docs
+and in commit messages, not in the source.
+
+The exception is a non-obvious constraint that will be silently broken by someone editing
+nearby — a numerical-stability requirement, a MATLAB-parity contract, a guard whose
+condition is subtler than it looks. State it in a sentence or two, then link out.
+
 ## Porting Focus
 Primary focus:
 - Parametric maps, especially T1 fitting (with GUI support)

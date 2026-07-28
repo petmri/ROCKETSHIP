@@ -167,7 +167,8 @@ jobs:
           python tests/contracts/generate_python_results.py --output /tmp/python_results.json
           python tests/contracts/compare_with_matlab_baseline.py --python-results /tmp/python_results.json --require-all
 
-      - name: Run Python DCE region parity (downsample fixture, gated tofts/patlak Ktrans + ROI xls)
+      # ROI-xls parity is a separate test; it runs unfiltered in python_checks, not here.
+      - name: Run Python DCE region parity (downsample fixture, gated tofts/patlak Ktrans)
         run: |
           python -m pytest tests/python/test_dce_pipeline_parity_metrics.py::test_bbb_p19_region_parity \
             --dataset-root tests/data/BIDS_test \
