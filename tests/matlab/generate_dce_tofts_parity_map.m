@@ -105,12 +105,32 @@ end
 % Checked here rather than set here on purpose: dce_preferences.txt is a tracked CRLF
 % file, and having a generator rewrite it is its own corruption hazard. Fail fast,
 % before Stage A/B burn an hour, and make the operator perform the documented step.
-cpu_prefs = parse_preference_file('dce_preferences.txt', 0, {'force_cpu'}, {0});
-if ~isequal(str2num(cpu_prefs.force_cpu), 1) %#ok<ST2NM>
+%
+% What is checked is whether this run would *actually* reach gpufit, mirroring the
+% USE_GPU decision in FXLfit_generic.m and D_fit_voxels_func.m: gpufit is used only when
+% CUDA is available AND force_cpu is off. Checking the preference alone is wrong -- on a
+% machine without CUDA (every CI runner) the fit is already on the CPU path, and demanding
+% force_cpu = 1 there blocks a correct run. That is exactly what broke the parity_checks
+% job on 2026-07-28.
+try
+    gpu_available = GpufitCudaAvailableMex;
+catch
+    gpu_available = 0;
+end
+cpu_prefs = parse_preference_file('dce_preferences.txt', 0, {'force_cpu'}, {'0'});
+force_cpu_raw = cpu_prefs.force_cpu;
+if ischar(force_cpu_raw) || isstring(force_cpu_raw)
+    force_cpu_val = str2double(force_cpu_raw);
+else
+    force_cpu_val = double(force_cpu_raw);
+end
+force_cpu = ~isnan(force_cpu_val) && force_cpu_val ~= 0;
+if gpu_available && ~force_cpu
     error(['generate_dce_tofts_parity_map:ForceCpuRequired\n' ...
-        'dce/dce_preferences.txt has force_cpu = %s, but parity baselines must be\n' ...
-        'generated on the CPU path. Set "force_cpu = 1", re-run, then revert it to 0.\n' ...
-        'Full recipe: tests/README.md.'], strtrim(cpu_prefs.force_cpu));
+        'CUDA gpufit is available and dce/dce_preferences.txt has force_cpu = %s, so this\n' ...
+        'run would fit on the GPU. Parity baselines must come from the CPU path.\n' ...
+        'Set "force_cpu = 1", re-run, then revert it to 0.\n' ...
+        'Full recipe: tests/README.md.'], strtrim(num2str(force_cpu_val)));
 end
 
 filevolume = 1;
