@@ -427,6 +427,24 @@ class TestDcePipeline:
         assert 8 <= int(out["end_ss_1b"]) <= 12
         assert out["lambda_tv"] >= 0.0
         assert 0.0 <= out["strength"] <= 1.0
+        assert int(out["valid_jump_count"]) >= 1
+
+    def test_tv_baseline_end_reports_no_jump_distinctly_from_a_frame_1_detection(self) -> None:
+        # A curve with no contrast at all must not come back looking like a confident
+        # detection of a bolus arriving on frame 2. Both cases return end_ss_1b == 1, so the
+        # mode is the only thing that separates "I found nothing" from "I found it at 1".
+        rng = np.random.default_rng(0)
+        flat = 95.0 + rng.normal(0.0, 0.1, size=48)
+        stlv = np.tile(flat[:, np.newaxis], (1, 5))
+
+        out = _tv_baseline_end(stlv)
+
+        assert out["method"] == "tv"
+        assert out["mode"] == "fallback_no_jump_detected"
+        assert int(out["end_ss_1b"]) == 1
+        assert int(out["valid_jump_count"]) == 0
+        # Confidence must agree with the mode rather than being computed from a zero jump.
+        assert out["strength"] == 0.0
 
     def test_resolve_baseline_window_uses_selected_auto_method_when_end_not_manual(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

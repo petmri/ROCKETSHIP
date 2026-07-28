@@ -1,6 +1,27 @@
 # Stage-B AIF Fitting: MATLAB vs Python Algorithm Differences
 
-_Batch-parity workstream. Created 2026-07-24._
+## Status: archived (2026-07-28) — complete; both languages run the same algorithm
+
+> **Archived note:** S1–S11 below are done, verified in both languages, and committed
+> (`bd6b77c` closes the sequence). The fitted AIF is no longer a parity gap: `ex_tofts` and
+> `patlak` ROI-xls agreement lands at ~1.3e-5, the level predicted for two pipelines running
+> genuinely the same algorithm, roughly a hundredfold better than where this started. The
+> `tv` detector is the default in both languages at 95.0% accuracy on 280 human-rated sessions.
+>
+> **Nothing from this document stayed open.** Two S11 deferrals were closed on 2026-07-28: the
+> silent `end_ss = 1` fallback in `tv` now reports a distinct `fallback_no_jump_detected` mode
+> in both languages (see below), and the R4 demotion rule was dropped — `tv` at 95.0% left it
+> nothing to rescue. The remaining `next_jump > -jump_mad` validity clause is recorded in R5 as
+> a known imprecision, deliberately not changed.
+>
+> One **modelling** question is recorded rather than resolved, and is not a defect: S10 asks
+> whether the AIF peak should be de-weighted as much as it is. `aif_Robust` is now `off` by
+> default, so the peak is de-weighted only by the data-based prior
+> (`aif_peak_weight_exponent = 2`) rather than by robust *and* prior together — which changes
+> the premise of S10's numbers. Revisit if AIF peak height ever looks like it is biasing
+> `Ktrans`; it needs real data, not a code change.
+
+_Batch-parity workstream. Created 2026-07-24. Archived 2026-07-28._
 
 ## Why this document exists
 
@@ -76,9 +97,9 @@ frame 3 at the top of the ramp (`A + B = 2.136`).
 
 ## Side-by-side: `AIFbiexpfithelp.m` vs `_fit_aif_biexp`
 
-Sources: [`dce/AIFbiexpfithelp.m`](../../../../dce/AIFbiexpfithelp.m),
-[`dce/AIFbiexpcon.m`](../../../../dce/AIFbiexpcon.m), and `_fit_aif_biexp` / `_aif_biexp_con` in
-[`python/dce_pipeline.py`](../../../../python/dce_pipeline.py).
+Sources: [`dce/AIFbiexpfithelp.m`](../../../../../dce/AIFbiexpfithelp.m),
+[`dce/AIFbiexpcon.m`](../../../../../dce/AIFbiexpcon.m), and `_fit_aif_biexp` / `_aif_biexp_con` in
+[`python/dce_pipeline.py`](../../../../../python/dce_pipeline.py).
 
 ### Verified identical (do not "fix" these)
 
@@ -853,10 +874,34 @@ would otherwise have silently dropped coverage of code that is still shipped, so
 `test_resolve_baseline_window_biexp_fit_is_selectable` was added to keep exercising
 `_biexp_fit_baseline_end` now that nothing reaches it by default.
 
+### S12 — closing the `tv` no-detection hazard (2026-07-28)
+
+R5 fixed the threshold that made `tv` miss a real bolus. It left the *consequence* of a miss
+untouched: with no jump above threshold, `valid_jumps` is empty and the detector returns
+`end_ss = 1` tagged `mode = "tv_jump"` — identical in every observable way to a confident
+detection of a bolus arriving on frame 2. `end_ss = 1` is plausible enough that nothing
+downstream questions it, which is precisely why `sub-1102140_ses-01` took a dedicated
+investigation to notice: the detector was not reporting an error, it was reporting a number.
+
+This is the same failure shape as the zero-width CI maps in `batch_parity.md` issue #3 — a
+silent, plausible wrong answer that survived for months because nothing distinguished "no data"
+from "this value". Both are now fixed the same way: make the absence report itself.
+
+- **Python** `_tv_baseline_end` returns `mode = "fallback_no_jump_detected"` (matching the
+  `fallback_*` convention the other detectors already use) and pins `strength = 0.0` so the
+  confidence signal agrees with the mode instead of being computed from a jump of 0.0.
+- **MATLAB** `find_end_ss_tv` gains an optional third output `details` (the two-output call in
+  `A_make_R1maps_func.m` is unchanged) carrying the same `mode`/`strength`/`valid_jump_count`,
+  and raises `find_end_ss_tv:NoJumpDetected` so a give-up is visible in the run log.
+
+`end_ss` itself is unchanged in both — 1 remains the safest guess when nothing was found. It just
+no longer claims to be a measurement. The condition fires on none of the 280 rated sessions;
+this is hardening against a latent hazard, not a fix for an observed failure.
+
 ## Reproducing
 
 - Regenerated MATLAB baseline (auto steady state + auto injection, all five models, `force_cpu=1`):
-  recipe in [`tests/README.md`](../../../../tests/README.md).
+  recipe in [`tests/README.md`](../../../../../tests/README.md).
 - MATLAB fitted coefficients + the LM-honours-bounds check: run `A_make_R1maps_func` →
   `B_AIF_fitting_func` with `startInjection = endInjection = -1`, then call `AIFbiexpfithelp`
   directly on `{Cp: CpROI, timer, step: [start_injection end_injection], fittingAU: false}`.

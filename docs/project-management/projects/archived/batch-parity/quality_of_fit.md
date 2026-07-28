@@ -1,6 +1,31 @@
 # Per-Voxel Quality-of-Fit (QoF) Reliability
 
-_Batch-parity workstream. Created 2026-07-23._
+## Status: archived (2026-07-28) — built, validated and shipped; ROI stats moved to TODO.md
+
+> **Archived note:** the metric exists and works. Estimator-B σ with eBayes variance moderation,
+> per-voxel reduced χ², the `reliable` mask, the parity-gate filter (χ²_ν ≤ 6.0) and the
+> pipeline hook that writes `*_qof_{sigma,chi2nu,reliable}` maps on a normal run are all landed
+> and covered by 27 unit tests. Validated on real `RUNNER_DATA` against controls.
+>
+> **One item stayed live and moved to `docs/project-management/TODO.md`: QoF-aware ROI stats** —
+> excluding unreliable voxels from ROI parameter rollups. That was the original motivation for
+> the whole workstream and is the one piece never built.
+>
+> **Batch integration needs no work** (verified 2026-07-28): `write_qof_maps` already flows
+> through `run_dce_bids_batch.py --set write_qof_maps=true` and through `--config-template`;
+> `_to_bool` accepts the string form. Only a convenience flag would be new, and it is not worth
+> a doc entry.
+>
+> **Dropped as won't-do:** estimator C (per-frame heteroscedastic σ), the B-vs-C agreement map,
+> the reason bitmask, the bound-hit flag, R² (#1) as a second gate, and the eBayes dof /
+> per-model-prior refinements. Estimator B is sufficient and validated; the rest are refinements
+> to something that already works.
+>
+> **Read the caveat in "Integration into parity testing" below alongside `batch_parity.md`'s
+> 2026-07-28 update:** QoF is no longer load-bearing for the parity gate. The failure it was
+> calibrated against was mostly the fitted AIF, not voxel quality.
+
+_Batch-parity workstream. Created 2026-07-23. Archived 2026-07-28._
 
 ## Motivation
 Real DCE data contains noisy / artifact voxels whose signal does not conform to the fitting
@@ -154,6 +179,15 @@ analysis-only, never a parity-gate input.
 - Parity gate: `test_bbb_p19_region_parity` filters each region at absolute **χ²_ν ≤ 6.0**
   (calibrated on real cross-backend divergence). Canonical patlak+brain failure resolved; all 10
   gated checks pass. 27 unit tests.
+
+**Closed 2026-07-28:**
+- **tofts+gm gate re-enabled and the hand-curated exception retired.** The item below asked to
+  re-enable it "if QoF reproduces it." QoF did not, and did not need to: the Stage-B AIF fix
+  (`aif_fitting_parity.md` S11) lifted `tofts_ktrans_gm` to corr 0.980 (cpu) / 0.992 (auto)
+  against a 0.95 floor with **zero** QoF-excluded voxels in that region. The gate is now 12/12
+  with no exceptions. Note the implication: the exception was blamed on GM non-identifiability,
+  which is real, but was not what made the numbers disagree.
+- **Batch integration** — already works via `--set write_qof_maps=true`; nothing to build.
 
 **Remaining — parity (validation/cleanup; the gate is already live):**
 - **RUNNER_DATA validation — DONE (2026-07-23), confirmed.** `sub-1101743/ses-01` (slice 11, 6935

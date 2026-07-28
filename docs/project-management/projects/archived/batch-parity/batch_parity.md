@@ -1,6 +1,22 @@
 # Batch Parity Status (MATLAB vs Python DCE)
 
-_Last reviewed: 2026-07-27._
+## Status: archived (2026-07-28) — all four numbered issues closed; two testing gaps moved to TODO.md
+
+> **Archived note:** every issue tracked in this document is resolved. The DCE parity gate
+> stands at **12/12 gated voxelwise checks** and **4/4 ROI-xls checks** passing, with **no
+> hand-curated exceptions left** — the last one (tofts+GM) was retired 2026-07-28 once the
+> Stage-B AIF fix made it unnecessary. Sub-docs `aif_fitting_parity.md`, `quality_of_fit.md`
+> and `sigma_estimators.md` are archived alongside this one.
+>
+> **What stayed live** (moved to `docs/project-management/TODO.md`, do not track them here):
+> testing gaps **A** (Stage-B AIF contract gate) and **B** (backend-equivalence gate), and
+> **QoF-aware ROI stats**. Gaps **C** (dense-ROI companion) and **D** (dedicated CI parity job)
+> were dropped as won't-do, as were the QoF/σ refinements listed in the sub-docs.
+>
+> This file is a historical snapshot of how DCE parity was achieved. Do not treat it as the
+> live tracking doc.
+
+_Last reviewed: 2026-07-28._
 
 ## Scope
 Parity between the MATLAB reference pipeline and the Python port for DCE parameter maps
@@ -9,21 +25,30 @@ Parity between the MATLAB reference pipeline and the Python port for DCE paramet
   `test_bbb_p19_roi_xls_parity`), and
 - the end-to-end batch pipeline (`run_dce_bids_batch.py`) on real `RUNNER_DATA` sessions.
 
-**Gated set:** tofts + patlak **Ktrans only** (cpu & auto vs MATLAB). Everything else
-(ex_tofts/tissue_uptake/2cxm, non-Ktrans params, backend auto-vs-cpu) is reported-only — not
-identifiable on this fixture. Suite layout in `tests/README.md`.
+**Gated set:** tofts + patlak **Ktrans only** (cpu & auto vs MATLAB), across all three regions
+(brain/GM/WM). Everything else (ex_tofts/tissue_uptake/2cxm, non-Ktrans params, backend
+auto-vs-cpu) is reported-only — not identifiable on this fixture. Suite layout in
+`tests/README.md`.
 
-**Active workstreams**
+**Final gate state (2026-07-28): 12/12 gated voxelwise checks pass, with no hand-curated
+exceptions.** The last exception — tofts+GM reported-only, on the grounds that tofts Ktrans was
+non-identifiable there — was retired once the Stage-B AIF fix lifted it to `corr` 0.980 (cpu) /
+0.992 (auto) against a 0.95 floor. Worth noting what that says about the original diagnosis: GM
+non-identifiability was real but was *not* the reason the numbers disagreed. Lowest gated value
+now is 0.9751 (`tofts_ktrans_brain_cpu_vs_matlab`). ROI-xls: 4/4.
+
+**Workstreams (all closed)**
 - **Per-voxel quality-of-fit (QoF) reliability metric** — the general solution to the recurring
   "noisy/non-conforming voxel pollutes parity and analysis" problem that the Spearman swap and
   hand-curated ROIs only partially mask. **Parity side landed + committed (`153728e`)**: reduced-χ²
   (estimator B) filters the gate at absolute χ²_ν ≤ 6.0 (resolved issue #1). **No MATLAB-side QoF**
-  (single-sided Python-CPU mask is a data-quality filter — see `quality_of_fit.md`). Remaining is
-  **data-analysis usability** (pipeline hook so a normal run writes QoF maps, config/CLI surface,
-  batch integration, QoF-aware ROI stats) + real-`RUNNER_DATA` validation + σ-outlier robustification.
-  Full plan & TODO: [`quality_of_fit.md`](quality_of_fit.md) → "Status & remaining work";
-  σ detail in [`sigma_estimators.md`](sigma_estimators.md).
-- Closing the remaining gated-parity gaps (below).
+  (single-sided Python-CPU mask is a data-quality filter — see `quality_of_fit.md`). Pipeline hook,
+  σ-outlier robustification and `RUNNER_DATA` validation all landed; **QoF-aware ROI stats** is the
+  one piece never built and is now tracked in `TODO.md`.
+  Full record: [`quality_of_fit.md`](quality_of_fit.md); σ detail in
+  [`sigma_estimators.md`](sigma_estimators.md).
+- **Stage-B AIF fitting parity** — the largest single contributor to the remaining gap, and the
+  root cause of issue #2. Full record: [`aif_fitting_parity.md`](aif_fitting_parity.md).
 
 ## Current State
 
@@ -74,8 +99,16 @@ per-model QoF reduced-χ² reliable mask (keep voxels with **χ²_ν ≤ 6.0**, 
 calibrated on real cross-backend divergence — see `quality_of_fit.md` / `sigma_estimators.md`).
 Excluding ~5–8% (20 of 237 brain voxels) lifts `patlak_ktrans_brain_auto_vs_matlab` to `corr=0.990`
 and **all 10 gated checks pass** — the principled replacement for a hand-curated exception (the
-canonical QoF target). Disable with `ROCKETSHIP_PARITY_QOF_CHI2_MAX=0` (reproduces the old `0.9369`
-failure). Deep-dive on the underlying single-voxel mechanism kept below.
+canonical QoF target). Deep-dive on the underlying single-voxel mechanism kept below.
+
+**Update 2026-07-28 — QoF is no longer load-bearing for this gate.** The claim that
+`ROCKETSHIP_PARITY_QOF_CHI2_MAX=0` reproduces the `0.9369` failure was true when written but is
+now stale: after the Stage-B AIF fix (`aif_fitting_parity.md` S11), running with QoF **disabled**
+gives `patlak_ktrans_brain_auto_vs_matlab` `corr=0.9678` — a pass. QoF still helps materially
+(0.9678 → 0.9940) and stays enabled for the margin, but the underlying disagreement it was built
+to mask was mostly the fitted AIF, not voxel quality. Two lessons worth carrying: the QoF filter
+was calibrated against a divergence whose dominant cause was a bug elsewhere, and a metric that
+"fixes" a failure is not thereby diagnosing it.
 
 **2. `tofts_roi_xls` / `tissue_uptake_roi_xls` ROI-average failures — ROOT-CAUSED 2026-07-24:
 the Stage-B AIF fit differs between the two languages.** Full write-up:
@@ -129,14 +162,25 @@ CI-aware metrics are live: e.g. `patlak_ktrans_wm` `ci_norm_absdiff_p95=0.057, p
 `tofts_ktrans_brain` `ci_norm_absdiff_p95=1.89, prop_out=0.19` (tofts's larger CI-relative
 spread is the expected non-identifiability signal). The CPU-reference restoration also improved
 `patlak_ktrans_brain_cpu_vs_matlab` (see issue #1). **Note:** this rewrote the committed
-reference maps (Ktrans/ve/vp/fp shift from gpufit→CPU `fit()` values) — a substantive fixture
-change to review before committing. Secondary follow-up: `prop_py_outside_matlab_ci` should skip
-degenerate (zero-width) voxels the way `ci_norm_absdiff_median` already does. **Regen recipe:**
+reference maps (Ktrans/ve/vp/fp shift from gpufit→CPU `fit()` values). **Regen recipe:**
 set `force_cpu=1`, run the `generate_dce_tofts_parity_map` command in
 `projects/archived/steady-state-tv-default/STATUS.md`, revert `force_cpu`; ~51 min single-core.
-The generator should arguably force CPU itself so this can't silently recur — open follow-up.
 
-**4. Batch-processing regression coverage — design, not yet built.** See "Testing gaps" below.
+**Both follow-ups closed 2026-07-28:**
+- **The generator now refuses to run with `force_cpu ~= 1`** (`generate_dce_tofts_parity_map.m`,
+  precondition check before Stage A) with an error naming the remedy, so a GPU-generated baseline
+  cannot silently recur. It *checks* rather than *sets* the pref on purpose: `dce_preferences.txt`
+  is a tracked CRLF file and a generator that rewrites it is its own corruption hazard.
+- **`prop_py_outside_matlab_ci` now excludes zero-width intervals**, as `ci_norm_absdiff_median`
+  already did. This immediately exposed the same bug on the Python side: gpufit produces no CIs,
+  so every `auto` row had all-zero Python CI widths and `prop_matlab_outside_py_ci` was reporting
+  a fake `1.0` ("100% disagreement") that was really "no data". Both now report `NaN` plus a
+  `n_zero_ci_width` / `n_zero_py_ci_width` count.
+
+**4. Batch-processing regression coverage — CLOSED 2026-07-28 as won't-do.** Never built beyond
+the design in "Testing gaps" below. Superseded in practice: the ROI-xls gate plus the 12 gated
+voxelwise checks cover the map-level regressions this was meant to catch, and the two gaps judged
+still worth building (A and B) moved to `TODO.md`.
 
 ## Deep-dive: single-voxel patlak non-identifiability (kept — hard-won, not cheaply reproducible)
 Root-cause chain (fully isolated, `sub-10bbbdownsample`, 237-voxel sparse `brain` sample):
@@ -173,20 +217,26 @@ tracked with phantom work in `projects/phantom-gt/`.
 See also memory notes: `parity-whole-brain-roi-noise`, `parity-backend-divergence`,
 `parity-tofts-gm-nonidentifiable`, `noisy-data-parity-philosophy`.
 
-## Testing gaps + plan to close (open)
+## Testing gaps + plan to close (dispositioned 2026-07-28)
 Gaps that let CPU-vs-CPUfit divergence and weighted-AIF side effects slip through: parity gates
 compare only final maps (not Stage-B `Cp_use` as a first-class contract); no required
 `cpu`-vs-`cpufit_cpu` backend-equivalence test on a real-data checkpoint; sparse-ROI sampling
 with no dense-ROI cross-check to separate true drift from mask instability.
 
+**A and B moved to `docs/project-management/TODO.md` and are tracked there. C and D are won't-do.**
+
 - **A. Stage-B AIF contract gate** — lock `Cp_use`/`step`/`baseline`/`max_index` against a
-  reference payload; gate on MAE/corr, not existence. **Now the highest-value gap:** issue #2 is
-  exactly the failure this gate was designed to catch, and it went undetected for months because
-  parity compares only final maps. A cross-language `Cp_use` check would have caught it on day one.
+  reference payload; gate on MAE/corr, not existence. **The highest-value gap, and S11 proved
+  it retroactively:** issue #2 is exactly the failure this gate was designed to catch, it went
+  undetected for months because parity compares only final maps, and a cross-language `Cp_use`
+  check would have caught it on day one. There is still no such test — verified 2026-07-28.
+  **→ TODO.md.**
 - **B. Backend-equivalence gate** — frozen Stage-B arrays from a `RUNNER_DATA` fixture; required
   `cpu` vs `cpufit` map metrics for `patlak`/`tofts`/`ex_tofts`; skip-with-reason if
-  `pycpufit` absent.
-- **C. Dense-ROI companion** — keep the sparse suite, add dense-ROI metrics for required models;
-  emit both on failure.
-- **D. CI integration** — dedicated parity job (optional per-PR, required nightly) running the
-  multi-model parity runner + A + B, archiving summary JSON for trend comparison.
+  `pycpufit` absent. Backed by the measured cpufit/gpufit-vs-MATLAB divergence
+  (`parity-backend-divergence`). **→ TODO.md.**
+- **C. Dense-ROI companion** — ~~keep the sparse suite, add dense-ROI metrics~~ **DROPPED.**
+  Largely subsumed: the QoF χ² filter now handles the noisy-voxel half of what dense-ROI
+  cross-checking was for, and the GM/WM/brain regions already give three mask sizes per model.
+- **D. CI integration** — ~~dedicated nightly parity job~~ **DROPPED.** CI infrastructure is a
+  separate decision from parity correctness, and the suite runs on demand via `-m parity` today.

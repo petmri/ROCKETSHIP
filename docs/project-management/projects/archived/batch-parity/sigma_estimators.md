@@ -1,7 +1,25 @@
 # Noise-σ Estimation for Reduced χ² (QoF #2)
 
+## Status: archived (2026-07-28) — estimator B shipped and accepted; C and the refinements dropped
+
+> **Archived note:** estimator **B** (concentration-domain successive-difference σ, with the
+> bolus wash-in excised) plus eBayes inverse-gamma variance moderation and the prior-predictive
+> clamp are implemented in `python/dce_sigma.py`, wired into `dce_qof`, and validated on real
+> data. Performance is accepted as-is; **no further σ work is planned.**
+>
+> **Dropped as won't-do, by decision rather than by failure:** estimator **C** (signal-domain
+> σ_S propagated through the analytic SPGR Jacobian, per-frame) and its plumbing; the B-vs-C
+> agreement map, which only existed to decide whether C earned its keep; the split-half eBayes
+> dof estimate; and per-model / per-tissue priors. B is sufficient and validated, and the whole
+> "Estimators we will build" section below should be read as *what was considered*, not as
+> outstanding work.
+>
+> The remaining open question — whether `shrink_sigma` should become the pipeline default — is
+> recorded in `docs/project-management/TODO.md` alongside the QoF-aware ROI stats item, since
+> answering it needs the same broader `RUNNER_DATA` evidence.
+
 _Batch-parity / quality-of-fit sub-plan. Split out of [`quality_of_fit.md`](quality_of_fit.md)
-2026-07-23._
+2026-07-23. Archived 2026-07-28._
 
 ## Why this is its own document
 Reduced χ² `= SSE/(σ²·(N−p))` is the first QoF signal we're building (see
@@ -17,7 +35,7 @@ built now.
   forces χ²_ν≈1 by construction and destroys all discrimination. Hard rule.
 
 ## Why concentration-domain noise is awkward (recap)
-The pipeline forms `C(t)` in two nonlinear steps ([`python/dce_signal.py`](../../../../python/dce_signal.py)):
+The pipeline forms `C(t)` in two nonlinear steps ([`python/dce_signal.py`](../../../../../python/dce_signal.py)):
 baseline-normalize `E = 100·(S − S0)/S0` (`S0 = mean(S[baseline])`), then SPGR log-inversion
 `C = −(1/(TR·r1))·ln(N(E)/D(E))` with `N`, `D` affine in `E`. Therefore:
 - **Heteroscedastic (first-order issue).** `σ_C(t) ≈ |dC/dS|_{S(t)}·σ_S` is time-varying even when the
@@ -130,7 +148,7 @@ window's timing is on disk; C needs a bounded plumbing step.**
 
 Artifacts (all under the session's `dce/` output):
 - **Post-fit arrays** `*_{model}_fit_postfit_arrays.npz` (`_write_postfit_arrays`,
-  [`python/dce_pipeline.py`](../../../../python/dce_pipeline.py)) — carries `ct_voxel_mM`
+  [`python/dce_pipeline.py`](../../../../../python/dce_pipeline.py)) — carries `ct_voxel_mM`
   (**per-voxel `C(t)`**), `cp_mM`, `timer_min`, `voxel_results` (fit params + **SSE** via `sse_col`),
   and **`voxel_residuals`** (per-frame `r_i`, precomputed), plus ROI variants. ⚠️ gated behind
   `stage_overrides.write_postfit_arrays` — **default false**, so the QoF run must enable it.
@@ -256,7 +274,7 @@ default once validated on real `RUNNER_DATA`.
      propagate through `dce_signal.signal_to_enhancement` + `dcdE_spgr`.
 2. **Reduced-χ² helper** `reduced_chi_square(sse, sigma, n, p)` accepting **scalar or per-frame** σ
    (weighted form). SSE is already produced per voxel (`sse_col` in `_MODEL_META`,
-   [`python/dce_postfit_analysis.py`](../../../../python/dce_postfit_analysis.py)).
+   [`python/dce_postfit_analysis.py`](../../../../../python/dce_postfit_analysis.py)).
 3. **Unit tests (Tier 1):** recover injected σ; FD-vs-analytic derivative; weighted ≡ unweighted when σ
    is constant.
 4. **Plumbing (resolved — see *Plumbing probe*):** B + reduced-χ² build from the existing post-fit NPZ
@@ -279,8 +297,8 @@ default once validated on real `RUNNER_DATA`.
 ## Related
 - [`quality_of_fit.md`](quality_of_fit.md) — parent QoF plan; #2 (reduced χ²) is the first metric and
   this doc is its σ dependency.
-- [`python/dce_signal.py`](../../../../python/dce_signal.py) — `signal_to_enhancement`,
+- [`python/dce_signal.py`](../../../../../python/dce_signal.py) — `signal_to_enhancement`,
   `enhancement_to_concentration_spgr` (the exact conversion whose Jacobian C propagates).
-- [`python/dce_postfit_analysis.py`](../../../../python/dce_postfit_analysis.py) — per-voxel SSE.
+- [`python/dce_postfit_analysis.py`](../../../../../python/dce_postfit_analysis.py) — per-voxel SSE.
 - Memory: `quality-of-fit`, `parity-backend-divergence` (the divergence Tier-2 correlates against),
   `noisy-data-parity-philosophy`.

@@ -7,7 +7,7 @@
 > complete and verified. The still-open parity-gate residual (this doc's "Blocked"
 > section) has been folded into the ongoing parity-tracking doc, since it's the same
 > class of issue already tracked there: see
-> `docs/project-management/projects/batch-parity/batch_parity.md` ("Update (2026-07-22):
+> `docs/project-management/projects/archived/batch-parity/batch_parity.md` ("Update (2026-07-22):
 > tv-default steady-state rollout re-triggers this, plus new residuals") for current
 > status and next steps. This file is kept as a historical snapshot of how the `tv`
 > default was chosen and built; do not treat it as the live tracking doc going forward.

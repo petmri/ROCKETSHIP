@@ -652,7 +652,7 @@ elseif (steady_state_time == -2)
         % frame late. It absorbs the first lightly-enhanced frame into the baseline because
         % doing so costs almost nothing in SSE, and no goodness-of-fit criterion can correct
         % that: the late answer genuinely fits *better*. See S11 in
-        % docs/project-management/projects/batch-parity/aif_fitting_parity.md.
+        % docs/project-management/projects/archived/batch-parity/aif_fitting_parity.md.
         % Matches Python's default steady_state_auto_method='tv'.
         [end_ss, end_injection] = find_end_ss_tv(DYNAMLV);
     end

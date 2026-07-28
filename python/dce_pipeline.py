@@ -1342,7 +1342,17 @@ def _tv_baseline_end(stlv: np.ndarray) -> Dict[str, Any]:
             if float(jumps[i]) > 1.5 * jump_threshold:
                 valid_jumps.append(i)
 
-    if len(valid_jumps) == 0:
+    # Finding no jump at all is a *failure to detect*, not a detection of frame 1. Reporting it
+    # as `tv_jump` with end_ss=1 made the two indistinguishable to every caller, so a detector
+    # that had given up looked exactly like one that had confidently found a bolus arriving on
+    # the second frame -- and end_ss=1 is a plausible enough answer that nothing downstream
+    # would question it. The distinct `fallback_*` mode (matching the convention used by the
+    # other detectors) lets callers tell the two apart; `strength` is pinned to 0.0 so the
+    # confidence signal agrees with the mode instead of being derived from a jump of 0.0
+    # against whole-curve scatter. The returned `end_ss_1b` is unchanged -- 1 is still the
+    # safest guess when nothing was found, it just no longer claims to be a measurement.
+    no_jump_found = len(valid_jumps) == 0
+    if no_jump_found:
         end_ss_0b = 0
         detected_jump = 0.0
     else:
@@ -1356,12 +1366,12 @@ def _tv_baseline_end(stlv: np.ndarray) -> Dict[str, Any]:
     if baseline_noise < 1e-6:
         baseline_noise = 1e-6
     raw_strength = detected_jump / baseline_noise
-    strength = float(np.clip(1.0 - np.exp(-raw_strength / 2.0), 0.0, 1.0))
+    strength = 0.0 if no_jump_found else float(np.clip(1.0 - np.exp(-raw_strength / 2.0), 0.0, 1.0))
 
     return {
         "method": "tv",
         "end_ss_1b": end_ss_1b,
-        "mode": "tv_jump",
+        "mode": "fallback_no_jump_detected" if no_jump_found else "tv_jump",
         "lambda_tv": float(lambda_tv),
         "tv_iterations": int(n_iter),
         "jump_mad": float(jump_mad),
@@ -1457,7 +1467,7 @@ def _biexp_fit_baseline_end(stlv: np.ndarray, config: "DcePipelineConfig") -> Di
 
     Weighting is uniform; a noise-inflated peak is handled by the robust estimator
     (``aif_Robust``) rather than by discarding frames. See
-    ``docs/project-management/projects/batch-parity/aif_fitting_parity.md``.
+    ``docs/project-management/projects/archived/batch-parity/aif_fitting_parity.md``.
     """
     curves = np.asarray(stlv, dtype=np.float64)
     if curves.ndim == 1:
@@ -2691,7 +2701,7 @@ def _fit_aif_biexp(
     # sessions it made the production fit worse, not better -- adjusted R² mean 0.882 against
     # 0.944 with it off, 106 sessions below 0.90 against 30, and a worst case of -1.46 (a fit
     # worse than a horizontal line) against +0.57. It is still selectable. See S11 in
-    # docs/project-management/projects/batch-parity/aif_fitting_parity.md.
+    # docs/project-management/projects/archived/batch-parity/aif_fitting_parity.md.
     aif_robust_raw = _stage_override(config, "aif_Robust", "off")
     if fit_pass == "timing":
         # The timing pass can opt out separately, and had to while `aif_Robust` defaulted to
@@ -2706,7 +2716,7 @@ def _fit_aif_biexp(
     # prior derived from how far it stands above the rest of the curve. That has to be data-based
     # rather than residual-based: the peak has leverage 1 here, so the robust estimator
     # (aif_Robust) cannot see it. See _aif_peak_weight, the `fit_pass` note above, and
-    # docs/project-management/projects/batch-parity/aif_fitting_parity.md.
+    # docs/project-management/projects/archived/batch-parity/aif_fitting_parity.md.
     peak_weight = 1.0
     if fit_pass == "production":
         peak_weight = _aif_peak_weight(

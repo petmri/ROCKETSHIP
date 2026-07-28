@@ -117,7 +117,7 @@ end
 %   fit_t_base_end : false -> t_base_end is held at timer(start_index) (an input, owned by the
 %                    baseline-end precedence upstream); true -> it is fitted, which is what the
 %                    Stage-A timing pass (find_end_ss_biexp) needs.
-% See docs/project-management/projects/batch-parity/aif_fitting_parity.md.
+% See docs/project-management/projects/archived/batch-parity/aif_fitting_parity.md.
 if isfield(xdata{1}, 'fit_t_base_end')
     fit_t_base_end = logical(xdata{1}.fit_t_base_end);
 else
@@ -149,7 +149,7 @@ xdata{1}.step = step;
 % which makes it dimensionless -- a raw 1/(peak-median) would change with the concentration
 % units and can exceed 1. It never reaches 0: at exactly zero the sample stops constraining the
 % upslope duration at all and the fit jumps to a different solution.
-% See docs/project-management/projects/batch-parity/aif_fitting_parity.md.
+% See docs/project-management/projects/archived/batch-parity/aif_fitting_parity.md.
 % Only the production fit de-weights the peak. What is unreliable about the peak is its
 % *height*, not its *position* -- and position is exactly what the Stage-A timing pass
 % (find_end_ss_biexp, which sets fit_t_base_end) is estimating, with the peak as its primary
@@ -248,7 +248,7 @@ end
 % t_base_end, and one frame is the true floor -- t_base_end sits on the last baseline sample, so
 % the earliest the peak can sit is the next one. A curve that jumps straight from baseline to
 % max in a single frame is exactly delta == dt, with no interior samples on the ramp.
-% See docs/project-management/projects/batch-parity/aif_fitting_parity.md.
+% See docs/project-management/projects/archived/batch-parity/aif_fitting_parity.md.
 
 timer_diffs = diff(timer);
 timer_diffs = timer_diffs(timer_diffs > 0);

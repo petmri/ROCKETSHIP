@@ -1,4 +1,4 @@
-function [end_ss, end_injection] = find_end_ss_tv(signal_intensities)
+function [end_ss, end_injection, details] = find_end_ss_tv(signal_intensities)
     % Total-variation/fused-lasso style denoise + first-significant-upward-jump
     % detector for the end of the pre-contrast steady-state baseline.
     %
@@ -16,6 +16,11 @@ function [end_ss, end_injection] = find_end_ss_tv(signal_intensities)
     % onset. Must equal TV_JUMP_THRESHOLD_SIGMA in python/dce_pipeline.py.
     TV_JUMP_THRESHOLD_SIGMA = 5.0;
 
+    % `details` mirrors the dict Python's _tv_baseline_end returns, so a caller can tell a real
+    % detection from a give-up. See the `mode` note at the bottom of this function.
+    details = struct('mode', 'tv_jump', 'strength', 0.0, 'valid_jump_count', 0, ...
+        'jump_threshold', 0.0, 'detected_jump', 0.0);
+
     DYNAMLV = signal_intensities;
     if isvector(DYNAMLV)
         DYNAMLV = DYNAMLV(:);
@@ -30,6 +35,7 @@ function [end_ss, end_injection] = find_end_ss_tv(signal_intensities)
 
     if size(DYNAMLV, 1) < 2
         end_ss = 1;
+        details.mode = 'fallback_short_signal';
         return;
     end
 
@@ -37,6 +43,7 @@ function [end_ss, end_injection] = find_end_ss_tv(signal_intensities)
     n = length(x_raw);
     if n < 3
         end_ss = 1;
+        details.mode = 'fallback_short_signal';
         return;
     end
 
@@ -105,10 +112,30 @@ function [end_ss, end_injection] = find_end_ss_tv(signal_intensities)
         end
     end
 
+    % Finding no jump at all is a *failure to detect*, not a detection of frame 1. Returning a
+    % bare end_ss = 1 made the two indistinguishable to every caller: a detector that had given
+    % up looked exactly like one that had confidently found a bolus arriving on the second
+    % frame, and end_ss = 1 is plausible enough that nothing downstream would question it.
+    % The warning and the `details.mode` flag make the give-up visible; end_ss itself is
+    % unchanged, since 1 is still the safest guess when nothing was found. Mirrors the
+    % `fallback_no_jump_detected` mode in python/dce_pipeline.py:_tv_baseline_end.
+    details.jump_threshold = jump_threshold;
+    details.valid_jump_count = numel(valid_jumps);
     if isempty(valid_jumps)
         end_ss = 1;
+        details.mode = 'fallback_no_jump_detected';
+        warning('find_end_ss_tv:NoJumpDetected', ...
+            ['No contrast-onset jump cleared the threshold (%.4g); falling back to ' ...
+             'end_ss = 1. This is a detection failure, not a baseline of one frame -- ' ...
+             'check the AIF curve before trusting downstream maps.'], jump_threshold);
     else
         end_ss = valid_jumps(1);
+        details.detected_jump = jumps(end_ss);
+        baseline_noise = std(x_raw(1:min(10, max(1, floor(n / 4)))), 1);
+        if baseline_noise < 1e-6
+            baseline_noise = 1e-6;
+        end
+        details.strength = min(max(1.0 - exp(-(details.detected_jump / baseline_noise) / 2.0), 0.0), 1.0);
     end
     end_ss = max(1, min(end_ss, n));
 end

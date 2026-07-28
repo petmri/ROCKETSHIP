@@ -87,7 +87,7 @@ For options in `stage_overrides`:
     Falls back to its `tv` seed if the fit cannot run or does not converge. **Not the
     default**: on 280 human-rated sessions it is right 74.6% of the time against `tv`'s
     95.0%, always erring one frame late (S11 in
-    `docs/project-management/projects/batch-parity/aif_fitting_parity.md`).
+    `docs/project-management/projects/archived/batch-parity/aif_fitting_parity.md`).
   - Aliases accepted: `legacy`, `dce_auto_aif`, `sobel`, `piecewise`, `find_end_ss`, `edge`, `find_end_ss_edge`, `tv`, `find_end_ss_tv`, `biexp`, `find_end_ss_biexp`
   - Precedence overall: `steady_state_end` > AIF sidecar `SteadyStateEndTimeIndex` > `steady_state_auto_method`
   - If none of the above is set, Python defaults to `tv` (MATLAB `find_end_ss_tv`)

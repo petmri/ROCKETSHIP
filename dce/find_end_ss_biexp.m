@@ -19,7 +19,7 @@ function [end_ss, end_injection] = find_end_ss_biexp(signal_intensities)
     % Weighting is uniform; a noise-inflated peak is handled by the robust estimator
     % (aif_Robust in dce_preferences.txt) rather than by discarding frames.
     %
-    % See docs/project-management/projects/batch-parity/aif_fitting_parity.md.
+    % See docs/project-management/projects/archived/batch-parity/aif_fitting_parity.md.
 
     DYNAMLV = signal_intensities;
     if isvector(DYNAMLV)
