@@ -55,7 +55,7 @@ def test_session_dce_inputs_requires_explicit_aif_roi(tmp_path: Path) -> None:
     (deriv_session / "anat").mkdir(parents=True, exist_ok=True)
 
     (deriv_session / "dce" / "sub-01_ses-01_desc-bfcz_DCE.nii.gz").write_text("")
-    (deriv_session / "anat" / "sub-01_ses-01_space-DCEref_desc-brain_mask.nii.gz").write_text("")
+    (deriv_session / "anat" / "sub-01_ses-01_space-DCEref_label-brain_mask.nii.gz").write_text("")
     (deriv_session / "anat" / "sub-01_ses-01_space-DCEref_T1map.nii").write_text("")
 
     session = BidsSession(
@@ -66,7 +66,7 @@ def test_session_dce_inputs_requires_explicit_aif_roi(tmp_path: Path) -> None:
         derivatives_path=deriv_session,
     )
 
-    with pytest.raises(FileNotFoundError, match=r"aif \(\*desc-AIF_T1map\.nii\*\)"):
+    with pytest.raises(FileNotFoundError, match=r"aif \(\*label-AIF_T1map\.nii\*\)"):
         _session_dce_inputs(session)
 
 

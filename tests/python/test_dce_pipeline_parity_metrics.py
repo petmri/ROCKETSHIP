@@ -53,12 +53,12 @@ def _dataset_paths(root: Path) -> dict:
         "processed": der,
         "matlabref": matlabref,
         "dynamic": raw / "dce" / f"{stem}_DCE.nii",
-        "aif": der / "dce" / f"{stem}_desc-AIFroi_mask.nii",
-        "roi": der / "anat" / f"{stem}_desc-brain_mask.nii",
-        "roi_gm": der / "anat" / f"{stem}_desc-GMroi_mask.nii",
-        "roi_wm": der / "anat" / f"{stem}_desc-WMroi_mask.nii",
+        "aif": der / "dce" / f"{stem}_label-AIF_mask.nii",
+        "roi": der / "anat" / f"{stem}_label-brain_mask.nii",
+        "roi_gm": der / "anat" / f"{stem}_label-GM_mask.nii",
+        "roi_wm": der / "anat" / f"{stem}_label-WM_mask.nii",
         "t1map": der / "anat" / f"{stem}_space-DCEref_T1map.nii",
-        "noise": der / "anat" / f"{stem}_desc-noise_mask.nii",
+        "noise": der / "anat" / f"{stem}_label-noise_mask.nii",
         "matlab_tofts_ktrans": matlabref / "Dyn-1_tofts_fit_Ktrans.nii",
         "matlab_tofts_ve": matlabref / "Dyn-1_tofts_fit_ve.nii",
     }
@@ -452,7 +452,7 @@ def _normalized_roi_header(header: list[str]) -> list[str]:
 
 def _canonical_roi_token(name: str) -> str:
     """Reduce an ROI label to its tissue token so BIDS-style mask filenames align with
-    the MATLAB reference's ``T1_*_roi`` names (e.g. ``...desc-brain_mask`` -> ``brain``)."""
+    the MATLAB reference's ``T1_*_roi`` names (e.g. ``...label-brain_mask`` -> ``brain``)."""
     text = str(name).strip().lower()
     for token in ("brain", "gm", "wm", "aif", "noise"):
         if token in text:

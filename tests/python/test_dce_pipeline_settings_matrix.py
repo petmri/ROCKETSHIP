@@ -40,10 +40,10 @@ def _tiny_paths(root: Path) -> dict:
         "source": raw / "dce",
         "tp": der,
         "dynamic": raw / "dce" / f"{stem}_DCE.nii",
-        "aif": der / "dce" / f"{stem}_desc-AIFroi_mask.nii",
-        "roi": der / "anat" / f"{stem}_desc-brain_mask.nii",
+        "aif": der / "dce" / f"{stem}_label-AIF_mask.nii",
+        "roi": der / "anat" / f"{stem}_label-brain_mask.nii",
         "t1map": der / "dce" / f"{stem}_space-DCEref_T1map.nii",
-        "noise": der / "anat" / f"{stem}_desc-noise_mask.nii",
+        "noise": der / "anat" / f"{stem}_label-noise_mask.nii",
         "meta": der / "dce" / f"{stem}_desc-tinymeta.json",
     }
 

@@ -216,11 +216,11 @@ python tests/data/scripts/generate_bbb_p19_downsample.py --clean --factor-x 3 --
 S=tests/data/BIDS_test; sub=sub-10bbbdownsample; ses=ses-01
 matlab -batch "addpath('tests/matlab'); generate_dce_tofts_parity_map( \
   'dynamicPath', '$S/rawdata/$sub/$ses/dce/${sub}_${ses}_DCE.nii', \
-  'aifRoiPath', '$S/derivatives/$sub/$ses/dce/${sub}_${ses}_desc-AIFroi_mask.nii', \
-  'brainRoiPath', '$S/derivatives/$sub/$ses/anat/${sub}_${ses}_desc-brain_mask.nii', \
+  'aifRoiPath', '$S/derivatives/$sub/$ses/dce/${sub}_${ses}_label-AIF_mask.nii', \
+  'brainRoiPath', '$S/derivatives/$sub/$ses/anat/${sub}_${ses}_label-brain_mask.nii', \
   't1MapPath', '$S/derivatives/$sub/$ses/anat/${sub}_${ses}_space-DCEref_T1map.nii', \
-  'noiseRoiPath', '$S/derivatives/$sub/$ses/anat/${sub}_${ses}_desc-noise_mask.nii', \
+  'noiseRoiPath', '$S/derivatives/$sub/$ses/anat/${sub}_${ses}_label-noise_mask.nii', \
   'outputRoot', '$S/derivatives/matlabref/$sub/$ses/dce', \
-  'roiList', '$S/derivatives/$sub/$ses/anat/${sub}_${ses}_desc-brain_mask.nii', \
+  'roiList', '$S/derivatives/$sub/$ses/anat/${sub}_${ses}_label-brain_mask.nii', \
   'models', {'tofts', 'ex_tofts', 'patlak', 'tissue_uptake', '2cxm'});"
 ```

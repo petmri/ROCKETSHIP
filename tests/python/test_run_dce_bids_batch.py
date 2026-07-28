@@ -28,8 +28,8 @@ def _make_session(tmp_root: Path) -> BidsSession:
     raw_dce.mkdir(parents=True, exist_ok=True)
 
     (dce_deriv / "sub-01_ses-01_desc-bfcz_DCE.nii.gz").write_text("")
-    (dce_deriv / "sub-01_ses-01_desc-AIF_T1map.nii.gz").write_text("")
-    (anat_deriv / "sub-01_ses-01_space-DCEref_desc-brain_mask.nii.gz").write_text("")
+    (dce_deriv / "sub-01_ses-01_label-AIF_T1map.nii.gz").write_text("")
+    (anat_deriv / "sub-01_ses-01_space-DCEref_label-brain_mask.nii.gz").write_text("")
     (anat_deriv / "sub-01_ses-01_space-DCEref_T1map.nii.gz").write_text("")
     (dce_deriv / "sub-01_ses-01_DCE.json").write_text(
         '{"RepetitionTime": 0.005, "FlipAngle": 15, "TemporalResolution": 5.0}'

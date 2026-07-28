@@ -128,8 +128,8 @@ def _run_dce_for_phantom_session(
     dce_deriv = session.derivatives_path / "dce"
     anat_deriv = session.derivatives_path / "anat"
     dynamic = _find_one(dce_deriv, "*desc-bfcz_DCE.nii*") or _find_one(dce_deriv, "*DCE.nii*")
-    aif = _find_one(dce_deriv, "*desc-AIF_T1map.nii*")
-    roi = _find_one(anat_deriv, "*desc-brain_mask.nii*")
+    aif = _find_one(dce_deriv, "*label-AIF_T1map.nii*")
+    roi = _find_one(anat_deriv, "*label-brain_mask.nii*")
 
     missing: List[str] = []
     if dynamic is None:

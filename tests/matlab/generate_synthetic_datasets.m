@@ -48,10 +48,10 @@ relativeFiles = {
     fullfile('rawdata', 'sub-01', 'ses-01', 'anat', 'sub-01_ses-01_flip-03_VFA.nii.gz')
     fullfile('rawdata', 'sub-01', 'ses-01', 'anat', 'sub-01_ses-01_flip-03_VFA.json')
     fullfile('derivatives', 'sub-01', 'ses-01', 'dce', 'sub-01_ses-01_desc-bfcz_DCE.nii.gz')
-    fullfile('derivatives', 'sub-01', 'ses-01', 'dce', 'sub-01_ses-01_desc-AIF_T1map.nii.gz')
+    fullfile('derivatives', 'sub-01', 'ses-01', 'dce', 'sub-01_ses-01_label-AIF_T1map.nii.gz')
     fullfile('derivatives', 'sub-01', 'ses-01', 'anat', 'sub-01_ses-01_space-DCEref_T1map.nii')
     fullfile('derivatives', 'sub-01', 'ses-01', 'anat', 'sub-01_ses-01_space-DCEref_desc-bfczunified_VFA.nii')
-    fullfile('derivatives', 'sub-01', 'ses-01', 'anat', 'sub-01_ses-01_space-DCEref_desc-brain_mask.nii.gz')
+    fullfile('derivatives', 'sub-01', 'ses-01', 'anat', 'sub-01_ses-01_space-DCEref_label-brain_mask.nii.gz')
 };
 
 variants = {
@@ -143,12 +143,12 @@ imageItems = {
     struct('path', fullfile(variantRoot, 'rawdata', 'sub-01', 'ses-01', 'anat', 'sub-01_ses-01_flip-02_VFA.nii.gz'), 'hasTime', false)
     struct('path', fullfile(variantRoot, 'rawdata', 'sub-01', 'ses-01', 'anat', 'sub-01_ses-01_flip-03_VFA.nii.gz'), 'hasTime', false)
     struct('path', fullfile(variantRoot, 'derivatives', 'sub-01', 'ses-01', 'dce', 'sub-01_ses-01_desc-bfcz_DCE.nii.gz'), 'hasTime', true)
-    struct('path', fullfile(variantRoot, 'derivatives', 'sub-01', 'ses-01', 'dce', 'sub-01_ses-01_desc-AIF_T1map.nii.gz'), 'hasTime', false)
+    struct('path', fullfile(variantRoot, 'derivatives', 'sub-01', 'ses-01', 'dce', 'sub-01_ses-01_label-AIF_T1map.nii.gz'), 'hasTime', false)
     struct('path', fullfile(variantRoot, 'derivatives', 'sub-01', 'ses-01', 'anat', 'sub-01_ses-01_space-DCEref_T1map.nii'), 'hasTime', false)
     struct('path', fullfile(variantRoot, 'derivatives', 'sub-01', 'ses-01', 'anat', 'sub-01_ses-01_space-DCEref_desc-bfczunified_VFA.nii'), 'hasTime', false)
 };
 
-maskPath = fullfile(variantRoot, 'derivatives', 'sub-01', 'ses-01', 'anat', 'sub-01_ses-01_space-DCEref_desc-brain_mask.nii.gz');
+maskPath = fullfile(variantRoot, 'derivatives', 'sub-01', 'ses-01', 'anat', 'sub-01_ses-01_space-DCEref_label-brain_mask.nii.gz');
 
 for i = 1:numel(imageItems)
     downsample_nifti(imageItems{i}.path, factor, false, imageItems{i}.hasTime);

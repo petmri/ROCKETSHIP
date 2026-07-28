@@ -143,13 +143,13 @@ def _generate_fixture(output_root: Path, seed: int) -> dict:
         d.mkdir(parents=True, exist_ok=True)
 
     nib.save(nib.Nifti1Image(dynamic.astype(np.float32), affine), str(raw_dce / f"{stem}_DCE.nii"))
-    nib.save(nib.Nifti1Image(aif_mask.astype(np.uint8), affine), str(der_dce / f"{stem}_desc-AIFroi_mask.nii"))
-    nib.save(nib.Nifti1Image(roi_mask.astype(np.uint8), affine), str(der_anat / f"{stem}_desc-brain_mask.nii"))
+    nib.save(nib.Nifti1Image(aif_mask.astype(np.uint8), affine), str(der_dce / f"{stem}_label-AIF_mask.nii"))
+    nib.save(nib.Nifti1Image(roi_mask.astype(np.uint8), affine), str(der_anat / f"{stem}_label-brain_mask.nii"))
     nib.save(
         nib.Nifti1Image((t1_map * 1000.0).astype(np.float32), affine),
         str(der_dce / f"{stem}_space-DCEref_T1map.nii"),
     )
-    nib.save(nib.Nifti1Image(noise_mask.astype(np.uint8), affine), str(der_anat / f"{stem}_desc-noise_mask.nii"))
+    nib.save(nib.Nifti1Image(noise_mask.astype(np.uint8), affine), str(der_anat / f"{stem}_label-noise_mask.nii"))
 
     (raw_dce / f"{stem}_DCE.json").write_text(
         json.dumps(

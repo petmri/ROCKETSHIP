@@ -179,7 +179,7 @@ def _session_has_preprocessing_signature(session: BidsSession, run_t1: bool, run
     """
     if run_t1 and _find_one(session.derivatives_path / "anat", "*desc-bfczunified_VFA.nii*") is not None:
         return True
-    if run_dce and _find_one(session.derivatives_path / "dce", "*desc-AIF_T1map.nii*") is not None:
+    if run_dce and _find_one(session.derivatives_path / "dce", "*label-AIF_T1map.nii*") is not None:
         return True
     return False
 
@@ -206,15 +206,15 @@ def _session_dce_inputs(session: BidsSession) -> Dict[str, Path]:
     dynamic = _find_one(dce_deriv, "*desc-bfcz_DCE.nii*")
     if dynamic is None:
         dynamic = _find_one(dce_deriv, "*DCE.nii*")
-    aif = _find_one(dce_deriv, "*desc-AIF_T1map.nii*")
-    roi = _find_one(anat_deriv, "*desc-brain_mask.nii*")
+    aif = _find_one(dce_deriv, "*label-AIF_T1map.nii*")
+    roi = _find_one(anat_deriv, "*label-brain_mask.nii*")
     t1map = _find_one(anat_deriv, "*space-DCEref_T1map.nii*")
 
     missing = []
     if dynamic is None:
         missing.append("dynamic")
     if aif is None:
-        missing.append("aif (*desc-AIF_T1map.nii*)")
+        missing.append("aif (*label-AIF_T1map.nii*)")
     if roi is None:
         missing.append("roi")
     if t1map is None:

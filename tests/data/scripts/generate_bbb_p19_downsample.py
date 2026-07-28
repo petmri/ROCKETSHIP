@@ -70,11 +70,11 @@ def _build_file_map(source_root: Path) -> List[tuple[Path, Path]]:
     wanted = [
         (source_root / "Dynamic_t1w.nii", raw_dce / f"{stem}_DCE.nii"),
         (source_root / "processed" / "T1_map_t1_fa_fit_fa10.nii", der_anat / f"{stem}_space-DCEref_T1map.nii"),
-        (source_root / "processed" / "T1_brain_roi.nii", der_anat / f"{stem}_desc-brain_mask.nii"),
-        (source_root / "processed" / "T1_gm_roi.nii", der_anat / f"{stem}_desc-GMroi_mask.nii"),
-        (source_root / "processed" / "T1_wm_roi.nii", der_anat / f"{stem}_desc-WMroi_mask.nii"),
-        (source_root / "processed" / "T1_noise_roi.nii", der_anat / f"{stem}_desc-noise_mask.nii"),
-        (source_root / "processed" / "T1_AIF_roi.nii", der_dce / f"{stem}_desc-AIFroi_mask.nii"),
+        (source_root / "processed" / "T1_brain_roi.nii", der_anat / f"{stem}_label-brain_mask.nii"),
+        (source_root / "processed" / "T1_gm_roi.nii", der_anat / f"{stem}_label-GM_mask.nii"),
+        (source_root / "processed" / "T1_wm_roi.nii", der_anat / f"{stem}_label-WM_mask.nii"),
+        (source_root / "processed" / "T1_noise_roi.nii", der_anat / f"{stem}_label-noise_mask.nii"),
+        (source_root / "processed" / "T1_AIF_roi.nii", der_dce / f"{stem}_label-AIF_mask.nii"),
     ]
     return [(src, dst) for src, dst in wanted if src.exists()]
 

@@ -134,8 +134,8 @@ def _discover_python_inputs(tp_root: Path) -> Dict[str, Path]:
     anat_dir = tp_root / "anat"
     return {
         "dynamic": _find_single_file(dce_dir, "*desc-bfcz_DCE.nii*"),
-        "aif": _find_single_file(dce_dir, "*desc-AIF_T1map.nii*"),
-        "roi": _find_single_file(anat_dir, "*desc-brain_mask.nii*"),
+        "aif": _find_single_file(dce_dir, "*label-AIF_T1map.nii*"),
+        "roi": _find_single_file(anat_dir, "*label-brain_mask.nii*"),
         "t1map": _find_single_file(anat_dir, "*space-DCEref_T1map.nii*"),
     }
 

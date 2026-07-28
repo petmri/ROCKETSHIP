@@ -124,10 +124,10 @@ def main(argv: List[str]) -> int:
         "generate_dce_tofts_parity_map("
         "'outputRoot', 'tests/data/BIDS_test/derivatives/matlabref/sub-10bbbdownsample/ses-01/dce', "
         "'dynamicPath', 'tests/data/BIDS_test/rawdata/sub-10bbbdownsample/ses-01/dce/sub-10bbbdownsample_ses-01_DCE.nii', "
-        "'aifRoiPath', 'tests/data/BIDS_test/derivatives/sub-10bbbdownsample/ses-01/dce/sub-10bbbdownsample_ses-01_desc-AIFroi_mask.nii', "
-        "'brainRoiPath', 'tests/data/BIDS_test/derivatives/sub-10bbbdownsample/ses-01/anat/sub-10bbbdownsample_ses-01_desc-brain_mask.nii', "
+        "'aifRoiPath', 'tests/data/BIDS_test/derivatives/sub-10bbbdownsample/ses-01/dce/sub-10bbbdownsample_ses-01_label-AIF_mask.nii', "
+        "'brainRoiPath', 'tests/data/BIDS_test/derivatives/sub-10bbbdownsample/ses-01/anat/sub-10bbbdownsample_ses-01_label-brain_mask.nii', "
         "'t1MapPath', 'tests/data/BIDS_test/derivatives/sub-10bbbdownsample/ses-01/anat/sub-10bbbdownsample_ses-01_space-DCEref_T1map.nii', "
-        "'noiseRoiPath', 'tests/data/BIDS_test/derivatives/sub-10bbbdownsample/ses-01/anat/sub-10bbbdownsample_ses-01_desc-noise_mask.nii', "
+        "'noiseRoiPath', 'tests/data/BIDS_test/derivatives/sub-10bbbdownsample/ses-01/anat/sub-10bbbdownsample_ses-01_label-noise_mask.nii', "
         "'models', {'tofts', 'patlak'});\"\n"
         "Then review the diff and commit the refreshed tests/data/BIDS_test/derivatives/matlabref/... files."
     )

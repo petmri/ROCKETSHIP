@@ -152,7 +152,7 @@ def _discover_parametric_inputs(session: BidsSession) -> Dict[str, Any]:
     if b1_map is None:
         b1_map = _find_one(raw_anat, "B1_scaled_FAreg.nii*")
 
-    mask_file = _find_one(deriv_anat, "*desc-brain_mask.nii*")
+    mask_file = _find_one(deriv_anat, "*label-brain_mask.nii*")
 
     return {
         "vfa_files": [str(path) for path in vfa_files],

@@ -114,7 +114,7 @@ def test_find_end_ss_tv_matches_matlab_on_real_bbb_downsample_curve() -> None:
         nib.load(str(S / f"rawdata/{sub}/{ses}/dce/{sub}_{ses}_DCE.nii")).get_fdata(), dtype=np.float64
     )
     mask = np.asarray(
-        nib.load(str(S / f"derivatives/{sub}/{ses}/dce/{sub}_{ses}_desc-AIFroi_mask.nii")).get_fdata(),
+        nib.load(str(S / f"derivatives/{sub}/{ses}/dce/{sub}_{ses}_label-AIF_mask.nii")).get_fdata(),
         dtype=np.float64,
     )
     if mask.ndim == 4:

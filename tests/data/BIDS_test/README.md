@@ -34,7 +34,7 @@ BIDS_test/
   the phantoms and the fit-parity fixtures the 4-D DCE image is present directly in `rawdata/.../dce/`.
 - **gt** — ground-truth assets, phantoms only (see below).
 - **derivatives/matlabref/** — MATLAB fit/T1 reference maps that Python is compared against. ROI
-  masks are stored as `derivatives/.../desc-*_mask.nii` (`brain`, `GMroi`, `WMroi`, `noise`, `AIFroi`).
+  masks are stored as `derivatives/.../label-*_mask.nii` (`brain`, `GM`, `WM`, `noise`, `AIF`).
 
 ## Subjects
 
@@ -84,7 +84,7 @@ These are committed lightweight fixtures consumed directly by specific tests (th
 former `tests/data/ci_fixtures/` tree). Their `derivatives/sub-XX` masks/T1 maps are the
 preprocessed *inputs* the tests feed the fitter; the corresponding MATLAB reference *outputs* live
 under `derivatives/matlabref/sub-XX`. They deliberately lack the full preprocessing chain
-(`desc-bfczunified_VFA`, `desc-AIF_T1map`, `desc-bfcz_DCE`), so dataset-level qualification skips
+(`desc-bfczunified_VFA`, `label-AIF_T1map`, `desc-bfcz_DCE`), so dataset-level qualification skips
 them. Regenerate the data-derived parts with:
 
 - `tests/data/scripts/generate_bbb_p19_downsample.py --output-root tests/data/BIDS_test` (sub-10 DCE + preprocessed inputs; GM/WM ROIs are committed extras not derivable from the base source)

@@ -10,10 +10,10 @@
     "dce/*_desc-bfcz_DCE.nii*"
   ],
   "aif_files": [
-    "dce/*desc-AIF_T1map.nii*"
+    "dce/*label-AIF_T1map.nii*"
   ],
   "roi_files": [
-    "anat/*space-DCEref_desc-brain_mask.nii*"
+    "anat/*space-DCEref_label-brain_mask.nii*"
   ],
   "t1map_files": [
     "anat/*space-DCEref_T1map.nii*"

@@ -37,7 +37,7 @@ class DceInputs:
 # keeping a copy of the string that silently stops matching if the convention changes.
 DYNAMIC_PATTERN = "*desc-bfcz_DCE.nii*"
 DYNAMIC_FALLBACK_PATTERN = "*DCE.nii*"
-AIF_MASK_PATTERN = "*desc-AIF_T1map.nii*"
+AIF_MASK_PATTERN = "*label-AIF_T1map.nii*"
 
 
 def _find_one(parent: Path, pattern: str) -> Optional[Path]:
@@ -53,8 +53,8 @@ def discover_dce_inputs(session: BidsSession) -> DceInputs:
     
     Expected file locations:
       {derivatives_path}/dce/*desc-bfcz_DCE.nii* or *DCE.nii*
-      {derivatives_path}/dce/*desc-AIF_T1map.nii*
-      {derivatives_path}/anat/*desc-brain_mask.nii*
+      {derivatives_path}/dce/*label-AIF_T1map.nii*
+      {derivatives_path}/anat/*label-brain_mask.nii*
       {derivatives_path}/anat/*space-DCEref_T1map.nii*
     
     Args:
@@ -78,13 +78,13 @@ def discover_dce_inputs(session: BidsSession) -> DceInputs:
     aif = _find_one(dce_deriv, AIF_MASK_PATTERN)
 
     # ROI mask
-    roi = _find_one(anat_deriv, "*space-DCEref_desc-brain_mask.nii*")
+    roi = _find_one(anat_deriv, "*space-DCEref_label-brain_mask.nii*")
 
     # T1 map
     t1map = _find_one(anat_deriv, "*space-DCEref_T1map.nii*")
 
     # Noise mask (optional)
-    noise = _find_one(anat_deriv, "*desc-noise_mask.nii*")
+    noise = _find_one(anat_deriv, "*label-noise_mask.nii*")
 
     # Metadata (optional)
     metadata_json = _find_one(dce_deriv, "*DCE.json")
@@ -93,9 +93,9 @@ def discover_dce_inputs(session: BidsSession) -> DceInputs:
     if dynamic is None:
         missing.append("dynamic (pattern: *desc-bfcz_DCE.nii* or *DCE.nii*)")
     if aif is None:
-        missing.append("aif_mask (pattern: *desc-AIF_T1map.nii*)")
+        missing.append("aif_mask (pattern: *label-AIF_T1map.nii*)")
     if roi is None:
-        missing.append("roi_mask (pattern: *desc-brain_mask.nii*)")
+        missing.append("roi_mask (pattern: *label-brain_mask.nii*)")
     if t1map is None:
         missing.append("t1_map (pattern: *space-DCEref_T1map.nii*)")
 
