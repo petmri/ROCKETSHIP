@@ -69,6 +69,74 @@ MATLAB averages each parameter's concentration curve over the whole-brain ROI an
 (`stage_overrides.fit_voxels=0`), which skips the per-voxel fit — so the check runs in a few seconds
 and matches MATLAB's tables within tolerance. See `docs/dce_options.md` for `fit_voxels`.
 
+### Stage-B AIF contract
+
+Everything above compares **final maps**, which is how a structurally different Stage-B AIF fit
+survived for months behind passing map checks (issue #2 / `aif_fitting_parity.md`).
+`test_stage_b_aif_parity.py` closes that: it gates Stage-B's own outputs — the fitted `Cp_use`,
+`CpROI`, `Stlv_use`, `timer`, the injection `step` window, `start_time`/`end_time`/`max_index`, and
+the AIF fit coefficients `[A B c d t_base_end t0_exp]` — against a committed MATLAB payload.
+
+```bash
+pytest tests/python/test_stage_b_aif_parity.py
+```
+
+No MATLAB needed: the reference is
+`derivatives/matlabref/sub-10bbbdownsample/ses-01/dce/Dyn-1_stage_b_aif.json`, written by
+`tests/matlab/helpers/write_stage_b_aif_contract.m` whenever the map generator runs. Python and
+MATLAB currently agree to ~1e-8 relative on every curve; the gates sit at `rel_mae ≤ 1e-5`,
+`rel_max_abs ≤ 1e-4`, `corr ≥ 0.99999`, timing to 1e-6 min, and **exact** integer equality on the
+indices. Correlation alone would not catch this bug class — a uniformly rescaled `Cp_use` still
+correlates at 1.0 — so the absolute-error gates are the load-bearing ones.
+
+Regenerate the payload without paying for a voxelwise Stage-D run:
+
+```bash
+matlab -batch "addpath('tests/matlab'); generate_dce_tofts_parity_map( \
+  'outputRoot', 'tests/data/BIDS_test/derivatives/matlabref/sub-10bbbdownsample/ses-01/dce', \
+  ... , 'stageBOnly', true);"
+```
+
+MATLAB-side drift (a stale committed payload) is caught by
+`tests/contracts/check_matlabref_map_drift.py`, which now diffs this JSON alongside the NIfTI maps.
+The `force_cpu` rule below applies to the maps, not to Stage-B — the AIF fit never reaches gpufit —
+but the generator's guard is shared, so the same recipe applies.
+
+### Backend equivalence (cpu vs cpufit/gpufit)
+
+Everything above compares Python to MATLAB. `test_backend_equivalence.py` compares Python's
+Stage-D backends to *each other* on identical inputs — 2000 voxels of Stage-B arrays frozen from
+`RUNNER_DATA/sub-1101743/ses-01` into `tests/data/stage_b_frozen/` (332 KB), so no network drive
+is needed to run it.
+
+```bash
+pytest tests/python/test_backend_equivalence.py
+```
+
+**Skips with a reason** when `pycpufit`/`pygpufit` are absent, which includes CI — neither is in
+`requirements.txt`, so today this gate is enforced on developer machines and self-hosted runners,
+not on GitHub runners.
+
+**Why it is not a plain correlation gate.** This is a low-enhancement BBB dataset where a large
+minority of voxels pin a parameter at a bound; on that flat objective two optimizers stop at
+different points of an equally good plateau. Over all voxels ex_tofts Ktrans reads `corr` 0.23 —
+but **0.9998** once bound-pinned voxels are excluded, with the two backends' SSE agreeing to ~1e-6
+relative. A whole-sample correlation gate would therefore have to be set so loose it caught
+nothing. The three parts instead are:
+
+1. **Identifiable subset** — voxels where neither backend pinned a core parameter. Gated on
+   `corr ≥ 0.98`, RMS-relative scatter (per parameter: Ktrans 0.06, ve 0.15, vp 0.02) and median
+   relative bias within ±0.02. Scatter is normalized by the reference **RMS, not its max** —
+   these parameters are strongly right-skewed, and max-normalization let a 20% Ktrans bias read
+   as 0.02.
+2. **Objective agreement** — SSE over *all* voxels: `corr ≥ 0.99`, median relative difference
+   ≤ 1e-3. Backends may stop at different plateau points but must not find worse optima.
+3. **Bound-hit symmetry** — each backend must pin core parameters at rates within 0.05. This is
+   the only check that would catch a bound-handling difference between backends.
+
+Regenerate the fixture (needs the network drive) with
+`python tests/python/freeze_stage_b_backend_fixture.py`.
+
 ### Thresholds
 
 Gate thresholds default to `tests/python/parity_thresholds_default.json`. Override with a copy:

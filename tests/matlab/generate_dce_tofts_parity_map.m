@@ -67,6 +67,9 @@ addParameter(p, 'aifRoiPath', '', @is_text_scalar);
 addParameter(p, 'brainRoiPath', '', @is_text_scalar);
 addParameter(p, 't1MapPath', '', @is_text_scalar);
 addParameter(p, 'noiseRoiPath', '', @is_text_scalar);
+% Stop after writing the Stage-B AIF contract JSON. Regenerating that payload otherwise
+% costs a full voxelwise Stage-D run it does not depend on.
+addParameter(p, 'stageBOnly', false, @(v) islogical(v) || isnumeric(v));
 parse(p, varargin{:});
 
 subjectRoot = char(p.Results.subjectRoot);
@@ -175,6 +178,25 @@ timevectPath = '';
     importAifPath, timeResolutionMin, timevectPath, A_vars, false);
 
 resultsBPath = fullfile(outputRoot, ['B_' rootname 'fitted_R1info.mat']);
+
+% Stage-B AIF contract payload. The parity suite compares only final maps, so a
+% structurally different AIF fit stays invisible behind passing map checks -- that is
+% exactly how issue #2 survived for months. See tests/python/test_stage_b_aif_parity.py.
+stageBContractPath = fullfile(outputRoot, [rootname '_stage_b_aif.json']);
+write_stage_b_aif_contract(stageBContractPath, B_vars, rootname);
+output = struct();
+output.subjectRoot = subjectRoot;
+output.outputRoot = outputRoot;
+output.models = modelList;
+output.resultsAPath = resultsAPath;
+output.resultsBPath = resultsBPath;
+output.stageBContractPath = stageBContractPath;
+if p.Results.stageBOnly
+    output.ktransPaths = {};
+    fprintf('Stage-B AIF contract written: %s\n', stageBContractPath);
+    return;
+end
+
 dce_model = struct( ...
     'tofts', 0, ...
     'ex_tofts', 0, ...
@@ -224,13 +246,7 @@ if ~isempty(missing)
     error('Expected Ktrans map(s) not found:\n%s', errText);
 end
 
-output = struct();
-output.subjectRoot = subjectRoot;
-output.outputRoot = outputRoot;
-output.models = modelList;
 output.ktransPaths = ktransPaths;
-output.resultsAPath = resultsAPath;
-output.resultsBPath = resultsBPath;
 
 fprintf('MATLAB DCE baseline written for models: %s\n', strjoin(modelList, ', '));
 end

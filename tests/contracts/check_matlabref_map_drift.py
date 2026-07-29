@@ -53,6 +53,15 @@ DEFAULT_REFERENCE_ROOT = (
 # still reported for debugging, just not gated.
 CORR_MIN = 0.9
 
+# Stage-B AIF contract payload (Dyn-1_stage_b_aif.json). Unlike the maps this is a
+# deterministic AIF fit on a 64-sample ROI mean, not thousands of near-singular voxel
+# fits, so it gets a strict absolute tolerance rather than a rank correlation. The
+# committed copy is what tests/python/test_stage_b_aif_parity.py grades Python against,
+# so it going stale would silently move that gate's target.
+STAGE_B_CONTRACT_NAME = "Dyn-1_stage_b_aif.json"
+STAGE_B_REL_TOL = 1e-6
+STAGE_B_TIME_ATOL = 1e-6
+
 
 def _load_nifti(path: Path) -> np.ndarray:
     import nibabel as nib  # type: ignore
@@ -75,6 +84,61 @@ def _compare_map(reference_path: Path, candidate_path: Path) -> Tuple[str, float
     return ("ok", corr, max_abs_diff, n)
 
 
+def _compare_stage_b_contract(reference_path: Path, candidate_path: Path) -> List[str]:
+    """Diff the Stage-B AIF contract payload field by field. Returns drift messages."""
+    import json
+
+    ref = json.loads(reference_path.read_text())
+    cand = json.loads(candidate_path.read_text())
+    drifts: List[str] = []
+
+    ref_version = str(ref.get("meta", {}).get("version", ""))
+    cand_version = str(cand.get("meta", {}).get("version", ""))
+    if ref_version != cand_version:
+        return [f"{STAGE_B_CONTRACT_NAME}: version {cand_version!r} != committed {ref_version!r}"]
+
+    for name in sorted(set(ref.get("curves", {})) | set(cand.get("curves", {}))):
+        r = np.asarray(ref["curves"].get(name, []), dtype=np.float64).ravel()
+        c = np.asarray(cand["curves"].get(name, []), dtype=np.float64).ravel()
+        if r.size != c.size:
+            drifts.append(f"{STAGE_B_CONTRACT_NAME}/curves.{name}: length {c.size} != {r.size}")
+            continue
+        scale = float(np.max(np.abs(r))) if r.size else 0.0
+        if not np.isfinite(scale) or scale <= 0.0:
+            scale = 1.0
+        rel = float(np.max(np.abs(r - c))) / scale
+        print(f"  {STAGE_B_CONTRACT_NAME}/curves.{name}: rel_max_abs={rel:.3e} (n={r.size})")
+        if rel > STAGE_B_REL_TOL:
+            drifts.append(f"{STAGE_B_CONTRACT_NAME}/curves.{name}: rel_max_abs={rel:.3e} > {STAGE_B_REL_TOL:.1e}")
+
+    # Window terms are minutes or 1-based indices; both must reproduce exactly.
+    for name in sorted(set(ref.get("window", {})) | set(cand.get("window", {}))):
+        r = np.asarray(ref["window"].get(name), dtype=np.float64).ravel()
+        c = np.asarray(cand["window"].get(name), dtype=np.float64).ravel()
+        if r.size != c.size:
+            drifts.append(f"{STAGE_B_CONTRACT_NAME}/window.{name}: length {c.size} != {r.size}")
+            continue
+        diff = float(np.max(np.abs(r - c))) if r.size else 0.0
+        if diff > STAGE_B_TIME_ATOL:
+            drifts.append(
+                f"{STAGE_B_CONTRACT_NAME}/window.{name}: {c.tolist()} != committed {r.tolist()}"
+            )
+
+    for name in ("params_cp", "params_stlv"):
+        r = np.asarray(ref.get("fit", {}).get(name) or [], dtype=np.float64).ravel()
+        c = np.asarray(cand.get("fit", {}).get(name) or [], dtype=np.float64).ravel()
+        if r.size != c.size:
+            drifts.append(f"{STAGE_B_CONTRACT_NAME}/fit.{name}: length {c.size} != {r.size}")
+            continue
+        if r.size:
+            rel = float(np.max(np.abs(r - c) / np.maximum(np.abs(r), 1e-12)))
+            print(f"  {STAGE_B_CONTRACT_NAME}/fit.{name}: rel_max={rel:.3e}")
+            if rel > STAGE_B_REL_TOL:
+                drifts.append(f"{STAGE_B_CONTRACT_NAME}/fit.{name}: rel_max={rel:.3e} > {STAGE_B_REL_TOL:.1e}")
+
+    return drifts
+
+
 def main(argv: List[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--candidate-root", type=Path, required=True, help="Freshly regenerated maps directory.")
@@ -86,8 +150,10 @@ def main(argv: List[str]) -> int:
     # tofts+patlak): a committed reference map for a model the candidate step didn't
     # (re)generate this run is out of scope, not a failure.
     candidate_maps = sorted(args.candidate_root.glob("*.nii")) + sorted(args.candidate_root.glob("*.nii.gz"))
-    if not candidate_maps:
-        print(f"No candidate maps found under {args.candidate_root}")
+    # A stageBOnly regeneration produces the contract payload and no maps; that is a valid
+    # candidate, not an empty one. Only a candidate with neither is a broken generation step.
+    if not candidate_maps and not (args.candidate_root / STAGE_B_CONTRACT_NAME).exists():
+        print(f"No candidate maps or Stage-B contract found under {args.candidate_root}")
         return 1
 
     print(f"matlabref map drift check: reference={args.reference_root} candidate={args.candidate_root} corr_min={args.corr_min:g}")
@@ -110,11 +176,24 @@ def main(argv: List[str]) -> int:
     if missing:
         drifts.append(f"reference missing {len(missing)} map(s) present in candidate: {', '.join(sorted(missing))}")
 
+    # Stage-B AIF contract, when the candidate step produced one. Absent on older
+    # candidates (or a stageBOnly=false generator predating it), which is not drift.
+    stage_b_checked = False
+    candidate_contract = args.candidate_root / STAGE_B_CONTRACT_NAME
+    reference_contract = args.reference_root / STAGE_B_CONTRACT_NAME
+    if candidate_contract.exists():
+        if not reference_contract.exists():
+            drifts.append(f"{STAGE_B_CONTRACT_NAME}: present in candidate but missing from the committed reference")
+        else:
+            stage_b_checked = True
+            drifts.extend(_compare_stage_b_contract(reference_contract, candidate_contract))
+
     if not drifts:
-        print(f"OK: {len(candidate_maps)} freshly regenerated map(s) match the committed baseline.")
+        extra = " + Stage-B AIF contract" if stage_b_checked else ""
+        print(f"OK: {len(candidate_maps)} freshly regenerated map(s){extra} match the committed baseline.")
         return 0
 
-    print(f"DRIFT DETECTED: {len(drifts)} map(s) out of tolerance:")
+    print(f"DRIFT DETECTED: {len(drifts)} item(s) out of tolerance:")
     for line in drifts:
         print(f"  {line}")
     print(

@@ -239,11 +239,18 @@ xdata{1}.step = [start_injection end_injection];
 
 M{1} = '';
 aif_name = '';
+% Empty unless the fitted branch runs; the parity contract keys off these.
+aif_fit_params_cp = [];
+aif_fit_params_stlv = [];
+aif_fit_rsquare_cp = NaN;
+aif_fit_rsquare_stlv = NaN;
 if isempty(import_aif_path)
     if(fit_aif==1)
         xdata{1}.fittingAU = false;
-        [Cp_fitted, xAIF, xdataAIF] = AIFbiexpfithelp(xdata, 1);
+        [Cp_fitted, xAIF, xdataAIF, rsquareAIF] = AIFbiexpfithelp(xdata, 1);
         Cp_use = Cp_fitted;
+        aif_fit_params_cp = xAIF;   % [A B c d t_base_end t0_exp]
+        aif_fit_rsquare_cp = rsquareAIF;
 
         M{2} = 'Fitted Curve';
         aif_name = 'fitted';
@@ -252,9 +259,11 @@ if isempty(import_aif_path)
         Cptemp = xdata{1}.Cp;
         xdata{1}.Cp = xdata{1}.Stlv;
         xdata{1}.fittingAU = true;
-        [Stlv_fitted, ~, ~] = AIFbiexpfithelp(xdata, 1);
+        [Stlv_fitted, xStlv, ~, rsquareStlv] = AIFbiexpfithelp(xdata, 1);
         xdata{1}.Cp = Cptemp;
         Stlv_use = Stlv_fitted;
+        aif_fit_params_stlv = xStlv;
+        aif_fit_rsquare_stlv = rsquareStlv;
     elseif(fit_aif==2) || (fit_aif==0)
         Cp_use = CpROI;
         M{2} = 'Using Raw Curve';
@@ -411,6 +420,13 @@ Bdata.threshold     = threshold;
 Bdata.time_resolution=time_resolution;
 Bdata.timer         = timer;
 Bdata.xdata         = xdata;
+% AIF fit coefficients [A B c d t_base_end t0_exp] + adjusted R^2, empty/NaN outside the
+% fitted branch. Kept because t_base_end/t0_exp are the Stage-B parity contract's timing
+% terms and were otherwise only ever printed to the log.
+Bdata.aif_fit_params_cp    = aif_fit_params_cp;
+Bdata.aif_fit_params_stlv  = aif_fit_params_stlv;
+Bdata.aif_fit_rsquare_cp   = aif_fit_rsquare_cp;
+Bdata.aif_fit_rsquare_stlv = aif_fit_rsquare_stlv;
 
 % Results from A that need to be passed through
 Bdata.rootname    = Adata.rootname;
