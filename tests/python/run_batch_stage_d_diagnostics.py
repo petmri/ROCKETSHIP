@@ -11,6 +11,7 @@ import argparse
 from datetime import datetime
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -57,7 +58,11 @@ def _args() -> argparse.Namespace:
         action="store_true",
         help="Skip MATLAB single-curve/ROI contract checks.",
     )
-    p.add_argument("--matlab-bin", default="/opt/homebrew/bin/matlab")
+    p.add_argument(
+        "--matlab-bin",
+        default=shutil.which("matlab") or "matlab",
+        help="Path to the MATLAB binary (default: resolved from PATH).",
+    )
     p.add_argument(
         "--output-json",
         type=Path,

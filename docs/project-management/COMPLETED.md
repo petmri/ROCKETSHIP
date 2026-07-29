@@ -7,6 +7,48 @@ Do not track open items in this file; active work belongs in `docs/project-manag
 
 Completed items moved from `TODO.md` on 2026-03-05 to keep the active backlog short.
 
+## Completed Recent Updates (2026-07-29b)
+- [x] **Both dev-merge-critical Primary Blockers closed.**
+  - **GUI status.** Both PySide6 GUIs (`python/dce_gui.py`, `python/parametric_gui.py`)
+    verified against the current pipeline by driving their actual `Run` button flow
+    headlessly (`QT_QPA_PLATFORM=offscreen`, real `QProcess` subprocess, real fixtures) --
+    not just a code read. Found and fixed a real bug in the process: the parametric GUI's
+    "Reset Defaults" / default-load path was broken. `parametric_default.json`'s paths are
+    authored relative to `python/` (matching `parametric_cli.py`'s
+    `ParametricT1Config.from_dict(..., base_dir=config_path.parent)` resolution), but the GUI
+    re-serializes the payload into a new config under `output_dir` and was treating relative
+    text as REPO_ROOT-relative -- so a stock "click Run" attempt wrote its run config one
+    directory *above* the repo root and then failed to find the VFA inputs. The DCE GUI
+    happened to work today only by coincidence (its CLI resolves relative paths against the
+    subprocess cwd, which the GUI always sets to REPO_ROOT). Fixed by having each GUI resolve
+    every path field to an absolute path at the point it's collected from the UI, anchored
+    against the correct base for that CLI (`self._config_path.parent` for parametric, REPO_ROOT
+    for DCE) -- so "Save Config As" and the run-config it launches are both portable
+    regardless of where they end up on disk. Also fixed a `str(None) -> "None"` literal-string
+    bug for optional fields (`mask_file`, `b1_map_file`, `checkpoint_dir`, and the run-summary
+    display) that would have tried to open a file named `None`. Re-verified both GUIs
+    end-to-end after the fix (real Stage A/B/D DCE run and real VFA T1 fit, both `status=ok`).
+    Model-flag set (`tofts`/`ex_tofts`/`fxr`/`nested`/`patlak`/`tissue_uptake`/`two_cxm`/`auc`/
+    `FXL_rr`) confirmed to still match `dce_pipeline.MODEL_SELECTION_ORDER` exactly.
+  - **Path cleanup.** Repo-wide sweep for hardcoded local/user-specific paths. Found none in
+    Python source (all path construction is `Path(__file__)`-relative or config-driven).
+    Fixed one real portability wart: `tests/python/run_batch_stage_d_diagnostics.py` (an
+    on-demand diagnostics script) defaulted `--matlab-bin` to the maintainer's own
+    `/opt/homebrew/bin/matlab`, which doesn't exist on Linux, Intel Mac, or a different
+    install layout; now defaults to `shutil.which("matlab") or "matlab"` (PATH-resolved,
+    still overridable). Normalized five docs (`docs/dce_options.md`, `python/README.md`,
+    `docs/wiki/python-walkthrough.md`, `tests/contracts/README.md`,
+    `docs/project-management/projects/qualification/QUALIFICATION_MERGE_PACKET.md`) that
+    hardcoded the maintainer's real absolute machine path
+    (`/Users/samuelbarnes/code/ROCKETSHIP`) to the placeholder convention already used
+    elsewhere in the same docs (`/path/to/ROCKETSHIP`). Left alone as legitimate/out-of-scope:
+    `tests/python/freeze_stage_b_backend_fixture.py`'s `DEFAULT_RUNNER_DATA` (documented,
+    CLI-overridable, established team convention for a not-in-CI regeneration script);
+    `dce/run_neuroecon_job.m` (neuroecon is explicitly out of scope); a commented-out
+    third-party path in `external_programs/niftitools/tommyscript.m` (dead, unreferenced,
+    a former collaborator's personal analysis script -- flagged for the user to decide on
+    deletion rather than removed unilaterally).
+
 ## Completed Recent Updates (2026-07-28)
 - [x] **DCE batch-parity project complete and archived** to
   `docs/project-management/projects/archived/batch-parity/`. MATLAB-vs-Python DCE parity now

@@ -7,11 +7,6 @@ Do not log historical completions here. Record finished work in `docs/project-ma
 Keep strategic sequencing in `docs/project-management/ROADMAP.md` and current measurable state in `docs/project-management/PORTING_STATUS.md`.
 Larger feature requests should be logged in `docs/project-management/projects/feature-request/new_features.md`.
 
-## Primary Blockers (Dev-Merge Critical)
-
-### 1. GUI Status
-- [ ] Check/update the current GUI for the ROCKETSHIP to ensure it allows users to select input data, configure parameters, and visualize results. This will improve usability and accessibility for non-technical users.
-
 ## Secondary Active Work (Non-Blocking First Dev Merge)
 
 ### 1. Synthetic Example Dataset Coverage

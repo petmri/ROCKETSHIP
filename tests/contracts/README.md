@@ -54,7 +54,7 @@ When it fires, regenerate and commit `baselines/matlab_reference_v1.{json,mat}`.
 Example:
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 .venv/bin/python tests/contracts/generate_python_results.py --output /tmp/python_results.json
 .venv/bin/python tests/contracts/compare_with_matlab_baseline.py --python-results /tmp/python_results.json --require-all
 ```

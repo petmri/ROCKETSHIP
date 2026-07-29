@@ -1,16 +1,16 @@
 # Python Walkthrough
 
-This walkthrough is derived from the Python usage guide in `/Users/samuelbarnes/code/ROCKETSHIP/python/README.md` and focuses on practical run steps.
+This walkthrough is derived from the Python usage guide in `/path/to/ROCKETSHIP/python/README.md` and focuses on practical run steps.
 
 ## Scope
 
 Python entrypoints in this repo:
 
-- DCE CLI: `/Users/samuelbarnes/code/ROCKETSHIP/run_dce_python_cli.py`
-- Parametric T1 CLI: `/Users/samuelbarnes/code/ROCKETSHIP/run_parametric_python_cli.py`
-- DCE GUI: `/Users/samuelbarnes/code/ROCKETSHIP/run_dce_python_gui.py`
-- Parametric GUI: `/Users/samuelbarnes/code/ROCKETSHIP/run_parametric_python_gui.py`
-- BIDS discovery: `/Users/samuelbarnes/code/ROCKETSHIP/run_bids_discovery.py`
+- DCE CLI: `/path/to/ROCKETSHIP/run_dce_python_cli.py`
+- Parametric T1 CLI: `/path/to/ROCKETSHIP/run_parametric_python_cli.py`
+- DCE GUI: `/path/to/ROCKETSHIP/run_dce_python_gui.py`
+- Parametric GUI: `/path/to/ROCKETSHIP/run_parametric_python_gui.py`
+- BIDS discovery: `/path/to/ROCKETSHIP/run_bids_discovery.py`
 
 Current workflow emphasis:
 
@@ -41,7 +41,7 @@ python3 -m venv .venv
 
 ## 2. Run DCE CLI
 
-Default run (uses `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_default.json`):
+Default run (uses `/path/to/ROCKETSHIP/python/dce_default.json`):
 
 ```bash
 cd /path/to/ROCKETSHIP
@@ -75,7 +75,7 @@ Typical outputs:
 
 ## 3. Run Parametric T1 CLI
 
-Default run (uses `/Users/samuelbarnes/code/ROCKETSHIP/python/parametric_default.json`):
+Default run (uses `/path/to/ROCKETSHIP/python/parametric_default.json`):
 
 ```bash
 cd /path/to/ROCKETSHIP
@@ -139,11 +139,11 @@ cd /path/to/ROCKETSHIP
 - DCE real Stage-A metadata (TR, FA, frame spacing) must be explicit from sidecar JSON or complete manual override tuple.
 - Backend values are `auto`, `cpu`, `gpufit`.
 - Stage-D accelerated fit behavior and options are documented in:
-  - `/Users/samuelbarnes/code/ROCKETSHIP/docs/dce_options.md`
+  - `/path/to/ROCKETSHIP/docs/dce_options.md`
 
 ## 8. Related Project Docs
 
-- `/Users/samuelbarnes/code/ROCKETSHIP/python/README.md`
-- `/Users/samuelbarnes/code/ROCKETSHIP/docs/project-management/TODO.md`
-- `/Users/samuelbarnes/code/ROCKETSHIP/docs/project-management/ROADMAP.md`
-- `/Users/samuelbarnes/code/ROCKETSHIP/docs/project-management/PORTING_STATUS.md`
+- `/path/to/ROCKETSHIP/python/README.md`
+- `/path/to/ROCKETSHIP/docs/project-management/TODO.md`
+- `/path/to/ROCKETSHIP/docs/project-management/ROADMAP.md`
+- `/path/to/ROCKETSHIP/docs/project-management/PORTING_STATUS.md`

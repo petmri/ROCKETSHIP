@@ -8,7 +8,7 @@ Python transition checkpoint.
 Command:
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 .venv/bin/python run_bids_discovery.py \
   --bids-root tests/data/BIDS_test \
   --output-json out/python_qualification_bids_test_auto/discovery_manifest.json \
@@ -18,13 +18,13 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 Discovered sessions: `4`
 
 Manifest artifact:
-- `/Users/samuelbarnes/code/ROCKETSHIP/out/python_qualification_bids_test_auto/discovery_manifest.json`
+- `/path/to/ROCKETSHIP/out/python_qualification_bids_test_auto/discovery_manifest.json`
 
 ## Qualification Command
 Command used for the merge packet run (dated 2026-02-20):
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 .venv/bin/python run_python_qualification.py \
   --bids-root tests/data/BIDS_test \
   --output-root out/python_qualification_bids_test_auto \
@@ -34,8 +34,8 @@ cd /Users/samuelbarnes/code/ROCKETSHIP
 ```
 
 Summary artifacts:
-- `/Users/samuelbarnes/code/ROCKETSHIP/out/python_qualification_bids_test_auto/qualification_summary.json`
-- `/Users/samuelbarnes/code/ROCKETSHIP/out/python_qualification_bids_test_auto/qualification_summary.md`
+- `/path/to/ROCKETSHIP/out/python_qualification_bids_test_auto/qualification_summary.json`
+- `/path/to/ROCKETSHIP/out/python_qualification_bids_test_auto/qualification_summary.md`
 
 ## Run Result Summary (Pre-Gate Baseline)
 Top-level result:
@@ -59,18 +59,18 @@ Per-session summary:
 ## Blocker Classification
 ### Fix-now (before dev merge)
 - Completed: add qualification gate for non-finite primary-model maps.
-  - Implemented in `/Users/samuelbarnes/code/ROCKETSHIP/python/qualification.py`
+  - Implemented in `/path/to/ROCKETSHIP/python/qualification.py`
     (helper `_primary_model_map_blockers`), with tests in
-    `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/test_python_qualification.py`.
+    `/path/to/ROCKETSHIP/tests/python/test_python_qualification.py`.
 - Completed: prevent all-NaN accelerated outputs from being silently accepted.
-  - Implemented in `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_pipeline.py`
+  - Implemented in `/path/to/ROCKETSHIP/python/dce_pipeline.py`
     (`_accelerated_output_has_usable_primary_params` + fallback handling in `_fit_stage_d_model`).
-  - Added tests in `/Users/samuelbarnes/code/ROCKETSHIP/tests/python/test_dce_pipeline.py`.
+  - Added tests in `/path/to/ROCKETSHIP/tests/python/test_dce_pipeline.py`.
   - New qualification run with gate + fallback:
     - output root:
-      `/Users/samuelbarnes/code/ROCKETSHIP/out/python_qualification_bids_test_auto_gated_fallback`
+      `/path/to/ROCKETSHIP/out/python_qualification_bids_test_auto_gated_fallback`
     - summary:
-      `/Users/samuelbarnes/code/ROCKETSHIP/out/python_qualification_bids_test_auto_gated_fallback/qualification_summary.json`
+      `/path/to/ROCKETSHIP/out/python_qualification_bids_test_auto_gated_fallback/qualification_summary.json`
     - result:
       - `status=ok`, `sessions_passed=4`, `sessions_failed=0`, `blocker_count=0`
 

@@ -221,7 +221,11 @@ HEURISTIC_DETECTOR_NAMES = ("piecewise_constant", "legacy_sobel", "glr")
 # here: `biexp_fit`'s accuracy row is only readable next to the row it degrades to.
 DEFAULT_DETECTOR_NAMES = tuple(n for n in DETECTOR_NAMES if n not in HEURISTIC_DETECTOR_NAMES)
 
-_NON_DYNAMIC_TOKENS = ("mask", "t1map", "seg", "roi")
+_NON_DYNAMIC_TOKENS = ("mask", "t1map", "seg", "roi", "dceref")
+# Preferred over any other candidate in the no-pattern heuristic below: motion correction is
+# almost always what you want the detectors judged against when a derivatives tree has several
+# desc-* variants of the same series side by side.
+_MOTION_CORRECTED_TOKEN = "desc-hmc"
 _SUBJECT_RE = re.compile(r"^sub-[A-Za-z0-9]+$")
 _SESSION_RE = re.compile(r"^ses-[A-Za-z0-9]+$")
 
@@ -424,9 +428,11 @@ def find_dynamic_file(
 
     `dynamic_pattern` pins the series explicitly. The default heuristic assumes a *raw* tree
     holding one dynamic per session; pointed at a derivatives tree it has a dozen candidates
-    (`desc-bfc`, `desc-hmc`, `desc-biases`, ...) and picks alphabetically, which is arbitrary.
-    Since the detectors are meant to be judged on the curve production actually feeds them,
-    pass the pipeline's own pattern (`*desc-bfcz_DCE.nii*`) when reading derivatives.
+    (`desc-bfc`, `desc-hmc`, `desc-biases`, ...). Since the detectors are meant to be judged on
+    the curve production actually feeds them, pass the pipeline's own pattern
+    (`*desc-bfcz_DCE.nii*`) when reading derivatives for real. Absent a pattern, motion-corrected
+    (`desc-hmc`) files are preferred when present -- otherwise the tie-break falls through to a
+    single "dce"-named file, then alphabetical, both arbitrary.
     """
     dce_dir = Path(raw_root) / subject / (session or "") / "dce"
     if dynamic_pattern:
@@ -444,6 +450,18 @@ def find_dynamic_file(
     if len(candidates) == 1:
         return candidates[0], "bids", None
     if len(candidates) > 1:
+        hmc_named = [c for c in candidates if _MOTION_CORRECTED_TOKEN in c.name.lower()]
+        if len(hmc_named) == 1:
+            return hmc_named[0], "bids", None
+        if len(hmc_named) > 1:
+            chosen = sorted(hmc_named)[0]
+            return (
+                chosen,
+                "bids",
+                f"{len(hmc_named)} motion-corrected ({_MOTION_CORRECTED_TOKEN}) candidates in "
+                f"{dce_dir}, chose {chosen.name}",
+            )
+
         dce_named = [c for c in candidates if "dce" in c.name.lower()]
         if len(dce_named) == 1:
             return dce_named[0], "bids", None

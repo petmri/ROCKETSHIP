@@ -66,6 +66,22 @@ def _text_to_paths(text: str) -> List[str]:
     return [line.strip() for line in text.splitlines() if line.strip()]
 
 
+def _resolve_repo_path(text: str) -> str:
+    """Resolve a possibly-relative path against REPO_ROOT (matches the CLI's cwd,
+    which the GUI always sets to REPO_ROOT for the subprocess it launches)."""
+    stripped = text.strip()
+    if not stripped:
+        return ""
+    candidate = Path(stripped).expanduser()
+    if not candidate.is_absolute():
+        candidate = (REPO_ROOT / candidate).resolve()
+    return str(candidate)
+
+
+def _resolve_repo_paths(values: List[str]) -> List[str]:
+    return [_resolve_repo_path(v) for v in values if str(v).strip()]
+
+
 class DceGuiWindow(QMainWindow):
     """Main window for configuring and running DCE CLI."""
 
@@ -438,7 +454,7 @@ class DceGuiWindow(QMainWindow):
         self.subject_source_edit.setText(str(payload.get("subject_source_path", "")))
         self.subject_tp_edit.setText(str(payload.get("subject_tp_path", "")))
         self.output_dir_edit.setText(str(payload.get("output_dir", "")))
-        self.checkpoint_dir_edit.setText(str(payload.get("checkpoint_dir", "")))
+        self.checkpoint_dir_edit.setText(str(payload.get("checkpoint_dir") or ""))
         self.backend_combo.setCurrentText(str(payload.get("backend", "auto")))
         self.aif_mode_combo.setCurrentText(str(payload.get("aif_mode", "auto")))
         self.write_xls_check.setChecked(bool(payload.get("write_xls", True)))
@@ -459,33 +475,33 @@ class DceGuiWindow(QMainWindow):
 
     def _collect_config_payload(self) -> Dict[str, Any]:
         model_flags = {name: (1 if cb.isChecked() else 0) for name, cb in self.model_checks.items()}
+        output_dir_text = self.output_dir_edit.text().strip()
+        if output_dir_text in {"", "."}:
+            output_dir = str(REPO_ROOT / "out" / "dce_gui")
+        else:
+            output_dir = _resolve_repo_path(output_dir_text)
         payload = {
-            "subject_source_path": self.subject_source_edit.text().strip(),
-            "subject_tp_path": self.subject_tp_edit.text().strip(),
-            "output_dir": self.output_dir_edit.text().strip(),
-            "checkpoint_dir": self.checkpoint_dir_edit.text().strip(),
+            "subject_source_path": _resolve_repo_path(self.subject_source_edit.text()),
+            "subject_tp_path": _resolve_repo_path(self.subject_tp_edit.text()),
+            "output_dir": output_dir,
+            "checkpoint_dir": _resolve_repo_path(self.checkpoint_dir_edit.text()),
             "backend": self.backend_combo.currentText(),
             "write_xls": self.write_xls_check.isChecked(),
             "aif_mode": self.aif_mode_combo.currentText(),
-            "dynamic_files": _text_to_paths(self.dynamic_edit.toPlainText()),
-            "aif_files": _text_to_paths(self.aif_edit.toPlainText()),
-            "roi_files": _text_to_paths(self.roi_edit.toPlainText()),
-            "t1map_files": _text_to_paths(self.t1map_edit.toPlainText()),
-            "noise_files": _text_to_paths(self.noise_edit.toPlainText()),
-            "drift_files": _text_to_paths(self.drift_edit.toPlainText()),
+            "dynamic_files": _resolve_repo_paths(_text_to_paths(self.dynamic_edit.toPlainText())),
+            "aif_files": _resolve_repo_paths(_text_to_paths(self.aif_edit.toPlainText())),
+            "roi_files": _resolve_repo_paths(_text_to_paths(self.roi_edit.toPlainText())),
+            "t1map_files": _resolve_repo_paths(_text_to_paths(self.t1map_edit.toPlainText())),
+            "noise_files": _resolve_repo_paths(_text_to_paths(self.noise_edit.toPlainText())),
+            "drift_files": _resolve_repo_paths(_text_to_paths(self.drift_edit.toPlainText())),
             "model_flags": model_flags,
             "stage_overrides": self._stage_overrides_to_dict(),
         }
         return payload
 
     def _prepare_run_config_path(self, payload: Dict[str, Any]) -> Path:
-        output_dir_raw = str(payload.get("output_dir", "")).strip()
-        if output_dir_raw in {"", "."}:
-            output_dir = REPO_ROOT / "out" / "dce_gui"
-        else:
-            output_dir = Path(output_dir_raw).expanduser()
-            if not output_dir.is_absolute():
-                output_dir = (REPO_ROOT / output_dir).resolve()
+        # payload["output_dir"] is already an absolute path (resolved in _collect_config_payload).
+        output_dir = Path(payload["output_dir"])
         output_dir.mkdir(parents=True, exist_ok=True)
         config_path = output_dir / "dce_gui_last_run_config.json"
         config_path.write_text(json.dumps(payload, indent=2) + "\n")

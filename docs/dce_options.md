@@ -1,11 +1,11 @@
 # DCE Options Reference (CLI + GUI)
 
 This file is the shared options reference for:
-- Python CLI: `/Users/samuelbarnes/code/ROCKETSHIP/run_dce_python_cli.py`
-- Python GUI: `/Users/samuelbarnes/code/ROCKETSHIP/run_dce_python_gui.py`
+- Python CLI: `/path/to/ROCKETSHIP/run_dce_python_cli.py`
+- Python GUI: `/path/to/ROCKETSHIP/run_dce_python_gui.py`
 
 Default config template:
-- `/Users/samuelbarnes/code/ROCKETSHIP/python/dce_default.json`
+- `/path/to/ROCKETSHIP/python/dce_default.json`
 
 ## Precedence
 For options in `stage_overrides`:

@@ -58,6 +58,29 @@ def _text_to_float_list(raw: str) -> List[float]:
     return [float(token) for token in parts]
 
 
+def _resolve_path(text: str, base_dir: Path) -> str:
+    """Resolve a possibly-relative path against base_dir.
+
+    parametric_cli.py resolves relative paths in a config against that config
+    file's own directory (`ParametricT1Config.from_dict(..., base_dir=config_path.parent)`),
+    not the process cwd. base_dir must track wherever the currently-loaded config
+    lives so relative paths keep meaning what they meant when authored, even after
+    the GUI re-serializes the payload into a different directory (e.g. output_dir)
+    to run it.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return ""
+    candidate = Path(stripped).expanduser()
+    if not candidate.is_absolute():
+        candidate = (base_dir / candidate).resolve()
+    return str(candidate)
+
+
+def _resolve_paths(values: List[str], base_dir: Path) -> List[str]:
+    return [_resolve_path(v, base_dir) for v in values if str(v).strip()]
+
+
 class ParametricGuiWindow(QMainWindow):
     """Main window for configuring and running parametric T1 CLI."""
 
@@ -259,17 +282,28 @@ class ParametricGuiWindow(QMainWindow):
         layout.addLayout(controls)
         return row
 
+    def _base_dir(self) -> Path:
+        """Directory relative paths in the current config are anchored to.
+
+        Mirrors parametric_cli.py's `base_dir=config_path.parent` semantics, so a
+        relative path shown in the GUI (as loaded verbatim from JSON) keeps resolving
+        the same way the CLI would resolve it, regardless of where the GUI later
+        writes the run config it launches (typically under output_dir).
+        """
+        config_path = getattr(self, "_config_path", None)
+        return config_path.parent if config_path is not None else REPO_ROOT
+
     def _dialog_start_dir(self, current_text: str) -> str:
         text = current_text.strip()
         if text:
             candidate = Path(text).expanduser()
             if not candidate.is_absolute():
-                candidate = (REPO_ROOT / candidate).resolve()
+                candidate = (self._base_dir() / candidate).resolve()
             if candidate.is_file():
                 return str(candidate.parent)
             if candidate.exists():
                 return str(candidate)
-        return str(REPO_ROOT)
+        return str(self._base_dir())
 
     def _choose_directory_for(self, edit: QLineEdit, title: str) -> None:
         start_dir = self._dialog_start_dir(edit.text())
@@ -330,8 +364,8 @@ class ParametricGuiWindow(QMainWindow):
         self.rsq_threshold_edit.setText(str(payload.get("rsquared_threshold", 0.6)))
         self.invalid_fill_edit.setText(str(payload.get("invalid_fill_value", -1.0)))
         self.xy_smooth_sigma_edit.setText(str(payload.get("xy_smooth_sigma", payload.get("xy_smooth_size", 0.0))))
-        self.mask_file_edit.setText(str(payload.get("mask_file", "")))
-        self.b1_map_file_edit.setText(str(payload.get("b1_map_file", "")))
+        self.mask_file_edit.setText(str(payload.get("mask_file") or ""))
+        self.b1_map_file_edit.setText(str(payload.get("b1_map_file") or ""))
         self.odd_echoes_check.setChecked(bool(payload.get("odd_echoes", False)))
         self.write_rsq_check.setChecked(bool(payload.get("write_r_squared", True)))
         self.write_rho_check.setChecked(bool(payload.get("write_rho_map", False)))
@@ -339,8 +373,14 @@ class ParametricGuiWindow(QMainWindow):
         self.flip_angles_edit.setText(_float_list_to_text(list(payload.get("flip_angles_deg", []))))
 
     def _collect_config_payload(self) -> Dict[str, Any]:
+        base_dir = self._base_dir()
+        output_dir_text = self.output_dir_edit.text().strip()
+        if output_dir_text in {"", "."}:
+            output_dir = str(REPO_ROOT / "out" / "parametric_gui")
+        else:
+            output_dir = _resolve_path(output_dir_text, base_dir)
         payload: Dict[str, Any] = {
-            "output_dir": self.output_dir_edit.text().strip(),
+            "output_dir": output_dir,
             "fit_type": self.fit_type_edit.text().strip() or "t1_fa_fit",
             "output_basename": self.output_basename_edit.text().strip() or "T1_map",
             "output_label": self.output_label_edit.text().strip(),
@@ -350,7 +390,7 @@ class ParametricGuiWindow(QMainWindow):
             "write_r_squared": bool(self.write_rsq_check.isChecked()),
             "write_rho_map": bool(self.write_rho_check.isChecked()),
             "invalid_fill_value": float(self.invalid_fill_edit.text().strip() or "-1.0"),
-            "vfa_files": _text_to_paths(self.vfa_files_edit.toPlainText()),
+            "vfa_files": _resolve_paths(_text_to_paths(self.vfa_files_edit.toPlainText()), base_dir),
             "flip_angles_deg": _text_to_float_list(self.flip_angles_edit.text()),
         }
         tr_text = self.tr_ms_edit.text().strip()
@@ -358,22 +398,15 @@ class ParametricGuiWindow(QMainWindow):
             payload["tr_ms"] = float(tr_text)
         mask_text = self.mask_file_edit.text().strip()
         if mask_text:
-            payload["mask_file"] = mask_text
+            payload["mask_file"] = _resolve_path(mask_text, base_dir)
         b1_text = self.b1_map_file_edit.text().strip()
         if b1_text:
-            payload["b1_map_file"] = b1_text
+            payload["b1_map_file"] = _resolve_path(b1_text, base_dir)
         return payload
 
     def _prepare_run_config_path(self, payload: Dict[str, Any]) -> Path:
-        output_dir_raw = str(payload.get("output_dir", "")).strip()
-        if output_dir_raw in {"", "."}:
-            output_dir = REPO_ROOT / "out" / "parametric_gui"
-            payload["output_dir"] = str(output_dir)
-        else:
-            output_dir = Path(output_dir_raw).expanduser()
-            if not output_dir.is_absolute():
-                output_dir = (REPO_ROOT / output_dir).resolve()
-                payload["output_dir"] = str(output_dir)
+        # payload["output_dir"] is already an absolute path (resolved in _collect_config_payload).
+        output_dir = Path(payload["output_dir"])
         output_dir.mkdir(parents=True, exist_ok=True)
         config_path = output_dir / "parametric_gui_last_run_config.json"
         config_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -502,9 +535,9 @@ class ParametricGuiWindow(QMainWindow):
             f"r2_median: {metrics.get('r2_median', '-')}",
             "",
             "outputs:",
-            f"  t1_map_path: {outputs.get('t1_map_path', '-')}",
-            f"  rsquared_map_path: {outputs.get('rsquared_map_path', '-')}",
-            f"  rho_map_path: {outputs.get('rho_map_path', '-')}",
+            f"  t1_map_path: {outputs.get('t1_map_path') or '-'}",
+            f"  rsquared_map_path: {outputs.get('rsquared_map_path') or '-'}",
+            f"  rho_map_path: {outputs.get('rho_map_path') or '-'}",
         ]
         self.summary_view.setPlainText("\n".join(lines))
         for key in ("t1_map_path", "rsquared_map_path", "rho_map_path"):
@@ -514,13 +547,8 @@ class ParametricGuiWindow(QMainWindow):
 
     def _open_output_dir(self) -> None:
         payload = self._collect_config_payload()
-        output_dir = str(payload.get("output_dir", "")).strip()
-        if not output_dir:
-            output_path = REPO_ROOT / "out" / "parametric_gui"
-        else:
-            output_path = Path(output_dir).expanduser()
-            if not output_path.is_absolute():
-                output_path = (REPO_ROOT / output_path).resolve()
+        # payload["output_dir"] is already an absolute path (resolved in _collect_config_payload).
+        output_path = Path(payload["output_dir"])
         output_path.mkdir(parents=True, exist_ok=True)
         opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(output_path)))
         if not opened:

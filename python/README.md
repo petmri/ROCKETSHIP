@@ -168,7 +168,7 @@ exist in both trees, so other tools can run over the same discovered set.
 Process all (or filtered) sessions in a BIDS dataset:
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 .venv/bin/python run_dce_bids_batch.py \
   --bids-root /path/to/bids_root \
   --pipeline-folder dceprep \
@@ -227,7 +227,7 @@ Example: Process only session 1 with specific models:
 Process T1 VFA mapping for all (or filtered) sessions in a BIDS dataset:
 
 ```bash
-cd /Users/samuelbarnes/code/ROCKETSHIP
+cd /path/to/ROCKETSHIP
 .venv/bin/python run_parametric_bids_batch.py \
   --bids-root /path/to/bids_root \
   --pipeline-folder t1prep \
@@ -345,7 +345,7 @@ Preference precedence (highest to lowest):
 
 Shared options documentation for CLI + GUI:
 
-- `/Users/samuelbarnes/code/ROCKETSHIP/docs/dce_options.md`
+- `/path/to/ROCKETSHIP/docs/dce_options.md`
 
 ## Pipeline outputs and provenance
 
