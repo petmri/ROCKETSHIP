@@ -87,6 +87,30 @@ jobs:
       - name: Run Python unit/integration tests (non-parity mode)
         run: python -m pytest tests/python -m "not parity" -q
 
+  # Kept out of python_checks so a flaky external release download cannot fail the main
+  # Python job, and so this doubles as the only end-to-end exercise of the installer.
+  backend_equivalence:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      # Pulls prebuilt pyCpufit/pyGpufit from the Gpufit release into .venv. Runners have no
+      # CUDA, so pyGpufit imports but reports cuda_available=false and the gpufit half of the
+      # gate skips itself; pyCpufit is a pure-CPU library and runs.
+      - name: Install Python acceleration (pyCpufit/pyGpufit)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python install_python_acceleration.py --no-matlab --no-gui --venv-path .venv
+
+      - name: Run backend-equivalence gate (cpu vs cpufit on frozen Stage-B arrays)
+        run: .venv/bin/python -m pytest tests/python/test_backend_equivalence.py -q -rs
+
   parity_checks:
     runs-on: ubuntu-latest
 

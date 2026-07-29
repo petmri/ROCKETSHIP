@@ -65,8 +65,9 @@ from the original list were dropped as won't-do. Full rationale:
       `tests/python/test_backend_equivalence.py`, on 2000 voxels of Stage-B arrays frozen from
       `RUNNER_DATA/sub-1101743/ses-01` (332 KB; `freeze_stage_b_backend_fixture.py`). Gates
       `cpu` vs `cpufit_cpu` and vs `gpufit_cuda` on `patlak`/`tofts`/`ex_tofts`; skips with
-      reason when the backend is absent (so it is **not** enforced in CI today — neither
-      package is in `requirements.txt`; see the note below).
+      reason when a backend is absent. Enforced in CI by the `backend_equivalence` job, which
+      installs the backends via `install_python_acceleration.py`; runners have no CUDA, so the
+      `cpufit` half gates and the `gpufit` half skips itself.
       **This corrected the premise.** The "cpufit/gpufit diverges from MATLAB" reading was
       measuring bound-pinned voxels: on this fixture ex_tofts Ktrans reads corr 0.23 over all
       voxels but **0.9998** once voxels with a parameter pinned at a bound are excluded, and
@@ -75,9 +76,12 @@ from the original list were dropped as won't-do. Full rationale:
       rather than a naive whole-sample correlation, which would have had to be set so loose it
       gated nothing. Verified to fail on a 20% Ktrans bias, inflated SSE, and skewed bound-hit
       rates.
-- [ ] **Decide whether to install `pycpufit` in CI** so gap B's gate is actually enforced there.
-      It passes locally on both accelerated backends; in CI it skips. Cost is ~2 min (the scipy
-      CPU reference), and it would need a wheel source for the runner.
+- [x] **Install `pycpufit` in CI** so gap B's gate is enforced there. Done via a dedicated
+      `backend_equivalence` job running `install_python_acceleration.py --no-matlab --no-gui`,
+      which pulls the prebuilt pyCpufit/pyGpufit from the `ironictoo/Gpufit` release
+      (`py3-none-any`, ctypes-loaded `.so`, no hard CUDA link). Kept out of `python_checks` so a
+      flaky external download cannot fail the main Python job — and it is now the only
+      end-to-end exercise of the installer.
 
 ## External Accelerator Handoff (Open Items Only)
 
