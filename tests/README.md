@@ -9,7 +9,7 @@ shown here as `pytest` for brevity.
 | Goal | Command |
 |---|---|
 | Default Python suite (incl. gated DCE parity) | `pytest tests/python` |
-| DCE parity, all models (reported extras) | `pytest tests/python -m parity --parity-suite=allmodels -s` |
+| DCE parity, incl. reported-only extras | `pytest tests/python -m parity --parity-suite=allmodels -s` |
 | Runtime parity vs MATLAB (needs MATLAB) | `pytest tests/python/test_runtime_parity.py --run-runtime-parity` |
 | OSIPI reliability | `pytest tests/python -m osipi -v` (runs the full 2CXM/2CUM sweeps by default) |
 | BIDS qualification | `pytest tests/python --run-qualification` |
@@ -28,18 +28,52 @@ shown here as `pytest` for brevity.
 The parity suite compares the Python pipeline against committed MATLAB baseline maps. It is organized by a
 single **`--parity-suite`** selector and split into **gated** vs **reported-only** checks.
 
-- **`--parity-suite=standard`** (default; runs on a plain `pytest`): gates **Tofts & Patlak, Ktrans only**,
-  Python-vs-MATLAB (cpu & auto), on **RMSE and Spearman (rank) correlation**.
-- **`--parity-suite=allmodels`**: additionally runs **ex_tofts, tissue_uptake, 2cxm** as **reported-only**
-  diagnostics (never gated — they are not identifiable on this fixture).
+- **`--parity-suite=standard`** (default; runs on a plain `pytest`): gates **Tofts, Patlak and ex-Tofts**,
+  **every fitted parameter**, Python-vs-MATLAB (cpu & auto), on **RMSE and Spearman (rank) correlation**.
+- **`--parity-suite=allmodels`**: additionally runs **tissue_uptake and 2cxm** as **reported-only**
+  diagnostics.
 - **`--parity-suite=all`**: union of the above.
 
-**Regions and the gated set.** Each model/param is evaluated over three ROIs — whole **brain** (sparse),
-**GM**, and **WM**. Both gated models (tofts, patlak) gate Ktrans on all three regions: **12 gated checks,
-no exceptions.** The former tofts-GM exception (reported-only, on the grounds that Tofts Ktrans was
-non-identifiable in that GM patch) was retired 2026-07-28 — the Stage-B AIF fix lifted tofts-GM to
-`corr` 0.980 (cpu) / 0.992 (auto) against a 0.95 floor. Non-Ktrans params (ve/vp/fp) and
-backend-consistency (auto-vs-cpu) are always reported, never gated.
+**The gate policy is one rule with no exceptions** (reviewed 2026-07-29). Every parameter of every gated
+model is gated, over all three ROIs — whole **brain** (sparse), **GM**, **WM** — against **one threshold
+pair**, after **one identifiability filter**. That is **42 gated checks**: tofts (Ktrans, ve) + patlak
+(Ktrans, vp) + ex_tofts (Ktrans, ve, vp) × 3 regions × {cpu, auto} vs MATLAB. There are no per-model,
+per-parameter or per-region carve-outs.
+
+**The identifiability filter.** A voxel counts only if **neither side left any of that model's compared
+parameters sitting on a bound**. Against a bound the objective is flat, so two optimizers stop at
+different points of one plateau and the disagreement measures the constraint rather than the port —
+the same mechanism, and the same rule, as `test_backend_equivalence.py`. It replaced two hand-rolled
+masks that each covered one corner of it (`ktrans_upper_exclude`, Ktrans near its 2.0 ceiling and only
+for ex_tofts/2cxm; `ve_ktrans_min`, Ktrans at its 1e-7 floor and only for ve). Two measured consequences:
+
+- **ex_tofts became gateable.** Its worst check went `0.807 → 0.9998` (Ktrans/GM/cpu) and `0.765 →
+  0.9998` (auto). The partial masks, not the model, were why it read as "not identifiable on this fixture."
+- **It removes padding, and can lower a number.** 60 of tofts' 229 brain voxels sat on `ve`'s 0.02 floor
+  and agreed trivially (`corr` 0.9952), inflating tofts Ktrans/brain to 0.9751; the honest value on
+  determined voxels is **0.9616**, which is now the tightest gated check.
+
+A gated check whose identifiable subset drops below **25%** of QoF-passing voxels **fails** rather than
+passing on a handful of voxels (observed minimum is 0.578, ex_tofts/brain).
+
+**Verified by breaking it** (2026-07-29), since a gate is only worth its failures. Each of these was
+injected into the Python maps and confirmed to fail the checks it should: a 40% patlak Ktrans scale
+error (`corr` stays at exactly 1.000000 — the case only the normalized bound catches, and one the old
+absolute bound passed by 30×); a shuffle of tofts Ktrans within the mask (`corr` 0.01, `nrmse` 1.16);
+ex_tofts `ve` driven entirely onto its bound (mask collapse, 0 valid voxels); and 90% of patlak `vp`
+pinned (identifiable fraction 0.091 < 0.25, the partial-collapse guard).
+
+**Reported-only, with the measurement that puts them there.** `tissue_uptake` — `Fp` is not identifiable
+at this fixture's 15.84 s frames (filtered `corr` 0.08 WM / 0.18 GM), and since the model fits
+`E = Ktrans/Fp`, `Ktrans` and `vp` inherit it; this is the same root cause as the ROI-xls `Fp` exclusion
+below. `2cxm` — the identifiable subset collapses (0/57 GM, 9/119 WM, 26/222 brain), so there is nothing
+determined left to compare. Both reasons are re-measured **with** the filter applied, so neither is a
+bound-pinning artifact.
+
+**Backend consistency (auto-vs-cpu) is reported, never gated** — CI installs no accelerator, so `auto`
+resolves to the same code path as `cpu` there and gating it would assert that a function equals itself.
+`test_backend_equivalence.py` is the real cpu-vs-cpufit/gpufit gate, and CI runs it with the backends
+installed.
 
 **Reported metrics.** Every check logs `corr` (Spearman rank correlation, not Pearson — robust to the
 single high-leverage/non-identifiable voxel that can otherwise dominate a sum-of-products statistic;
@@ -68,6 +102,18 @@ MATLAB averages each parameter's concentration curve over the whole-brain ROI an
 (average-then-fit). Python reproduces this exactly via the pipeline's **ROI-only mode**
 (`stage_overrides.fit_voxels=0`), which skips the per-voxel fit — so the check runs in a few seconds
 and matches MATLAB's tables within tolerance. See `docs/dce_options.md` for `fit_voxels`.
+
+**One limit for every model and column**: `ROI_XLS_MAX_ABS_ERR = 0.01`. This replaced four hand-tuned
+per-model limits (tofts 0.03, ex_tofts/patlak 0.01, tissue_uptake 0.05) that had drifted into 20–770×
+headroom as the Stage-B AIF work landed; measured worst column per model on 2026-07-29 is tofts
+0.001440, ex_tofts 0.000013, patlak 0.000013, tissue_uptake 0.002235, so the single value is ~7× the
+worst case and tightens three of the four.
+
+**The suite's one remaining hand-curated exclusion** is `tissue_uptake`'s `Fp` and its two CI columns
+(`ROI_XLS_EXCLUDED_COLUMNS`) — and it is the *same* finding that keeps `tissue_uptake` out of the
+voxelwise gated set above, not a second independent exception. Re-measured 2026-07-29 and still
+precisely scoped: `Fp` (0.073345) and its CI (0.055581, 0.091109) are the only columns over the limit;
+the worst of all the others is `Vp 95% high` at 0.002235.
 
 ### Stage-B AIF contract
 
@@ -147,9 +193,29 @@ Gate thresholds default to `tests/python/parity_thresholds_default.json`. Overri
 pytest tests/python -m parity --parity-thresholds path/to/my_thresholds.json
 ```
 
-Only the keys you include are overlaid. The standard gate uses `model_ktrans_corr_min` and
-`model_ktrans_mse_max` (RMSE gate = `sqrt(model_ktrans_mse_max)`). The individual `--parity-*-corr-min` /
-`--parity-*-mse-max` CLI flags still work but are secondary to the JSON.
+Only the keys you include are overlaid. There are exactly two, applied to every gated
+model/parameter/region alike: **`gate_corr_min`** (0.95; measured worst case 0.9616) and
+**`gate_nrmse_max`** (0.25; measured worst case 0.1423). The equivalent CLI flags are
+`--parity-gate-corr-min` / `--parity-gate-nrmse-max`.
+
+**Scatter is gated on `nrmse` — RMSE over the reference RMS — not on absolute RMSE.** These
+parameters differ ~50× in scale across models (reference RMS runs 0.0012 for patlak Ktrans to
+0.058 for ex_tofts ve), so no single absolute bound is honest for all of them: an `rmse_max` of
+0.02, the tightest value the tofts numbers would have allowed, still admits a **1737%** error on
+patlak Ktrans. Normalizing makes a proportional error read as itself, and matches how
+`test_backend_equivalence.py` measures the same kind of scatter. A degenerate reference (zero RMS
+over the mask) yields a non-finite `nrmse` and **fails** — there is nothing to normalize against,
+so nothing was verified.
+
+The two metrics are deliberately orthogonal: correlation cannot see a pure scale error at all
+(the 40% patlak injection below reports `corr=1.000000`), and rank correlation catches a
+structural change that leaves the value distribution intact.
+
+The former per-scope knobs (`model_ktrans_*`, `model_param_*`, `ve_ktrans_min`, `ktrans_upper_exclude`,
+and the never-consumed `downsample_*` / `full_*` / `cpu_auto_*` / `ex_tofts_ktrans_corr_min`) were
+removed on 2026-07-29 — the first four are subsumed by the single pair plus the identifiability filter,
+and the rest had no reader in the suite at all. Unknown keys in an override JSON are still accepted and
+ignored, so an old file will not error.
 
 ### Deprecated flags
 

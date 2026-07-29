@@ -43,25 +43,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=".pytest_cache/parity_summaries",
         help="Directory to write parity summary JSON reports.",
     )
-    group.addoption("--parity-ve-ktrans-min", action="store", type=float, default=1e-6)
-    group.addoption("--parity-downsample-ktrans-corr-min", action="store", type=float, default=0.99)
-    group.addoption("--parity-downsample-ktrans-mse-max", action="store", type=float, default=0.001)
-    group.addoption("--parity-downsample-ve-corr-min", action="store", type=float, default=0.97)
-    group.addoption("--parity-downsample-ve-mse-max", action="store", type=float, default=0.002)
-    group.addoption("--parity-full-ktrans-corr-min", action="store", type=float, default=0.99)
-    group.addoption("--parity-full-ktrans-mse-max", action="store", type=float, default=0.001)
-    group.addoption("--parity-full-ve-corr-min", action="store", type=float, default=0.97)
-    group.addoption("--parity-full-ve-mse-max", action="store", type=float, default=0.002)
-    group.addoption("--parity-model-ktrans-corr-min", action="store", type=float, default=0.95)
-    group.addoption("--parity-model-ktrans-mse-max", action="store", type=float, default=0.01)
-    group.addoption("--parity-model-param-corr-min", action="store", type=float, default=0.90)
-    group.addoption("--parity-model-param-mse-max", action="store", type=float, default=0.02)
-    group.addoption("--parity-cpu-auto-ktrans-corr-min", action="store", type=float, default=0.98)
-    group.addoption("--parity-cpu-auto-ktrans-mse-max", action="store", type=float, default=0.002)
-    group.addoption("--parity-cpu-auto-param-corr-min", action="store", type=float, default=0.95)
-    group.addoption("--parity-cpu-auto-param-mse-max", action="store", type=float, default=0.01)
-    group.addoption("--parity-ex-tofts-ktrans-corr-min", action="store", type=float, default=0.85)
-    group.addoption("--parity-ktrans-upper-exclude", action="store", type=float, default=1.9)
+    # The DCE parity gate has exactly two thresholds, applied to every gated model/parameter/
+    # region alike (see tests/python/test_dce_pipeline_parity_metrics.py "Gate policy").
+    # Scatter is normalized by the reference RMS so one bound is honest across parameters whose
+    # scales differ 50x. Measured worst case on sub-10bbbdownsample: corr 0.9616, nrmse 0.1423.
+    group.addoption("--parity-gate-corr-min", action="store", type=float, default=0.95)
+    group.addoption("--parity-gate-nrmse-max", action="store", type=float, default=0.25)
     group.addoption("--parity-required-models", "--req-models", action="store", default="tofts,ex_tofts,patlak")
     group.addoption("--parity-cpu-optional-models", "--cpu-opt-models", action="store", default="patlak")
     group.addoption("--parity-require-all-models", "--all-models", action="store_true", default=False)
@@ -229,25 +216,8 @@ def parity_summary_dir(request: pytest.FixtureRequest, repo_root: Path) -> Path 
 def parity_thresholds(request: pytest.FixtureRequest) -> dict:
     cfg = request.config
     values = {
-        "ve_ktrans_min": float(cfg.getoption("--parity-ve-ktrans-min")),
-        "downsample_ktrans_corr_min": float(cfg.getoption("--parity-downsample-ktrans-corr-min")),
-        "downsample_ktrans_mse_max": float(cfg.getoption("--parity-downsample-ktrans-mse-max")),
-        "downsample_ve_corr_min": float(cfg.getoption("--parity-downsample-ve-corr-min")),
-        "downsample_ve_mse_max": float(cfg.getoption("--parity-downsample-ve-mse-max")),
-        "full_ktrans_corr_min": float(cfg.getoption("--parity-full-ktrans-corr-min")),
-        "full_ktrans_mse_max": float(cfg.getoption("--parity-full-ktrans-mse-max")),
-        "full_ve_corr_min": float(cfg.getoption("--parity-full-ve-corr-min")),
-        "full_ve_mse_max": float(cfg.getoption("--parity-full-ve-mse-max")),
-        "model_ktrans_corr_min": float(cfg.getoption("--parity-model-ktrans-corr-min")),
-        "model_ktrans_mse_max": float(cfg.getoption("--parity-model-ktrans-mse-max")),
-        "model_param_corr_min": float(cfg.getoption("--parity-model-param-corr-min")),
-        "model_param_mse_max": float(cfg.getoption("--parity-model-param-mse-max")),
-        "cpu_auto_ktrans_corr_min": float(cfg.getoption("--parity-cpu-auto-ktrans-corr-min")),
-        "cpu_auto_ktrans_mse_max": float(cfg.getoption("--parity-cpu-auto-ktrans-mse-max")),
-        "cpu_auto_param_corr_min": float(cfg.getoption("--parity-cpu-auto-param-corr-min")),
-        "cpu_auto_param_mse_max": float(cfg.getoption("--parity-cpu-auto-param-mse-max")),
-        "ex_tofts_ktrans_corr_min": float(cfg.getoption("--parity-ex-tofts-ktrans-corr-min")),
-        "ktrans_upper_exclude": float(cfg.getoption("--parity-ktrans-upper-exclude")),
+        "gate_corr_min": float(cfg.getoption("--parity-gate-corr-min")),
+        "gate_nrmse_max": float(cfg.getoption("--parity-gate-nrmse-max")),
         "required_models_raw": str(cfg.getoption("--parity-required-models") or "").strip(),
         "cpu_optional_models_raw": str(cfg.getoption("--parity-cpu-optional-models") or "").strip(),
         "require_all_models": bool(cfg.getoption("--parity-require-all-models")),

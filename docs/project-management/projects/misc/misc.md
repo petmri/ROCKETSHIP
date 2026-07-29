@@ -1,8 +1,0 @@
-1. I replaced GM roi file to be a cleaner region, this should fix the problems with ex-tofts fitting on that region. We can revisit the decision about limited GM gating with ex-tofts.
-2. the BBB p19 data is in two spots, the CI fixtures and in the data/BBB data p19. Along with multiple ROIs. We need to organize data better.
-    - Delete the tests/data/CI_fixtures folder and move the data to the tests/data/BIDS_test folder. The CI scripts should just point to the tests/data/BIDS_test folder. 
-    - Delete the synthetic folder, again all that data should be in the tests/data/BIDS_test folder. The synthetic folder is not needed.
-3. The BIDS_test data is a little confusing. There isn't a DCE image in the rawdata folder (for subn 1, 2, 3, or 4). But there is in the derivatives folder. I'm not sure why.
-    - This is because rocketship is not designed to run on the rawdata folder, but rather on the derivatives folder. The rawdata folder is just for reference and to show what the original data looked like. The derivatives folder is where the processed data lives, and where the DCE images are generated.
-4. I can't figure out what the batch_parity.md documetion is talking about. It refers to "Primary tracking for parity work on `RUNNER_DATA/sub-1101743/{ses-01,ses-02}` and related parity fixtures.", what data is that?
-    - The RUNNER_DATA is on the network drive and we use for the self hosted runner for DCEPrep.

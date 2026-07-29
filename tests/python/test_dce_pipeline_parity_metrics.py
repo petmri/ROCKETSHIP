@@ -17,7 +17,12 @@ from scipy.stats import spearmanr
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "python"))
 
-from dce_pipeline import DcePipelineConfig, run_dce_pipeline  # noqa: E402
+from dce_pipeline import (  # noqa: E402
+    DcePipelineConfig,
+    _apply_model_specific_prefs,
+    _stage_d_fit_prefs,
+    run_dce_pipeline,
+)
 import dce_qof  # noqa: E402
 
 MULTI_MODEL_PARITY_SPECS = {
@@ -307,11 +312,21 @@ def _metrics(
     # the same fix already applied to tests/contracts/check_matlabref_map_drift.py). A
     # genuine algorithm change still collapses Spearman to ~0/negative.
     corr = float(spearmanr(x, y).correlation) if np.std(x) > 0 and np.std(y) > 0 else float("nan")
+    # Scatter is gated on `nrmse`, RMSE over the *reference* RMS, not on absolute RMSE. These
+    # parameters span two orders of magnitude across models (reference RMS runs 0.0012 for
+    # patlak Ktrans to 0.058 for ex_tofts ve), so one absolute bound cannot be honest for all
+    # of them: an rmse_max of 0.02 -- the tightest value the tofts numbers allowed -- would have
+    # admitted a 1737% error on patlak Ktrans. Normalizing makes a proportional error read as
+    # itself, and matches how test_backend_equivalence.py measures the same kind of scatter.
+    rmse = float(np.sqrt(mse))
+    ref_rms = float(np.sqrt(np.mean(y * y)))
     return {
         "n": int(x.size),
         "corr": corr,
         "mse": mse,
-        "rmse": float(np.sqrt(mse)),
+        "rmse": rmse,
+        "ref_rms": ref_rms,
+        "nrmse": (rmse / ref_rms) if ref_rms > 0 else float("nan"),
     }
 
 
@@ -460,15 +475,28 @@ def _canonical_roi_token(name: str) -> str:
     return text
 
 
-# Columns excluded from the ROI-xls gate, per model.
+# One absolute limit for every model and every column of the ROI-xls gate. It replaced four
+# hand-tuned per-model limits (tofts 0.03, ex_tofts/patlak 0.01, tissue_uptake 0.05) that had
+# drifted into 20-770x headroom as the Stage-B AIF work landed. Re-measured 2026-07-29, worst
+# column per model: tofts 0.001440 (Ktrans 95% high), ex_tofts 0.000013, patlak 0.000013,
+# tissue_uptake 0.002235 (excluding Fp, below) -- so this single value is ~7x the worst case
+# and is a real tightening for three of the four.
+ROI_XLS_MAX_ABS_ERR = 0.01
+
+# Columns excluded from the ROI-xls gate, per model. This is the suite's one remaining
+# hand-curated exclusion, and it is the same finding that keeps tissue_uptake out of the
+# voxelwise gated set (UNGATED_MODEL_REASONS above), not a second independent exception.
 #
 # tissue_uptake's Fp (plasma flow) is not reliably estimable on this fixture: at 15.84 s frames
 # the bolus rise occupies a single sample, and Fp is determined almost entirely by that leading
 # edge. It is also the parameter most exposed to how the AIF's peak is fitted, which is exactly
 # the thing the data cannot pin down (the peak has leverage 1 in the biexponential model -- see
-# docs/project-management/projects/archived/batch-parity/aif_fitting_parity.md). Python and MATLAB have
-# never agreed on it here; every other tissue_uptake column agrees to <0.004. Gating on Fp
+# docs/project-management/projects/archived/batch-parity/aif_fitting_parity.md). Gating on Fp
 # measures the fixture's temporal resolution, not the port's correctness.
+#
+# Re-measured 2026-07-29 and still precisely scoped: Fp (0.073345) and its two CI columns
+# (0.055581, 0.091109) are the *only* tissue_uptake columns above the limit; the worst of all
+# the others is Vp 95% high at 0.002235.
 ROI_XLS_EXCLUDED_COLUMNS = {
     "tissue_uptake": ("fp", "fp 95% low", "fp 95% high"),
 }
@@ -541,11 +569,83 @@ def _compare_roi_table_against_reference(
     return {"rows": int(len(py_rows)), "mae": mae, "max_abs_err": max_err}
 
 
-# Standard suite: gated Python-vs-MATLAB parity on Tofts & Patlak Ktrans. Runs by default
-# (no flag). `--parity-suite=allmodels` additionally runs ex_tofts/tissue_uptake/2cxm as
-# reported-only diagnostics.
-STANDARD_PARITY_MODELS = ["tofts", "patlak"]
-ALLMODELS_EXTRA = ["ex_tofts", "tissue_uptake", "2cxm"]
+# Standard suite: gated Python-vs-MATLAB parity on Tofts, Patlak and ex-Tofts. Runs by default
+# (no flag). `--parity-suite=allmodels` additionally runs tissue_uptake/2cxm as reported-only
+# diagnostics.
+STANDARD_PARITY_MODELS = ["tofts", "patlak", "ex_tofts"]
+ALLMODELS_EXTRA = ["tissue_uptake", "2cxm"]
+
+# Gate policy, reviewed 2026-07-29. One rule applied uniformly: every parameter of every gated
+# model is gated, over every region, against one threshold pair, after one identifiability
+# filter. No per-model, per-parameter or per-region exceptions.
+GATED_MODELS = {"tofts", "patlak", "ex_tofts"}
+
+# The two models that stay reported-only, and the measurement that puts them there. Both were
+# re-measured with the identifiability filter below already applied, so neither is a
+# bound-pinning artifact -- these are properties of the fixture, not of the port.
+UNGATED_MODEL_REASONS = {
+    "tissue_uptake": (
+        "Fp is not identifiable at this fixture's 15.84 s frames: the bolus rise occupies a "
+        "single sample and Fp is set almost entirely by that leading edge. Filtered corr is "
+        "0.08 (WM) / 0.18 (GM). Ktrans and vp inherit it -- the model fits E=Ktrans/Fp, so an "
+        "undetermined Fp propagates into both. Same root cause as the ROI-xls Fp exclusion "
+        "(aif_fitting_parity.md S8)."
+    ),
+    "2cxm": (
+        "The identifiable subset collapses: 0/57 GM, 9/119 WM and 26/222 brain voxels survive "
+        "the bound filter, i.e. almost every 2cxm fit pins a parameter. There is not enough "
+        "determined signal on this fixture to gate on."
+    ),
+}
+
+# Identifiability filter. A voxel is comparable for a model only if NEITHER side left ANY of
+# that model's compared parameters sitting on a bound: against a bound the objective is flat, so
+# two optimizers stop at different points of one plateau and the disagreement measures the
+# constraint rather than the port. Identical rule to tests/python/test_backend_equivalence.py.
+#
+# This replaced two hand-rolled masks that each covered one corner of it -- `ktrans_upper_exclude`
+# (Ktrans near its 2.0 ceiling, applied only to ex_tofts/2cxm) and `ve_ktrans_min` (Ktrans at its
+# 1e-7 floor, applied only to ve). The partial masks were why ex_tofts was ungateable: with the
+# full filter its worst check goes 0.807 -> 0.9998 (Ktrans/GM/cpu) and 0.765 -> 0.9998
+# (Ktrans/GM/auto). It also removes padding -- 60 of tofts' 229 brain voxels sat on ve's 0.02
+# floor and agreed trivially (corr 0.9952), inflating tofts Ktrans/brain from a true 0.9616.
+BOUND_REL_TOL = 1e-6
+# Below this the filter has eaten the comparison and a "pass" would mean nothing, so gated checks
+# fail rather than pass quietly. Observed minimum on gated models is 0.578 (ex_tofts/brain).
+IDENTIFIABLE_FRACTION_MIN = 0.25
+
+
+def _at_bound(values: np.ndarray, lo: float, hi: float) -> np.ndarray:
+    span = max(hi - lo, 1e-12)
+    return (np.abs(values - lo) <= BOUND_REL_TOL * span) | (np.abs(values - hi) <= BOUND_REL_TOL * span)
+
+
+def _identifiable_mask(
+    params: list[str],
+    py_maps: dict[str, np.ndarray],
+    matlab_maps: dict[str, np.ndarray],
+    prefs: dict,
+) -> tuple[np.ndarray, dict[str, int]]:
+    """Voxels where neither side pinned any compared parameter at one of its bounds.
+
+    Bounds are read from the pipeline's own fit prefs so the filter tracks the fitter instead of
+    a second copy of the numbers. For the three gated models those are exactly the values in
+    `dce/dce_preferences.txt`, so the same thresholds legitimately apply to the MATLAB maps.
+    (`2cxm` and `tissue_uptake` carry Python-side model-specific overrides that MATLAB has no
+    equivalent for -- e.g. ve floor 0.05 vs 0.02 -- so the filter is slightly conservative on
+    those two. Both are reported-only, so this affects a diagnostic, not a gate.)
+    """
+    pinned = np.zeros(np.shape(matlab_maps[params[0]]), dtype=bool)
+    per_param: dict[str, int] = {}
+    for param in params:
+        key = param.lower()
+        lo = float(prefs[f"lower_limit_{key}"])
+        hi = float(prefs[f"upper_limit_{key}"])
+        hit = _at_bound(py_maps[param], lo, hi) | _at_bound(matlab_maps[param], lo, hi)
+        per_param[param] = int(np.count_nonzero(hit))
+        pinned |= hit
+    return ~pinned, per_param
+
 
 # QoF filtering (sigma_estimators.md): exclude voxels whose Python-CPU reduced χ² exceeds this
 # ABSOLUTE cutoff (residuals > τ× the estimated noise variance), per model, using the CPU (reference)
@@ -618,17 +718,15 @@ def test_bbb_p19_region_parity(
             "wm": _load_nifti(paths["roi_wm"]) > 0,
         }
 
-        ktrans_corr_min = float(parity_thresholds["model_ktrans_corr_min"])
-        ktrans_mse_max = float(parity_thresholds["model_ktrans_mse_max"])
-        param_corr_min = float(parity_thresholds["model_param_corr_min"])
-        param_mse_max = float(parity_thresholds["model_param_mse_max"])
-        ve_ktrans_min = float(parity_thresholds["ve_ktrans_min"])
-        ktrans_upper_exclude = float(parity_thresholds["ktrans_upper_exclude"])
+        # One pair for every gated check, whatever the model, parameter or region.
+        gate_corr_min = float(parity_thresholds["gate_corr_min"])
+        gate_nrmse_max = float(parity_thresholds["gate_nrmse_max"])
 
-        # Gated scope: only Tofts & Patlak, Ktrans parameter, Python-vs-MATLAB. Everything
-        # else (other params, other models, backend-consistency) is reported, never gated.
-        gated_models = {"tofts", "patlak"}
-
+        # Gated scope: every parameter of every model in GATED_MODELS, Python-vs-MATLAB, over
+        # all three regions. Backend consistency (auto-vs-cpu) stays reported -- CI installs no
+        # accelerator, so `auto` resolves to the same code path as `cpu` there and gating it
+        # would assert that a function equals itself. tests/python/test_backend_equivalence.py
+        # is the real cpu-vs-cpufit/gpufit gate, and CI runs it with the backends installed.
         failures: list[str] = []
         checks: list[dict] = []
 
@@ -638,29 +736,47 @@ def test_bbb_p19_region_parity(
             *,
             label: str,
             region_mask: np.ndarray,
-            corr_min: float,
-            mse_max: float,
             gated: bool,
-            extra_mask: np.ndarray | None = None,
+            identifiable: np.ndarray | None = None,
             ci: dict | None = None,
             qof_mask: np.ndarray | None = None,
         ) -> None:
+            finite = np.isfinite(lhs) & np.isfinite(rhs)
             combined = np.asarray(region_mask, dtype=bool)
-            if extra_mask is not None:
-                combined = combined & np.asarray(extra_mask, dtype=bool)
-            n_pre_qof = int(np.count_nonzero(np.isfinite(lhs) & np.isfinite(rhs) & combined))
+            n_pre_qof = int(np.count_nonzero(finite & combined))
             if qof_mask is not None:
                 combined = combined & np.asarray(qof_mask, dtype=bool)
-            n_valid = int(np.count_nonzero(np.isfinite(lhs) & np.isfinite(rhs) & combined))
+            n_post_qof = int(np.count_nonzero(finite & combined))
+            if identifiable is not None:
+                combined = combined & np.asarray(identifiable, dtype=bool)
+            n_valid = int(np.count_nonzero(finite & combined))
+            frac_identifiable = (n_valid / n_post_qof) if n_post_qof else 0.0
             check_rec: dict = {
                 "label": label,
                 "gated": bool(gated),
-                "corr_min": float(corr_min),
-                "mse_max": float(mse_max),
+                "corr_min": float(gate_corr_min),
+                "nrmse_max": float(gate_nrmse_max),
                 "valid_voxels": n_valid,
                 "qof_filtered": bool(qof_mask is not None),
-                "qof_excluded_voxels": int(n_pre_qof - n_valid) if qof_mask is not None else 0,
+                "qof_excluded_voxels": int(n_pre_qof - n_post_qof) if qof_mask is not None else 0,
+                "bound_pinned_excluded_voxels": int(n_post_qof - n_valid),
+                "identifiable_fraction": float(frac_identifiable),
             }
+            # A gated check whose identifiable subset has collapsed is verifying nothing, the
+            # same silent hole the <2-voxel branch below covers -- just reached by degrees
+            # rather than all at once (e.g. every fit drifting onto a bound).
+            if gated and n_valid >= 2 and frac_identifiable < IDENTIFIABLE_FRACTION_MIN:
+                msg = (
+                    f"only {frac_identifiable:.3f} of QoF-passing voxels are identifiable "
+                    f"({n_valid}/{n_post_qof}, min {IDENTIFIABLE_FRACTION_MIN}); "
+                    "the gate has nothing determined left to compare"
+                )
+                check_rec["status"] = "collapsed"
+                check_rec["error"] = msg
+                failures.append(f"{label}: {msg}")
+                _parity_log(f"{label}: FAILED (gated, identifiable fraction {frac_identifiable:.3f})")
+                checks.append(check_rec)
+                return
             if n_valid < 2:
                 # A gated check with nothing to compare is a silent hole, not a pass.
                 if gated:
@@ -677,7 +793,11 @@ def test_bbb_p19_region_parity(
 
             metrics = _metrics(lhs, rhs, combined)
             check_rec["metrics"] = metrics
-            summary = f"{label}: n={metrics['n']}, corr={metrics['corr']:.6f}, rmse={metrics['rmse']:.6f}"
+            summary = (
+                f"{label}: n={metrics['n']}, corr={metrics['corr']:.6f}, "
+                f"nrmse={metrics['nrmse']:.6f} (rmse={metrics['rmse']:.6f}, "
+                f"ref_rms={metrics['ref_rms']:.6f}), ident={frac_identifiable:.3f}"
+            )
             if ci is not None:
                 ci_metrics = _ci_metrics(lhs, rhs, combined, **ci)
                 check_rec["ci_metrics"] = ci_metrics
@@ -692,11 +812,17 @@ def test_bbb_p19_region_parity(
                 checks.append(check_rec)
                 return
 
-            rmse_max = float(np.sqrt(mse_max))
-            if metrics["corr"] >= corr_min and metrics["rmse"] <= rmse_max:
+            # A non-finite nrmse means the reference is degenerate (all-zero over the mask), so
+            # there is nothing to normalize against and nothing verified -- fail, do not pass.
+            ok = (
+                metrics["corr"] >= gate_corr_min
+                and np.isfinite(metrics["nrmse"])
+                and metrics["nrmse"] <= gate_nrmse_max
+            )
+            if ok:
                 check_rec["status"] = "pass"
             else:
-                err = f"{summary} (corr_min={corr_min}, rmse_max={rmse_max:.6f})"
+                err = f"{summary} (corr_min={gate_corr_min}, nrmse_max={gate_nrmse_max})"
                 check_rec["status"] = "failed"
                 check_rec["error"] = err
                 failures.append(f"{label}: {err}")
@@ -730,84 +856,73 @@ def test_bbb_p19_region_parity(
                 f"QoF {model_name}: chi2_nu<={tau:g} excludes {n_excl}/{n_fit} fitted voxels"
             )
 
+        # Bounds come from the same prefs the fitter ran with, per model.
+        base_prefs = _stage_d_fit_prefs(cpu_cfg)
+        ident_records: list[dict] = []
+
         for model_name in models:
-            spec = MULTI_MODEL_PARITY_SPECS[model_name]
-            _parity_log(f"model={model_name}: running checks")
-            gated_model = model_name in gated_models
+            params = list(MULTI_MODEL_PARITY_SPECS[model_name]["params"])
+            gated_model = model_name in GATED_MODELS
+            _parity_log(f"model={model_name}: running checks (gated={gated_model})")
+            if not gated_model:
+                _parity_log(f"  reported-only: {UNGATED_MODEL_REASONS[model_name]}")
             qof_mask_m = qof_masks.get(model_name)
-            py_cpu_ktrans = _load_nifti(out_cpu / f"Dyn-1_{model_name}_fit_Ktrans.nii.gz")
-            py_auto_ktrans = _load_nifti(out_auto / f"Dyn-1_{model_name}_fit_Ktrans.nii.gz")
-            matlab_ktrans = _load_nifti(_matlab_map_path(paths, model_name, "Ktrans"))
+            prefs_m = _apply_model_specific_prefs(base_prefs, model_name)
 
-            # Ktrans CI maps (reported-only; tolerant of absence).
-            ci_cpu = _load_param_ci(out_cpu, paths, model_name, "Ktrans")
-            ci_auto = _load_param_ci(out_auto, paths, model_name, "Ktrans")
+            matlab_maps = {p: _load_nifti(_matlab_map_path(paths, model_name, p)) for p in params}
+            py_maps = {
+                "cpu": {p: _load_nifti(out_cpu / f"Dyn-1_{model_name}_fit_{p}.nii.gz") for p in params},
+                "auto": {p: _load_nifti(out_auto / f"Dyn-1_{model_name}_fit_{p}.nii.gz") for p in params},
+            }
 
-            # Ktrans upper-bound exclusion for the unstable (reported-only) models.
-            if model_name in {"ex_tofts", "2cxm"}:
-                cpu_excl = (matlab_ktrans < ktrans_upper_exclude) & (py_cpu_ktrans < ktrans_upper_exclude)
-                auto_excl = (matlab_ktrans < ktrans_upper_exclude) & (py_auto_ktrans < ktrans_upper_exclude)
-                cpu_auto_excl = (py_cpu_ktrans < ktrans_upper_exclude) & (py_auto_ktrans < ktrans_upper_exclude)
-            else:
-                cpu_excl = auto_excl = cpu_auto_excl = None
+            # One identifiable mask per (model, comparison) -- shared by every parameter and
+            # region of that comparison, so a voxel is never in-scope for ve and out for Ktrans.
+            ident: dict[str, np.ndarray] = {}
+            for backend in ("cpu", "auto"):
+                ident[f"{backend}_vs_matlab"], pinned_counts = _identifiable_mask(
+                    params, py_maps[backend], matlab_maps, prefs_m
+                )
+                ident_records.append({
+                    "model": model_name,
+                    "comparison": f"{backend}_vs_matlab",
+                    "pinned_voxels_per_param": pinned_counts,
+                })
+                _parity_log(
+                    f"  bound-pinned ({backend} vs matlab, either side): "
+                    + ", ".join(f"{p}={n}" for p, n in pinned_counts.items())
+                )
+            ident["auto_vs_cpu"], _ = _identifiable_mask(
+                params, py_maps["auto"], py_maps["cpu"], prefs_m
+            )
+
+            # Reported-only CI diagnostics; loaded once per parameter, not once per region.
+            ci_maps = {
+                p: (_load_param_ci(out_cpu, paths, model_name, p),
+                    _load_param_ci(out_auto, paths, model_name, p))
+                for p in params
+            }
 
             for region_name, region_mask in regions.items():
-                # Every gated model gates on every region. The former tofts+GM exception (GM
-                # reported-only, on the grounds that tofts Ktrans was non-identifiable there)
-                # was retired 2026-07-28: the Stage-B AIF fix (aif_fitting_parity.md S11) lifted
-                # tofts_ktrans_gm to corr 0.980 (cpu) / 0.992 (auto) against a 0.95 floor, so the
-                # hand-curated exception no longer describes anything real.
-                ktrans_gated = gated_model
-                run_check(
-                    py_cpu_ktrans, matlab_ktrans,
-                    label=f"{model_name}_ktrans_{region_name}_cpu_vs_matlab",
-                    region_mask=region_mask, corr_min=ktrans_corr_min, mse_max=ktrans_mse_max,
-                    gated=ktrans_gated, extra_mask=cpu_excl, ci=ci_cpu, qof_mask=qof_mask_m,
-                )
-                run_check(
-                    py_auto_ktrans, matlab_ktrans,
-                    label=f"{model_name}_ktrans_{region_name}_auto_vs_matlab",
-                    region_mask=region_mask, corr_min=ktrans_corr_min, mse_max=ktrans_mse_max,
-                    gated=ktrans_gated, extra_mask=auto_excl, ci=ci_auto, qof_mask=qof_mask_m,
-                )
-                run_check(
-                    py_auto_ktrans, py_cpu_ktrans,
-                    label=f"{model_name}_ktrans_{region_name}_auto_vs_cpu",
-                    region_mask=region_mask, corr_min=ktrans_corr_min, mse_max=ktrans_mse_max,
-                    gated=False, extra_mask=cpu_auto_excl, qof_mask=qof_mask_m,
-                )
-
-                for param in spec["params"]:
-                    if param == "Ktrans":
-                        continue
-                    py_cpu_map = _load_nifti(out_cpu / f"Dyn-1_{model_name}_fit_{param}.nii.gz")
-                    py_auto_map = _load_nifti(out_auto / f"Dyn-1_{model_name}_fit_{param}.nii.gz")
-                    matlab_map = _load_nifti(_matlab_map_path(paths, model_name, param))
-                    ci_cpu_p = _load_param_ci(out_cpu, paths, model_name, param)
-                    ci_auto_p = _load_param_ci(out_auto, paths, model_name, param)
-                    if param.lower() == "ve":
-                        cpu_pm = (py_cpu_ktrans > ve_ktrans_min) & (matlab_ktrans > ve_ktrans_min)
-                        auto_pm = (py_auto_ktrans > ve_ktrans_min) & (matlab_ktrans > ve_ktrans_min)
-                        cpu_auto_pm = (py_cpu_ktrans > ve_ktrans_min) & (py_auto_ktrans > ve_ktrans_min)
-                    else:
-                        cpu_pm = auto_pm = cpu_auto_pm = None
+                for param in params:
+                    matlab_map = matlab_maps[param]
+                    ci_cpu, ci_auto = ci_maps[param]
                     run_check(
-                        py_cpu_map, matlab_map,
+                        py_maps["cpu"][param], matlab_map,
                         label=f"{model_name}_{param}_{region_name}_cpu_vs_matlab",
-                        region_mask=region_mask, corr_min=param_corr_min, mse_max=param_mse_max,
-                        gated=False, extra_mask=cpu_pm, ci=ci_cpu_p, qof_mask=qof_mask_m,
+                        region_mask=region_mask, gated=gated_model,
+                        identifiable=ident["cpu_vs_matlab"], ci=ci_cpu, qof_mask=qof_mask_m,
                     )
                     run_check(
-                        py_auto_map, matlab_map,
+                        py_maps["auto"][param], matlab_map,
                         label=f"{model_name}_{param}_{region_name}_auto_vs_matlab",
-                        region_mask=region_mask, corr_min=param_corr_min, mse_max=param_mse_max,
-                        gated=False, extra_mask=auto_pm, ci=ci_auto_p, qof_mask=qof_mask_m,
+                        region_mask=region_mask, gated=gated_model,
+                        identifiable=ident["auto_vs_matlab"], ci=ci_auto, qof_mask=qof_mask_m,
                     )
                     run_check(
-                        py_auto_map, py_cpu_map,
+                        py_maps["auto"][param], py_maps["cpu"][param],
                         label=f"{model_name}_{param}_{region_name}_auto_vs_cpu",
-                        region_mask=region_mask, corr_min=param_corr_min, mse_max=param_mse_max,
-                        gated=False, extra_mask=cpu_auto_pm, qof_mask=qof_mask_m,
+                        region_mask=region_mask, gated=False,
+                        identifiable=ident["auto_vs_cpu"], qof_mask=qof_mask_m,
                     )
 
         _parity_log("completed multi-model backend parity")
@@ -815,10 +930,15 @@ def test_bbb_p19_region_parity(
             "suite": "multi-model",
             "dataset_root": str(paths["root"]),
             "roi_stride": int(roi_stride),
-            "gated_models": sorted(gated_models),
+            "gated_models": sorted(GATED_MODELS),
+            "ungated_model_reasons": UNGATED_MODEL_REASONS,
+            "gate_corr_min": gate_corr_min,
+            "gate_nrmse_max": gate_nrmse_max,
             "regions": sorted(regions.keys()),
             "qof_chi2_max": QOF_CHI2_MAX,
             "qof_filtering": qof_records,
+            "identifiability_filtering": ident_records,
+            "identifiable_fraction_min": IDENTIFIABLE_FRACTION_MIN,
             "gated_failures": failures,
             "checks": checks,
         }
@@ -851,7 +971,6 @@ def test_bbb_p19_roi_xls_parity(
     root = Path(parity_dataset_root) if parity_dataset_root else _default_downsample_root()
     paths = _dataset_paths(root)
     models = ["tofts", "ex_tofts", "patlak", "tissue_uptake"]
-    roi_abs_err_limits = {"tofts": 0.03, "ex_tofts": 0.01, "patlak": 0.01, "tissue_uptake": 0.05}
 
     ref_xls_paths = {
         m: Path(paths["matlabref"]) / f"Dyn-1_{m}_fit_rois.xls" for m in models
@@ -871,7 +990,7 @@ def test_bbb_p19_roi_xls_parity(
         assert result["meta"]["status"] == "ok"
 
         for model_name in models:
-            limit = float(roi_abs_err_limits[model_name])
+            limit = ROI_XLS_MAX_ABS_ERR
             py_xls = out_dir / f"Dyn-1_{model_name}_fit_rois.xls"
             label = f"{model_name}_roi_xls_cpu_vs_matlab"
             rec: dict = {"label": label, "max_abs_err_limit": limit}

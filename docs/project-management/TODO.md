@@ -34,7 +34,8 @@ Larger feature requests should be logged in `docs/project-management/projects/fe
 - [x] End steady-state Short term: AIF sidecar 
 - [x] End steady-state medium term: evaluate the 4 algorithms, port the winner to MATLAB. Done and archived (`docs/project-management/projects/archived/steady-state-tv-default/`);
       the `tv`-default rollout is committed (`a9d78b6`) and `pytest -m parity` passes
-      (12/12 gated checks, no hand-curated exceptions -- see
+      (all gated checks, no hand-curated exceptions -- 12/12 at the time, 42/42 after the
+      2026-07-29 gate-scope review below; see
       `docs/project-management/projects/archived/batch-parity/batch_parity.md`).
 - [ ] **QoF-aware ROI stats.** Exclude unreliable voxels (χ²_ν > `qof_chi2_max`) from voxelwise
       ROI parameter rollups, and/or report a reliable-fraction per ROI, so nonsense voxels stop
@@ -48,10 +49,20 @@ Larger feature requests should be logged in `docs/project-management/projects/fe
       `docs/project-management/projects/archived/batch-parity/sigma_estimators.md`.
 
 ### 4. Parity Testing Gaps (carried over from the archived batch-parity project)
-DCE parity itself is done -- 12/12 gated voxelwise checks and 4/4 ROI-xls checks pass with no
+DCE parity itself is done -- **42/42** gated voxelwise checks and 4/4 ROI-xls checks pass with no
 hand-curated exceptions. These two gaps are about what the suite *cannot currently catch*; C and D
 from the original list were dropped as won't-do. Full rationale:
 `docs/project-management/projects/archived/batch-parity/batch_parity.md` -> "Testing gaps".
+- [x] **Gate-scope review (2026-07-29).** The gated set went from 12 checks (tofts+patlak, Ktrans
+      only) to 42 (tofts/patlak/ex_tofts, *every* parameter, all three regions, cpu and auto),
+      under one rule with no per-model/parameter/region carve-outs. Two hand-rolled masks
+      (`ktrans_upper_exclude`, `ve_ktrans_min`) collapsed into the single bound-pinning
+      identifiability filter that `test_backend_equivalence.py` already used -- which is what
+      made ex_tofts gateable (worst check 0.807 -> 0.9998). Scatter is now gated on RMSE
+      normalized by the reference RMS: the previous absolute bound would have passed a 1737%
+      error on patlak Ktrans. `tissue_uptake` and `2cxm` remain reported-only, each with the
+      measurement (taken *with* the filter applied) recorded in `UNGATED_MODEL_REASONS`.
+      Verified by injecting four regressions and confirming each fails.
 - [x] **A. Stage-B AIF contract gate.** Built 2026-07-29: `tests/python/test_stage_b_aif_parity.py`
       gates `Cp_use`/`CpROI`/`Stlv_use`/`timer`, the `step` window, `start_time`/`end_time`/
       `max_index` and the AIF fit coefficients `[A B c d t_base_end t0_exp]` against a committed

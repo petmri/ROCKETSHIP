@@ -1,22 +1,5 @@
 {
-  "_comment": "Default DCE parity gate thresholds. Pass a copy via --parity-thresholds <path> to override. The standard suite gates tofts/patlak Ktrans on Corr>=model_ktrans_corr_min and RMSE<=sqrt(model_ktrans_mse_max). Keys mirror the parity_thresholds fixture; only keys you include are overlaid.",
-  "ve_ktrans_min": 1e-06,
-  "downsample_ktrans_corr_min": 0.99,
-  "downsample_ktrans_mse_max": 0.001,
-  "downsample_ve_corr_min": 0.97,
-  "downsample_ve_mse_max": 0.002,
-  "full_ktrans_corr_min": 0.99,
-  "full_ktrans_mse_max": 0.001,
-  "full_ve_corr_min": 0.97,
-  "full_ve_mse_max": 0.002,
-  "model_ktrans_corr_min": 0.95,
-  "model_ktrans_mse_max": 0.01,
-  "model_param_corr_min": 0.90,
-  "model_param_mse_max": 0.02,
-  "cpu_auto_ktrans_corr_min": 0.98,
-  "cpu_auto_ktrans_mse_max": 0.002,
-  "cpu_auto_param_corr_min": 0.95,
-  "cpu_auto_param_mse_max": 0.01,
-  "ex_tofts_ktrans_corr_min": 0.85,
-  "ktrans_upper_exclude": 1.9
+  "_comment": "Default DCE parity gate thresholds. Pass a copy via --parity-thresholds <path> to override; only the keys you include are overlaid. The gate has exactly two knobs, applied uniformly to every gated model, parameter and region (tofts/patlak/ex_tofts x Ktrans/ve/vp x brain/GM/WM, cpu and auto vs MATLAB) after the bound-pinning identifiability filter. Metrics are Spearman rank correlation and RMSE normalized by the reference RMS (scale-free, so one bound is honest across parameters whose scales differ 50x). Measured worst case on sub-10bbbdownsample 2026-07-29: corr 0.9616 (tofts Ktrans/brain/cpu), nrmse 0.1423 (ex_tofts Ktrans/brain/cpu).",
+  "gate_corr_min": 0.95,
+  "gate_nrmse_max": 0.25
 }

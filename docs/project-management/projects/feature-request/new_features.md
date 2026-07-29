@@ -1,0 +1,3 @@
+# New Feature Requests
+-[ ] Turn the noise estimation currently used in pipeline parity testing into a standalone function for general use. This is a small but useful utility that can be used to estimate noise in DCE-MRI voxels, and could be useful for other applications as well (AIF voxel filtering, TV baseline detection, etc.).
+- [ ] Implement confidence intervals for GPUfit/CPUfit (currently only available in MATLAB/Python).
