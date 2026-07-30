@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import math
 from pathlib import Path
 import random
 import sys
 
+import numpy as np
 import pytest
 
 
@@ -16,17 +18,24 @@ sys.path.insert(0, str(REPO_ROOT / "python"))
 
 from rocketship import (  # noqa: E402
     model_2cxm_cfit,
+    model_2cxm_cfit_batch,
     model_2cxm_fit,
     model_extended_tofts_cfit,
+    model_extended_tofts_cfit_batch,
     model_extended_tofts_fit,
     model_fxr_cfit,
+    model_fxr_cfit_batch,
     model_fxr_fit,
     model_patlak_cfit,
+    model_patlak_cfit_batch,
     model_patlak_fit,
     model_patlak_linear,
+    model_patlak_linear_batch,
     model_tissue_uptake_cfit,
+    model_tissue_uptake_cfit_batch,
     model_tissue_uptake_fit,
     model_tofts_cfit,
+    model_tofts_cfit_batch,
     model_tofts_fit,
     model_vp_cfit,
     model_vp_fit,
@@ -241,6 +250,223 @@ def test_patlak_linear_matches_matlab_baseline_profile() -> None:
     for a, e in zip(actual, expected):
         assert _within_tol(float(a), float(e), float(tol["atol"]), float(tol["rtol"])), (
             f"Mismatch: actual={a} expected={e}"
+        )
+
+
+@pytest.mark.unit
+def test_patlak_linear_batch_is_bit_identical_to_scalar() -> None:
+    """The batch seeder replaced a per-voxel scalar loop; drift here shifts fit seeds.
+
+    Summation order is the fragile part -- see `_sequential_sum_over_time` in
+    `python/dce_models.py`. Exact equality is the assertion on purpose.
+    """
+    rng = np.random.default_rng(1234)
+    for _ in range(25):
+        n_time = int(rng.integers(2, 48))
+        n_voxels = int(rng.integers(1, 24))
+        timer = np.sort(rng.random(n_time)) * 12.0
+        cp = rng.random(n_time) * 3.0
+        cp[rng.random(n_time) < 0.2] = 0.0  # forces the |cp| <= tiny branch
+        ct = rng.normal(0.0, 1.0, (n_time, n_voxels))
+        ct[rng.random((n_time, n_voxels)) < 0.05] = np.nan
+
+        with np.errstate(all="ignore"):
+            batch = model_patlak_linear_batch(ct, cp, timer)
+        for i in range(n_voxels):
+            scalar = np.asarray(
+                model_patlak_linear(list(ct[:, i]), list(cp), list(timer)), dtype=np.float64
+            )
+            assert np.array_equal(scalar, batch[i], equal_nan=True), (
+                f"voxel {i}: scalar={scalar} batch={batch[i]}"
+            )
+
+
+@pytest.mark.unit
+def test_patlak_linear_batch_accepts_single_voxel_vector() -> None:
+    baseline = json.loads((REPO_ROOT / "tests/contracts/baselines/matlab_reference_v1.json").read_text())
+    timer = baseline["dce"]["forward"]["timer"]
+    cp = baseline["dce"]["forward"]["Cp"]
+    ct = baseline["dce"]["forward"]["patlak"]
+
+    batch = model_patlak_linear_batch(np.asarray(ct, dtype=np.float64), cp, timer)
+    assert batch.shape == (1, 7)
+    scalar = np.asarray(model_patlak_linear(ct, cp, timer), dtype=np.float64)
+    assert np.array_equal(scalar, batch[0], equal_nan=True)
+
+
+def _degenerate_params(rng: np.random.Generator, n: int, lo: float, hi: float) -> np.ndarray:
+    """Random parameters salted with the values that trip the scalar guards."""
+    v = rng.uniform(lo, hi, n)
+    hit = rng.random(n) < 0.35
+    pick = rng.integers(0, 4, n)
+    v = np.where(hit & (pick == 0), 0.0, v)
+    v = np.where(hit & (pick == 1), -v, v)
+    v = np.where(hit & (pick == 2), 1e-18, v)
+    v = np.where(hit & (pick == 3), 1e12, v)
+    return v
+
+
+def _scalar_column(fn, n_time: int, *args) -> np.ndarray:
+    """Evaluate a scalar cfit the way `_predict_curves_batch`'s callers do.
+
+    The float() casts matter: numpy scalars return inf on divide-by-zero where
+    Python floats raise, and the batch functions reproduce the Python-float
+    behaviour because that is what the pipeline actually passes.
+    """
+    cast = [float(a) if isinstance(a, (int, float, np.floating)) else a for a in args]
+    try:
+        out = np.asarray(fn(*cast), dtype=np.float64)
+    except Exception:
+        return np.full(n_time, np.nan)
+    return out if out.shape == (n_time,) else np.full(n_time, np.nan)
+
+
+# Values chosen to trip every guard in the batched curve evaluators: exact zeros,
+# negatives (negative lambda -> exp overflow), denormal and huge magnitudes
+# (float ** 2 overflow, zero denominators), plus two ordinary values.
+_PATHOLOGICAL = (0.0, -0.5, 1e-18, 1e-200, 0.3, 1.0, 1e12, 1e200)
+
+
+def _assert_batch_matches_scalar(name, batch, scalar_fn, combos, tail, n_time) -> None:
+    assert batch.shape == (n_time, len(combos)), name
+    for i, params in enumerate(combos):
+        expected = _scalar_column(scalar_fn, n_time, *params, *tail)
+        actual = batch[:, i]
+        assert np.array_equal(np.isnan(expected), np.isnan(actual)), (
+            f"{name} params={params}: validity differs\n"
+            f"  scalar={expected}\n  batch={actual}"
+        )
+        good = ~np.isnan(expected)
+        # Values are bit-identical in practice; the tolerance exists only so a
+        # last-bit difference in a libm routine cannot fail this on some other
+        # platform. It is orders of magnitude tighter than any real regression.
+        np.testing.assert_allclose(
+            actual[good], expected[good], rtol=1e-9, atol=0.0,
+            err_msg=f"{name} params={params}",
+        )
+
+
+@pytest.mark.unit
+def test_cfit_batch_matches_scalar_on_pathological_grid() -> None:
+    """The batched curve evaluators replaced a per-voxel loop in the post-fit path.
+
+    The fragile part is agreeing on *which* voxels are unusable. The scalar path
+    raises where numpy stays silent -- ZeroDivisionError on float division by zero,
+    OverflowError from `math.exp` and from squaring a finite float past DBL_MAX,
+    ValueError from a negative `math.sqrt` -- and each of those is a separate mask
+    in the batch versions. Random parameters reach some of those branches only
+    rarely, so this walks an exhaustive grid of pathological values instead.
+
+    The validity mask is what is asserted strictly; values carry a loose tolerance
+    because a last-bit disagreement between libm and numpy is not a regression.
+    """
+    timer = np.array([0.0, 0.5, 1.1, 1.9, 2.4, 3.3], dtype=np.float64)
+    cp = np.array([0.0, 2.1, 3.4, 2.2, 1.5, 0.9], dtype=np.float64)
+    cp_l, t_l = list(cp), list(timer)
+    n_time = timer.size
+    relaxivity, fw = 4.5, 0.8
+
+    def grid(n: int) -> tuple[list[tuple[float, ...]], list[np.ndarray]]:
+        combos = list(itertools.product(_PATHOLOGICAL, repeat=n))
+        cols = [np.array([c[j] for c in combos], dtype=np.float64) for j in range(n)]
+        return combos, cols
+
+    two, (k2, x2) = grid(2)
+    three, (k3, x3, y3) = grid(3)
+    four, (k4, x4, y4, z4) = grid(4)
+
+    _assert_batch_matches_scalar(
+        "tofts", model_tofts_cfit_batch(k2, x2, cp, timer),
+        model_tofts_cfit, two, (cp_l, t_l), n_time,
+    )
+    _assert_batch_matches_scalar(
+        "patlak", model_patlak_cfit_batch(k2, x2, cp, timer),
+        model_patlak_cfit, two, (cp_l, t_l), n_time,
+    )
+    _assert_batch_matches_scalar(
+        "ex_tofts", model_extended_tofts_cfit_batch(k3, x3, y3, cp, timer),
+        model_extended_tofts_cfit, three, (cp_l, t_l), n_time,
+    )
+    _assert_batch_matches_scalar(
+        "tissue_uptake", model_tissue_uptake_cfit_batch(k3, x3, y3, cp, timer),
+        model_tissue_uptake_cfit, three, (cp_l, t_l), n_time,
+    )
+    _assert_batch_matches_scalar(
+        "2cxm", model_2cxm_cfit_batch(k4, x4, y4, z4, cp, timer),
+        model_2cxm_cfit, four, (cp_l, t_l), n_time,
+    )
+    # fxr's fourth grid axis is r1o, which it also uses as r1i.
+    _assert_batch_matches_scalar(
+        "fxr",
+        model_fxr_cfit_batch(k4, x4, y4, cp, timer, z4, z4, relaxivity, fw),
+        lambda kk, vv, tt, rr, c, t: model_fxr_cfit(
+            kk, vv, tt, c, t, rr, rr, relaxivity, fw
+        ),
+        four, (cp_l, t_l), n_time,
+    )
+
+    # Drives 2cxm's discriminant negative, where the scalar `math.sqrt` raises and
+    # the voxel must come back NaN rather than as a number. The grid above does not
+    # reach it and random draws hit it only once in a few thousand voxels.
+    negative_root = [(-0.8803508696373115, 0.5495718236942608, -1.5881926099945167, 1.8132161026709008)]
+    cols = [np.array([c[j] for c in negative_root]) for j in range(4)]
+    assert np.all(np.isnan(model_2cxm_cfit_batch(*cols, cp, timer))), (
+        "2cxm must reject a negative discriminant, matching math.sqrt raising"
+    )
+    _assert_batch_matches_scalar(
+        "2cxm-negative-root", model_2cxm_cfit_batch(*cols, cp, timer),
+        model_2cxm_cfit, negative_root, (cp_l, t_l), n_time,
+    )
+
+
+@pytest.mark.unit
+def test_cfit_batch_matches_scalar_on_random_params() -> None:
+    """Complements the pathological grid with ordinary values at many time lengths."""
+    rng = np.random.default_rng(20260730)
+    for _ in range(20):
+        n_time = int(rng.integers(2, 48))
+        n_vox = int(rng.integers(1, 20))
+        timer = np.sort(rng.random(n_time)) * 10.0
+        cp = rng.random(n_time) * 4.0
+        cp_l, t_l = list(cp), list(timer)
+
+        k = _degenerate_params(rng, n_vox, 0.01, 1.0)
+        ve = _degenerate_params(rng, n_vox, 0.01, 0.9)
+        vp = _degenerate_params(rng, n_vox, 0.001, 0.3)
+        fp = _degenerate_params(rng, n_vox, 0.05, 2.0)
+        tp = _degenerate_params(rng, n_vox, 0.01, 5.0)
+        tau = _degenerate_params(rng, n_vox, 0.01, 3.0)
+        r1o = _degenerate_params(rng, n_vox, 0.1, 2.0)
+        relaxivity, fw = 4.5, 0.8
+
+        combos2 = list(zip(k, vp))
+        _assert_batch_matches_scalar(
+            "tofts", model_tofts_cfit_batch(k, ve, cp, timer), model_tofts_cfit,
+            list(zip(k, ve)), (cp_l, t_l), n_time,
+        )
+        _assert_batch_matches_scalar(
+            "patlak", model_patlak_cfit_batch(k, vp, cp, timer), model_patlak_cfit,
+            combos2, (cp_l, t_l), n_time,
+        )
+        _assert_batch_matches_scalar(
+            "ex_tofts", model_extended_tofts_cfit_batch(k, ve, vp, cp, timer),
+            model_extended_tofts_cfit, list(zip(k, ve, vp)), (cp_l, t_l), n_time,
+        )
+        _assert_batch_matches_scalar(
+            "tissue_uptake", model_tissue_uptake_cfit_batch(k, fp, tp, cp, timer),
+            model_tissue_uptake_cfit, list(zip(k, fp, tp)), (cp_l, t_l), n_time,
+        )
+        _assert_batch_matches_scalar(
+            "2cxm", model_2cxm_cfit_batch(k, ve, vp, fp, cp, timer),
+            model_2cxm_cfit, list(zip(k, ve, vp, fp)), (cp_l, t_l), n_time,
+        )
+        _assert_batch_matches_scalar(
+            "fxr",
+            model_fxr_cfit_batch(k, ve, tau, cp, timer, r1o, r1o, relaxivity, fw),
+            lambda kk, vv, tt, rr, c, t: model_fxr_cfit(
+                kk, vv, tt, c, t, rr, rr, relaxivity, fw
+            ),
+            list(zip(k, ve, tau, r1o)), (cp_l, t_l), n_time,
         )
 
 

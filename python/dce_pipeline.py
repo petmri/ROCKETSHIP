@@ -23,13 +23,13 @@ from dce_fit_backends import (
     fit_tofts_stage_d,
 )
 from dce_models import (
-    model_2cxm_cfit,
-    model_extended_tofts_cfit,
-    model_fxr_cfit,
+    model_2cxm_cfit_batch,
+    model_extended_tofts_cfit_batch,
+    model_fxr_cfit_batch,
     model_fxr_fit,
-    model_patlak_cfit,
-    model_tissue_uptake_cfit,
-    model_tofts_cfit,
+    model_patlak_cfit_batch,
+    model_tissue_uptake_cfit_batch,
+    model_tofts_cfit_batch,
 )
 
 
@@ -1658,15 +1658,18 @@ def _clean_ab(
     keep = np.ones(ab.shape[1], dtype=bool)
     cleaned = ab.copy()
 
-    for col in range(ab.shape[1]):
+    # MATLAB cleanAB.m uses TEST < 1 as the bad-point criterion. Screening every
+    # column at once keeps the scalar interpolation loop below to the few columns
+    # that actually have bad points.
+    with np.errstate(invalid="ignore"):
+        bad_mask = cleaned < 1.0
+    bad_counts = bad_mask.sum(axis=0)
+    over_threshold = bad_counts > threshold_fraction * n_time
+    keep[over_threshold] = False
+
+    for col in np.where((bad_counts > 0) & ~over_threshold)[0]:
         vec = cleaned[:, col]
-        # MATLAB cleanAB.m uses TEST < 1 as the bad-point criterion.
-        bad = np.where(vec < 1.0)[0]
-        if bad.size > threshold_fraction * n_time:
-            keep[col] = False
-            continue
-        if bad.size == 0:
-            continue
+        bad = np.where(bad_mask[:, col])[0]
         for idx in bad:
             start = max(0, int(idx) - 5)
             end = min(n_time, int(idx) + 6)
@@ -1697,19 +1700,37 @@ def _clean_r1(
     keep = np.ones(r1.shape[1], dtype=bool)
     cleaned = r1.copy()
 
-    for col in range(r1.shape[1]):
-        vec = cleaned[:, col]
-        imag_bad = np.where(np.imag(vec) > 0)[0]
-        if imag_bad.size > threshold_fraction * n_time:
-            keep[col] = False
-            continue
-        if imag_bad.size > 0:
-            vec = np.real(vec)
+    # MATLAB's log of a negative AB ratio is complex, which is what the imag
+    # screen below is for; numpy's is NaN, so for the real arrays Stage A actually
+    # produces that screen is a no-op and the bad-point mask can be computed for
+    # every column at once. Complex input keeps the original per-column screen.
+    if np.iscomplexobj(cleaned):
+        bad_mask = None
+        candidate_columns: Any = range(cleaned.shape[1])
+    else:
+        with np.errstate(invalid="ignore"):
+            bad_mask = (~np.isfinite(cleaned)) | (cleaned > 100.0)
+        bad_counts = bad_mask.sum(axis=0)
+        over_threshold = bad_counts > threshold_fraction * n_time
+        keep[over_threshold] = False
+        candidate_columns = np.where((bad_counts > 0) & ~over_threshold)[0]
 
-        bad = np.where((~np.isfinite(vec)) | (vec > 100.0))[0]
-        if bad.size > threshold_fraction * n_time:
-            keep[col] = False
-            continue
+    for col in candidate_columns:
+        vec = cleaned[:, col]
+        if bad_mask is None:
+            imag_bad = np.where(np.imag(vec) > 0)[0]
+            if imag_bad.size > threshold_fraction * n_time:
+                keep[col] = False
+                continue
+            if imag_bad.size > 0:
+                vec = np.real(vec)
+
+            bad = np.where((~np.isfinite(vec)) | (vec > 100.0))[0]
+            if bad.size > threshold_fraction * n_time:
+                keep[col] = False
+                continue
+        else:
+            bad = np.where(bad_mask[:, col])[0]
         for idx in bad:
             start = max(0, int(idx) - 3)
             end = min(n_time, int(idx) + 4)
@@ -1955,9 +1976,7 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     if t1_lv.size == 0:
         raise ValueError("All AIF voxels removed after R1 cleaning")
 
-    for j in range(t1_lv.size):
-        scale = (1.0 / t1_lv[j]) - np.mean(r1_lv[baseline_slice, j])
-        r1_lv[:, j] = r1_lv[:, j] + scale
+    r1_lv = r1_lv + ((1.0 / t1_lv) - np.mean(r1_lv[baseline_slice, :], axis=0))[np.newaxis, :]
 
     # ROI path to R1
     ss_tum = np.mean(sttum[baseline_slice, :], axis=0)
@@ -1984,9 +2003,7 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     if t1_tum.size == 0:
         raise ValueError("All ROI voxels removed after R1 cleaning")
 
-    for j in range(t1_tum.size):
-        scale = (1.0 / t1_tum[j]) - np.mean(r1_toi[baseline_slice, j])
-        r1_toi[:, j] = r1_toi[:, j] + scale
+    r1_toi = r1_toi + ((1.0 / t1_tum) - np.mean(r1_toi[baseline_slice, :], axis=0))[np.newaxis, :]
 
     blood_t1_source = "override" if blood_t1_override_sec is not None else "aif_t1_map"
     blood_t1_mean_sec = float(np.mean(t1_lv)) if t1_lv.size > 0 else None
@@ -3588,69 +3605,71 @@ def _fit_fxr_curve(
     )
 
 
-def _predict_curve_from_fit_row(
+_CFIT_MIN_PARAMS = {
+    "tofts": 2,
+    "patlak": 2,
+    "ex_tofts": 3,
+    "tissue_uptake": 3,
+    "fxr": 3,
+    "2cxm": 4,
+}
+
+
+def _predict_curves_batch(
     model_name: str,
-    fit_row: np.ndarray,
+    fit_results: np.ndarray,
     cp: np.ndarray,
     timer: np.ndarray,
     *,
-    r1o: Optional[float],
+    r1o_vector: Optional[np.ndarray],
     relaxivity: float,
     fw: float,
-) -> Optional[np.ndarray]:
-    row = np.asarray(fit_row, dtype=np.float64).reshape(-1)
-    if row.size == 0 or np.any(~np.isfinite(row[: min(4, row.size)])):
-        return None
-    cp_list = [float(v) for v in cp]
-    timer_list = [float(v) for v in timer]
+) -> np.ndarray:
+    """Forward curve for every fitted voxel at once; returns (n_time, n_voxels).
 
-    try:
+    Voxels with unusable parameters get a NaN column instead of aborting the batch.
+    Nothing here depends on which backend produced `fit_results` -- the post-fit
+    path re-evaluates every voxel in Python even on gpufit/cpufit runs.
+    """
+    n_time = int(timer.size)
+    n_voxels, n_params = fit_results.shape
+    need = _CFIT_MIN_PARAMS.get(model_name)
+    if need is None or n_params < need:
+        return np.full((n_time, n_voxels), np.nan, dtype=np.float64)
+
+    # A non-finite among the leading parameters makes the voxel unusable.
+    usable = np.all(np.isfinite(fit_results[:, : min(4, n_params)]), axis=1)
+    col = [fit_results[:, j] for j in range(n_params)]
+
+    with np.errstate(all="ignore"):
         if model_name == "tofts":
-            return np.asarray(model_tofts_cfit(float(row[0]), float(row[1]), cp_list, timer_list), dtype=np.float64)
-        if model_name == "ex_tofts":
-            return np.asarray(
-                model_extended_tofts_cfit(float(row[0]), float(row[1]), float(row[2]), cp_list, timer_list),
-                dtype=np.float64,
+            pred = model_tofts_cfit_batch(col[0], col[1], cp, timer)
+        elif model_name == "ex_tofts":
+            pred = model_extended_tofts_cfit_batch(col[0], col[1], col[2], cp, timer)
+        elif model_name == "patlak":
+            pred = model_patlak_cfit_batch(col[0], col[1], cp, timer)
+        elif model_name == "tissue_uptake":
+            ktrans, fp, vp = col[0], col[1], col[2]
+            usable &= np.abs(fp) > 1e-12
+            tp = vp / np.where(usable, fp, 1.0)
+            usable &= np.isfinite(tp) & (tp > 0.0)
+            pred = model_tissue_uptake_cfit_batch(
+                ktrans, fp, np.where(usable, tp, 1.0), cp, timer
             )
-        if model_name == "patlak":
-            return np.asarray(model_patlak_cfit(float(row[0]), float(row[1]), cp_list, timer_list), dtype=np.float64)
-        if model_name == "tissue_uptake":
-            ktrans = float(row[0])
-            fp = float(row[1])
-            vp = float(row[2])
-            if not (math.isfinite(ktrans) and math.isfinite(fp) and math.isfinite(vp)):
-                return None
-            if abs(fp) <= 1e-12:
-                return None
-            tp = vp / fp
-            if not math.isfinite(tp) or tp <= 0.0:
-                return None
-            return np.asarray(model_tissue_uptake_cfit(ktrans, fp, tp, cp_list, timer_list), dtype=np.float64)
-        if model_name == "2cxm":
-            return np.asarray(
-                model_2cxm_cfit(float(row[0]), float(row[1]), float(row[2]), float(row[3]), cp_list, timer_list),
-                dtype=np.float64,
+        elif model_name == "2cxm":
+            pred = model_2cxm_cfit_batch(col[0], col[1], col[2], col[3], cp, timer)
+        else:  # fxr
+            r1o = np.full(n_voxels, np.nan, dtype=np.float64)
+            if r1o_vector is not None:
+                supplied = np.asarray(r1o_vector, dtype=np.float64).reshape(-1)[:n_voxels]
+                r1o[: supplied.size] = supplied
+            usable &= np.isfinite(r1o)
+            pred = model_fxr_cfit_batch(
+                col[0], col[1], col[2], cp, timer, r1o, r1o, float(relaxivity), float(fw)
             )
-        if model_name == "fxr":
-            if r1o is None or not math.isfinite(float(r1o)):
-                return None
-            return np.asarray(
-                model_fxr_cfit(
-                    float(row[0]),
-                    float(row[1]),
-                    float(row[2]),
-                    cp_list,
-                    timer_list,
-                    float(r1o),
-                    float(r1o),
-                    float(relaxivity),
-                    float(fw),
-                ),
-                dtype=np.float64,
-            )
-    except Exception:
-        return None
-    return None
+
+    pred[:, ~usable] = np.nan
+    return pred
 
 
 def _compute_fit_residuals(
@@ -3674,26 +3693,20 @@ def _compute_fit_residuals(
         return None
 
     residuals = np.full_like(ct_use, np.nan, dtype=np.float64)
-    for idx in range(fit_use.shape[0]):
-        r1o = None
-        if r1o_vector is not None and idx < r1o_vector.size:
-            r1o = float(r1o_vector[idx])
-        pred = _predict_curve_from_fit_row(
-            model_name,
-            fit_use[idx, :],
-            cp,
-            timer,
-            r1o=r1o,
-            relaxivity=relaxivity,
-            fw=fw,
-        )
-        if pred is None:
-            continue
-        if pred.shape[0] != ct_use.shape[0]:
-            continue
-        if np.any(~np.isfinite(pred)):
-            continue
-        residuals[:, idx] = ct_use[:, idx] - pred
+    pred = _predict_curves_batch(
+        model_name,
+        fit_use,
+        np.asarray(cp, dtype=np.float64).reshape(-1),
+        np.asarray(timer, dtype=np.float64).reshape(-1),
+        r1o_vector=r1o_vector,
+        relaxivity=relaxivity,
+        fw=fw,
+    )
+    if pred.shape[0] != ct_use.shape[0]:
+        return residuals
+    # A single non-finite sample invalidates the whole curve, as in the scalar path.
+    usable = np.all(np.isfinite(pred), axis=0)
+    residuals[:, usable] = ct_use[:, usable] - pred[:, usable]
     return residuals
 
 

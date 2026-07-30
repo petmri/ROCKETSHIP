@@ -235,6 +235,32 @@ def _exp_weighted_cumulative_trapz_values(y: List[float], t: List[float], lam: f
     return out
 
 
+def _exp_weighted_cumulative_trapz_batch(
+    y: np.ndarray, t: np.ndarray, lam: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Batched `_exp_weighted_cumulative_trapz_values`: shared y/t, one lam per voxel.
+
+    The recurrence is sequential in time and cannot vectorize over it, but `lam` is
+    the only per-voxel quantity, so this runs n_time vector steps instead of
+    n_voxels * n_time scalar ones. Every operation is in the same order and
+    association as the scalar function, so the result is bit-identical.
+
+    Returns `(out, overflowed)`, both (n_time, n_voxels) and (n_voxels,). A large
+    negative `lam` makes the scalar `math.exp` raise OverflowError where `np.exp`
+    quietly returns inf, so callers need the mask to reject exactly those voxels.
+    """
+    n_time = int(t.size)
+    out = np.zeros((n_time, int(lam.size)), dtype=np.float64)
+    overflowed = np.zeros(int(lam.size), dtype=bool)
+    for k in range(1, n_time):
+        dt = float(t[k] - t[k - 1])
+        decay = np.exp(-lam * dt)
+        overflowed |= np.isinf(decay)
+        interval = 0.5 * dt * ((float(y[k - 1]) * decay) + float(y[k]))
+        out[k] = (decay * out[k - 1]) + interval
+    return out, overflowed
+
+
 def _resample_for_osipi_style_fit(
     ct_vec: List[float],
     cp_vec: List[float],
@@ -671,6 +697,227 @@ def model_extended_tofts_cfit(
     return [(float(ktrans) * conv[i]) + (float(vp) * cp_vec[i]) for i in range(len(t_vec))]
 
 
+# --- Batched curve evaluation -------------------------------------------------
+#
+# The `*_cfit_batch` functions below evaluate one forward curve per voxel for many
+# voxels sharing a single cp/timer. They exist for the post-fit residual path,
+# which re-evaluates every fitted voxel in Python regardless of which backend did
+# the fitting.
+#
+# Two conventions differ from the scalar functions, both deliberate:
+#   - Parameters that would make the scalar function raise (a zero denominator, a
+#     negative sqrt) yield a NaN column instead, so one bad voxel cannot abort a
+#     batch of 160k.
+#   - Python raises ZeroDivisionError on float division by exact zero where numpy
+#     returns inf, so each such divide is masked rather than left to propagate.
+#     That is what keeps a degenerate voxel NaN here and skipped there.
+
+
+def _cfit_batch_inputs(
+    cp: Iterable[float], t: Iterable[float], *params: Iterable[float]
+) -> tuple[np.ndarray, np.ndarray, List[np.ndarray]]:
+    """Coerce the shared cp/timer and the per-voxel parameter vectors."""
+    cp_arr = np.asarray(cp, dtype=np.float64).reshape(-1)
+    t_arr = np.asarray(t, dtype=np.float64).reshape(-1)
+    if cp_arr.size != t_arr.size:
+        raise ValueError(f"cp and t lengths differ: {cp_arr.size} vs {t_arr.size}")
+    rows = [np.asarray(p, dtype=np.float64).reshape(-1) for p in params]
+    if any(r.size != rows[0].size for r in rows):
+        raise ValueError("parameter vectors have differing lengths")
+    return cp_arr, t_arr, rows
+
+
+def _safe_denominator(den: np.ndarray) -> np.ndarray:
+    """Replace exact zeros with 1.0 so a masked-off voxel cannot divide by zero."""
+    return np.where(den != 0.0, den, 1.0)
+
+
+def model_tofts_cfit_batch(
+    ktrans: Iterable[float], ve: Iterable[float], cp: Iterable[float], t1: Iterable[float]
+) -> np.ndarray:
+    """Batched `model_tofts_cfit`. Returns (n_time, n_voxels)."""
+    cp_arr, t_arr, (k, v) = _cfit_batch_inputs(cp, t1, ktrans, ve)
+    ok = v != 0.0
+    with np.errstate(all="ignore"):
+        conv, overflowed = _exp_weighted_cumulative_trapz_batch(
+            cp_arr, t_arr, k / _safe_denominator(v)
+        )
+        out = k[None, :] * conv
+    out[:, ~ok | overflowed] = np.nan
+    return out
+
+
+def model_extended_tofts_cfit_batch(
+    ktrans: Iterable[float],
+    ve: Iterable[float],
+    vp: Iterable[float],
+    cp: Iterable[float],
+    t1: Iterable[float],
+) -> np.ndarray:
+    """Batched `model_extended_tofts_cfit`. Returns (n_time, n_voxels)."""
+    cp_arr, t_arr, (k, v, p) = _cfit_batch_inputs(cp, t1, ktrans, ve, vp)
+    ok = v != 0.0
+    with np.errstate(all="ignore"):
+        conv, overflowed = _exp_weighted_cumulative_trapz_batch(
+            cp_arr, t_arr, k / _safe_denominator(v)
+        )
+        out = (k[None, :] * conv) + (p[None, :] * cp_arr[:, None])
+    out[:, ~ok | overflowed] = np.nan
+    return out
+
+
+def model_patlak_cfit_batch(
+    ktrans: Iterable[float], vp: Iterable[float], cp: Iterable[float], time: Iterable[float]
+) -> np.ndarray:
+    """Batched `model_patlak_cfit`. Returns (n_time, n_voxels).
+
+    No exponential weighting, so the integral is voxel-independent and the whole
+    model collapses to two outer products.
+    """
+    cp_arr, t_arr, (k, p) = _cfit_batch_inputs(cp, time, ktrans, vp)
+    cum = np.asarray(_cumulative_trapz_values(cp_arr, t_arr), dtype=np.float64)
+    with np.errstate(all="ignore"):
+        return (k[None, :] * cum[:, None]) + (p[None, :] * cp_arr[:, None])
+
+
+def model_tissue_uptake_cfit_batch(
+    ktrans: Iterable[float],
+    fp: Iterable[float],
+    tp: Iterable[float],
+    cp: Iterable[float],
+    t: Iterable[float],
+) -> np.ndarray:
+    """Batched `model_tissue_uptake_cfit`. Returns (n_time, n_voxels)."""
+    cp_arr, t_arr, (k, f, tp_arr) = _cfit_batch_inputs(cp, t, ktrans, fp, tp)
+    ok = tp_arr != 0.0
+    cum = np.asarray(_cumulative_trapz_values(cp_arr, t_arr), dtype=np.float64)
+    with np.errstate(all="ignore"):
+        weighted, overflowed = _exp_weighted_cumulative_trapz_batch(
+            cp_arr, t_arr, 1.0 / _safe_denominator(tp_arr)
+        )
+        out = (k[None, :] * cum[:, None]) + ((f - k)[None, :] * weighted)
+    out[:, ~ok | overflowed] = np.nan
+    return out
+
+
+def model_2cxm_cfit_batch(
+    ktrans: Iterable[float],
+    ve: Iterable[float],
+    vp: Iterable[float],
+    fp: Iterable[float],
+    cp: Iterable[float],
+    t1: Iterable[float],
+) -> np.ndarray:
+    """Batched `model_2cxm_cfit`. Returns (n_time, n_voxels).
+
+    Each guard the scalar function raises on becomes a mask; `ok` accumulates them
+    and the masked-off columns are set to NaN at the end. Non-finite curve values
+    are clamped to 0.0, matching the scalar function rather than the masks.
+    """
+    cp_arr, t_arr, (k, v, p, f) = _cfit_batch_inputs(cp, t1, ktrans, ve, vp, fp)
+    v_sum = p + v
+    ok = v_sum != 0.0
+
+    with np.errstate(all="ignore"):
+        # ktrans >= fp saturates PS rather than dividing by a non-positive gap.
+        saturated = k >= f
+        ps = np.where(saturated, 1e8, (k * f) / _safe_denominator(np.where(saturated, 1.0, f - k)))
+
+        den_e = ps + f
+        ok &= den_e != 0.0
+        e_big = ps / _safe_denominator(den_e)
+        e_small = v / _safe_denominator(v_sum)
+
+        scale_num = (e_big - (e_big * e_small)) + e_small
+        root_num = (((4.0 * e_big) * e_small) * (1.0 - e_big)) * (1.0 - e_small)
+        # np.power(x, 2.0) routes to libm pow, matching the scalar `** 2`; `x ** 2`
+        # on an array becomes x*x and differs in the last ULP.
+        root_den = np.power(scale_num, 2.0)
+        # Python's `**` raises OverflowError when a finite base squares past
+        # DBL_MAX; np.power returns inf. (`inf ** 2` returns inf in both.)
+        ok &= ~(np.isfinite(scale_num) & np.isinf(root_den))
+        ok &= root_den != 0.0
+        root_arg = 1.0 - (root_num / _safe_denominator(root_den))
+        root_arg = np.where((root_arg < 0.0) & (np.abs(root_arg) < 1e-15), 0.0, root_arg)
+        # math.sqrt raises on a negative; numpy would return NaN.
+        ok &= ~(root_arg < 0.0)
+        sqrt_term = np.sqrt(np.where(root_arg < 0.0, 0.0, root_arg))
+
+        den_tau = 2.0 * e_big
+        ok &= den_tau != 0.0
+        tau_scale = scale_num / _safe_denominator(den_tau)
+        tau_plus = tau_scale * (1.0 + sqrt_term)
+        tau_minus = tau_scale * (1.0 - sqrt_term)
+
+        den_plus = v_sum * tau_minus
+        den_minus = v_sum * tau_plus
+        ok &= (den_plus != 0.0) & (den_minus != 0.0)
+        k_plus = f / _safe_denominator(den_plus)
+        k_minus = f / _safe_denominator(den_minus)
+
+        tau_diff = tau_plus - tau_minus
+        ok &= tau_diff != 0.0
+        safe_diff = _safe_denominator(tau_diff)
+        f_plus = (f * (tau_plus - 1.0)) / safe_diff
+        f_minus = ((-f) * (tau_minus - 1.0)) / safe_diff
+
+        conv_plus, over_plus = _exp_weighted_cumulative_trapz_batch(cp_arr, t_arr, k_plus)
+        conv_minus, over_minus = _exp_weighted_cumulative_trapz_batch(cp_arr, t_arr, k_minus)
+        ok &= ~(over_plus | over_minus)
+        ct = (f_plus[None, :] * conv_plus) + (f_minus[None, :] * conv_minus)
+        ct = np.where(np.isfinite(ct), ct, 0.0)
+
+    ct[:, ~ok] = np.nan
+    return ct
+
+
+def model_fxr_cfit_batch(
+    ktrans: Iterable[float],
+    ve: Iterable[float],
+    tau: Iterable[float],
+    cp: Iterable[float],
+    t1: Iterable[float],
+    r1o: Iterable[float],
+    r1i: Iterable[float],
+    r1: float,
+    fw: float,
+) -> np.ndarray:
+    """Batched `model_fxr_cfit`. Returns (n_time, n_voxels).
+
+    `r1o`/`r1i` are per-voxel; `r1` (relaxivity) and `fw` are shared scalars.
+    """
+    cp_arr, t_arr, (k, v, tau_arr, r1o_arr, r1i_arr) = _cfit_batch_inputs(
+        cp, t1, ktrans, ve, tau, r1o, r1i
+    )
+    if float(fw) == 0.0:
+        return np.full((t_arr.size, k.size), np.nan, dtype=np.float64)
+
+    # po == 0 exactly when ve == 0, so it needs no separate mask.
+    ok = (v != 0.0) & (tau_arr > 0.0)
+    safe_tau = _safe_denominator(np.where(ok, tau_arr, 1.0))
+    with np.errstate(all="ignore"):
+        po = v / float(fw)
+        safe_po = _safe_denominator(po)
+        conv, overflowed = _exp_weighted_cumulative_trapz_batch(
+            cp_arr, t_arr, k / _safe_denominator(v)
+        )
+        ok &= ~overflowed
+        ct = k[None, :] * conv
+
+        xx = ((r1o_arr - r1i_arr) + (1.0 / safe_tau)) / safe_po
+        r1_ct = float(r1) * ct
+        term = ((2.0 / safe_tau)[None, :] - r1_ct) - xx[None, :]
+        term_sq = np.power(term, 2.0)
+        # See the same guard in model_2cxm_cfit_batch: finite base, overflowing square.
+        ok &= ~np.any(np.isfinite(term) & np.isinf(term_sq), axis=0)
+        yy = term_sq + ((4.0 * (1.0 - safe_po)) / ((safe_tau * safe_tau) * safe_po))[None, :]
+        yy = np.where(yy < 0.0, 0.0, yy)
+        out = 0.5 * ((((2.0 * r1i_arr)[None, :] + r1_ct) + xx[None, :]) - np.sqrt(yy))
+
+    out[:, ~ok] = np.nan
+    return out
+
+
 def model_patlak_linear(ct: Iterable[float], cp: Iterable[float], timer: Iterable[float]) -> List[float]:
     """Port of `dce/model_patlak_linear.m`.
 
@@ -735,6 +982,87 @@ def model_patlak_linear(ct: Iterable[float], cp: Iterable[float], timer: Iterabl
         r_squared = 0.0
 
     return [slope, intercept, sum_squared_error, -1.0, -1.0, -1.0, -1.0]
+
+
+def _sequential_sum_over_time(values: np.ndarray) -> np.ndarray:
+    """Left-to-right sum along axis 0, one row at a time.
+
+    Do not replace with `.sum(axis=0)`: numpy blocks axis-0 reductions once an
+    array is wide enough, which reorders the summation and breaks the last-ULP
+    agreement with `model_patlak_linear`. Row-by-row costs the same.
+    """
+    total = np.zeros(values.shape[1], dtype=np.float64)
+    for row in values:
+        total += row
+    return total
+
+
+def model_patlak_linear_batch(
+    ct: np.ndarray, cp: Iterable[float], timer: Iterable[float]
+) -> np.ndarray:
+    """Vectorized `model_patlak_linear` over many voxels sharing one cp/timer.
+
+    `ct` is (n_time,) or (n_time, n_voxels); returns (n_voxels, 7) rows in the
+    same layout the scalar function returns, bit-identical to calling the scalar
+    function per column.
+    """
+    cp_arr = np.asarray(cp, dtype=np.float64).reshape(-1)
+    t_arr = np.asarray(timer, dtype=np.float64).reshape(-1)
+    ct_arr = np.asarray(ct, dtype=np.float64)
+    if ct_arr.ndim == 1:
+        ct_arr = ct_arr[:, None]
+
+    n_time = t_arr.size
+    if not (ct_arr.shape[0] == cp_arr.size == n_time):
+        raise ValueError(
+            f"ct/cp/timer lengths differ: {ct_arr.shape[0]} / {cp_arr.size} / {n_time}"
+        )
+
+    out = np.zeros((ct_arr.shape[1], 7), dtype=np.float64)
+    out[:, 3:] = -1.0
+    if n_time < 2:
+        return out
+
+    # Sequential accumulation, matching _cumulative_trapz_values exactly.
+    cum = np.zeros(n_time, dtype=np.float64)
+    np.cumsum(0.5 * np.diff(t_arr) * (cp_arr[:-1] + cp_arr[1:]), out=cum[1:])
+
+    usable = np.abs(cp_arr) > 1e-12
+    with np.errstate(divide="ignore", invalid="ignore"):
+        x_row = np.where(usable, cum / cp_arr, np.nan)
+        y_all = np.where(usable[:, None], ct_arr / cp_arr[:, None], np.nan)
+
+    # MATLAB model_patlak_linear.m drops the first frame.
+    x_row = x_row[1:]
+    y_all = y_all[1:]
+    x_all = np.broadcast_to(x_row[:, None], y_all.shape)
+    valid = np.isfinite(x_row)[:, None] & np.isfinite(y_all)
+    counts = valid.sum(axis=0)
+
+    # Invalid slots are zeroed rather than compacted; adding 0.0 is exact, so the
+    # sums match the scalar function's sums over its filtered lists.
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        x_bar = _sequential_sum_over_time(np.where(valid, x_all, 0.0)) / counts
+        y_bar = _sequential_sum_over_time(np.where(valid, y_all, 0.0)) / counts
+        x_centered = np.where(valid, x_all - x_bar, 0.0)
+        y_centered = np.where(valid, y_all - y_bar, 0.0)
+        sum_x2 = _sequential_sum_over_time(x_centered * x_centered)
+        sum_y2 = _sequential_sum_over_time(y_centered * y_centered)
+        sum_xy = _sequential_sum_over_time(x_centered * y_centered)
+
+        slope = np.where(sum_x2 == 0.0, 0.0, sum_xy / sum_x2)
+        intercept = y_bar - (slope * x_bar)
+        denom = np.sqrt(sum_x2 * sum_y2)
+        # np.power(x, 2.0) routes to libm pow, matching the scalar function's `** 2`;
+        # `x ** 2` on an array would become x*x, which differs in the last ULP.
+        r_squared = np.where(denom == 0.0, 0.0, np.power(sum_xy / denom, 2.0))
+        sum_squared_error = (1.0 - r_squared) * sum_y2
+
+    fitted = counts >= 2
+    out[fitted, 0] = slope[fitted]
+    out[fitted, 1] = intercept[fitted]
+    out[fitted, 2] = sum_squared_error[fitted]
+    return out
 
 
 def model_patlak_fit(

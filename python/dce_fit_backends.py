@@ -25,7 +25,7 @@ from dce_models import (
     _reject_algorithm_override,
     model_extended_tofts_cfit,
     model_patlak_cfit,
-    model_patlak_linear,
+    model_patlak_linear_batch,
     model_tissue_uptake_cfit,
     model_tofts_cfit,
 )
@@ -94,21 +94,10 @@ def assemble_patlak_candidates(inputs: FitInputs) -> np.ndarray:
     default_k = float(settings["initial_value_ktrans"])
     default_vp = float(settings["initial_value_vp"])
     n_voxels = inputs.n_voxels
-    base_k = np.full(n_voxels, default_k, dtype=np.float64)
-    base_vp = np.full(n_voxels, default_vp, dtype=np.float64)
 
-    cp_vec = [float(v) for v in inputs.cp]
-    t_vec = [float(v) for v in inputs.timer]
-    for i in range(n_voxels):
-        try:
-            estimate = model_patlak_linear([float(v) for v in inputs.ct[:, i]], cp_vec, t_vec)
-            k0, vp0 = float(estimate[0]), float(estimate[1])
-            if math.isfinite(k0):
-                base_k[i] = k0
-            if math.isfinite(vp0):
-                base_vp[i] = vp0
-        except Exception:
-            continue
+    seeds = model_patlak_linear_batch(inputs.ct, inputs.cp, inputs.timer)
+    base_k = np.where(np.isfinite(seeds[:, 0]), seeds[:, 0], default_k)
+    base_vp = np.where(np.isfinite(seeds[:, 1]), seeds[:, 1], default_vp)
 
     default_k_row = np.full(n_voxels, default_k, dtype=np.float64)
     default_vp_row = np.full(n_voxels, default_vp, dtype=np.float64)
@@ -359,20 +348,13 @@ def assemble_tissue_uptake_candidates(inputs: FitInputs) -> np.ndarray:
 
     fixed = np.tile(np.array([k0_raw, fp0_raw, vp0], dtype=np.float64)[None, None, :], (1, n_voxels, 1))
 
-    patlak_k = np.full(n_voxels, k0_raw, dtype=np.float64)
-    patlak_fp = np.full(n_voxels, fp0_raw, dtype=np.float64)
-    cp_vec = [float(v) for v in inputs.cp]
-    t_vec = [float(v) for v in inputs.timer]
-    for i in range(n_voxels):
-        try:
-            estimate = model_patlak_linear([float(v) for v in inputs.ct[:, i]], cp_vec, t_vec)
-            k_guess = float(estimate[0])
-            if math.isfinite(k_guess):
-                k_guess = min(max(k_guess, k_lo), k_hi)
-                patlak_k[i] = k_guess
-                patlak_fp[i] = min(max(max(fp0_raw, k_guess * 1.25), fp_lo), fp_hi)
-        except Exception:
-            continue
+    k_guess = model_patlak_linear_batch(inputs.ct, inputs.cp, inputs.timer)[:, 0]
+    seeded = np.isfinite(k_guess)
+    k_clipped = np.clip(k_guess, k_lo, k_hi)
+    patlak_k = np.where(seeded, k_clipped, k0_raw)
+    patlak_fp = np.where(
+        seeded, np.clip(np.maximum(fp0_raw, k_clipped * 1.25), fp_lo, fp_hi), fp0_raw
+    )
     patlak = np.stack([patlak_k, patlak_fp, np.full(n_voxels, vp0, dtype=np.float64)], axis=-1)[None, :, :]
 
     n_random = int(settings.get("multistart_starts", 4))
@@ -970,19 +952,23 @@ def _assemble_stage_d_output(
     """
     row_len = 3 * n_params + 1
     out = np.full((n_voxels, row_len), np.nan, dtype=np.float64)
-    for i in range(n_voxels):
-        out[i, :n_params] = params[i, :]
-        out[i, n_params] = float(chi[i])
-        extra_i = extra[i]
+    out[:, :n_params] = params[:, :n_params]
+    out[:, n_params] = chi
+
+    # The accelerated backends expose no Jacobian, so `extra` is all-None there and
+    # the CI columns are a pure columnwise fill; only rows carrying real CIs need
+    # the per-voxel path.
+    for j in range(n_params):
+        lo_col, hi_col = n_params + 1 + 2 * j, n_params + 2 + 2 * j
+        fallback = -1.0 if ci_fallback == "sentinel" else params[:, j]
+        out[:, lo_col] = fallback
+        out[:, hi_col] = fallback
+
+    for i in np.flatnonzero(np.fromiter((e is not None for e in extra), dtype=bool, count=n_voxels)):
+        ci_lo, ci_hi = extra[i]
         for j in range(n_params):
             lo_col, hi_col = n_params + 1 + 2 * j, n_params + 2 + 2 * j
-            if extra_i is not None:
-                ci_lo, ci_hi = extra_i
-                out[i, lo_col], out[i, hi_col] = float(ci_lo[j]), float(ci_hi[j])
-            elif ci_fallback == "sentinel":
-                out[i, lo_col] = out[i, hi_col] = -1.0
-            else:
-                out[i, lo_col] = out[i, hi_col] = float(params[i, j])
+            out[i, lo_col], out[i, hi_col] = float(ci_lo[j]), float(ci_hi[j])
     return out
 
 

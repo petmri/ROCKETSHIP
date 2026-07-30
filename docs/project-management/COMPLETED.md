@@ -7,6 +7,33 @@ Do not track open items in this file; active work belongs in `docs/project-manag
 
 Completed items moved from `TODO.md` on 2026-03-05 to keep the active backlog short.
 
+## Completed Recent Updates (2026-07-30)
+- [x] **Python non-fit pipeline performance, round 2: batched curve evaluation.** The post-fit
+  path re-evaluates every fitted voxel's forward curve in Python regardless of backend
+  (gpufit/cpufit return parameters, not curves), so it was untouched by acceleration and grew
+  as a share of the run the faster the backend got. Added
+  `_exp_weighted_cumulative_trapz_batch` plus `model_*_cfit_batch` for all six models, and
+  reduced `_compute_fit_residuals` to one batched call: at 160k voxels with
+  `write_postfit_arrays=1 write_qof_maps=1`, residuals 4.70 s -> 0.076 s (62x) and end-to-end
+  10.99 s -> 6.42 s; unchanged on the default path, where both flags are off. Bit-identical
+  Stage-A/B/D arrays and written NIfTIs across all six models. The subtle part is that Python
+  floats *raise* (ZeroDivisionError, OverflowError from `math.exp` and from squaring a finite
+  float, ValueError from a negative `math.sqrt`) where numpy returns inf/NaN, so each needs an
+  explicit mask; details in
+  `docs/project-management/projects/python-pipeline-performance/python_pipeline_performance.md`.
+
+## Completed Recent Updates (2026-07-29c)
+- [x] **Python non-fit pipeline performance, round 1.** Profiling showed the Python around the
+  fitter cost more than the fitter itself: at 160k ROI voxels (tofts+patlak, default outputs)
+  8.90 s of in-scope Python against 7.67 s of CPUfit, 6.70 s of it the per-voxel linear-Patlak
+  seeding loop. Vectorized that seeding (new `model_patlak_linear_batch`), `_clean_ab`,
+  `_clean_r1`, the two Stage-A baseline-rescale loops, and `_assemble_stage_d_output`:
+  16.35 s -> 8.91 s end-to-end, in-scope Python 8.90 s -> 1.30 s, with every Stage-A/B/D output
+  array bit-identical across both backends and all 9 models. Remaining work (the `model_*_cfit`
+  curve functions, opt-out QC figures) is tracked in `TODO.md`; profile and equivalence
+  evidence in
+  `docs/project-management/projects/python-pipeline-performance/python_pipeline_performance.md`.
+
 ## Completed Recent Updates (2026-07-29b)
 - [x] **Both dev-merge-critical Primary Blockers closed.**
   - **GUI status.** Both PySide6 GUIs (`python/dce_gui.py`, `python/parametric_gui.py`)

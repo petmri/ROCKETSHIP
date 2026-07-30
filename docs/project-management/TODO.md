@@ -21,6 +21,12 @@ Larger feature requests should be logged in `docs/project-management/projects/fe
 
 ### 3. Modeling and Workflow Follow-Ups
 - [ ] Evaluate moving T1 fitting onto CPUfit/GPUfit for performance improvements.
+- [ ] Finish Python non-fit pipeline performance: make the Stage-A/B QC figures opt-out
+      (0.62 s unconditionally, and 68% of in-scope time on the small single-slice fixtures).
+      The per-voxel seeding (round 1) and the `model_*_cfit` curve functions (round 2) are
+      done. Profiles, results, the bit-exactness gotchas and the peak-memory/multiprocessing
+      findings are in
+      `docs/project-management/projects/python-pipeline-performance/python_pipeline_performance.md`.
 - [x] Improve `2cxm` and `tissue_uptake` stability/accuracy on real data.
 - [ ] Expand DSC support beyond current core (`DSC_convolution_oSVD` and broader workflow parity).
 - [ ] Decide final status of `nested` and `FXL_rr` (full support vs explicit non-support with cleanup).

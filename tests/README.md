@@ -10,7 +10,7 @@ shown here as `pytest` for brevity.
 |---|---|
 | Default Python suite (incl. gated DCE parity) | `pytest tests/python` |
 | DCE parity, incl. reported-only extras | `pytest tests/python -m parity --parity-suite=allmodels -s` |
-| Runtime parity vs MATLAB (needs MATLAB) | `pytest tests/python/test_runtime_parity.py --run-runtime-parity` |
+| Runtime parity vs MATLAB (needs MATLAB) | `pytest tests/python/test_runtime_parity.py --run-runtime-parity -s` |
 | OSIPI reliability | `pytest tests/python -m osipi -v` (runs the full 2CXM/2CUM sweeps by default) |
 | BIDS qualification | `pytest tests/python --run-qualification` |
 | MATLAB unit tests | `run_unit_tests()` in MATLAB |
