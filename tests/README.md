@@ -10,7 +10,8 @@ shown here as `pytest` for brevity.
 |---|---|
 | Default Python suite (incl. gated DCE parity) | `pytest tests/python` |
 | DCE parity, incl. reported-only extras | `pytest tests/python -m parity --parity-suite=allmodels -s` |
-| Runtime parity vs MATLAB (needs MATLAB) | `pytest tests/python/test_runtime_parity.py --run-runtime-parity -s` |
+| Runtime python vs MATLAB (no acceleration) | `pytest tests/python/test_runtime_parity.py --run-runtime-parity -s` |
+| Performance benchmark | `python tests/python/run_dce_benchmark.py --dataset-root <bids-root>` (see [Performance benchmark](#performance-benchmark)) |
 | OSIPI reliability | `pytest tests/python -m osipi -v` (runs the full 2CXM/2CUM sweeps by default) |
 | BIDS qualification | `pytest tests/python --run-qualification` |
 | MATLAB unit tests | `run_unit_tests()` in MATLAB |
@@ -273,11 +274,59 @@ The phantom tolerance profile (`tests/data/BIDS_test/phantom_gt_mae_tolerances.j
 `test_phantom_gt_reliability.py` is qualification-gated and `xfail`s when `gate_ready=false`. See
 `docs/project-management/projects/phantom-gt/PHANTOM_GT_QUALIFICATION_STATUS.md`.
 
+## Performance benchmark
+
+`run_dce_benchmark.py` times the full DCE pipeline (Stage A -> B -> D) for each available
+MATLAB/Python backend. `Total(s)` is deliberately whole-process wall clock, including
+interpreter startup and file I/O, because that is what a user actually waits for.
+
+```bash
+python tests/python/run_dce_benchmark.py \
+  --dataset-root /media/network_mriphysics/USC-PPG/bids_ppg \
+  --configs matlab_gpufit,python_cpufit,python_gpufit
+```
+
+**Dataset layout.** Raw data is read from `<root>/<--raw-subdir>/<subject>/<session>`
+(default `sourcedata/raw`) and derivatives from
+`<root>/derivatives/<--derivatives-subdir>/<subject>/<session>` (default
+`dceprep-multihance_fix`). When that subdirectory does not hold the subject, a bounded
+fallback scan probes up to 64 siblings, `dceprep*` first, and prints which one it picked.
+Inputs are matched on the `desc-` naming convention (`desc-bfcz_DCE`, `desc-AIF_T1map`,
+`space-DCEref_desc-brain_mask`, `space-DCEref_T1map`); `*_RAS.*` duplicates are ignored.
+`tests/data/BIDS_test` still uses the older `label-` names and a `rawdata/` tree, so the
+default `--dataset-root` does not currently resolve — see `docs/project-management/TODO.md`.
+
+**Reading the table.** `A(s)`/`B(s)`/`D(s)` come from each pipeline's own stage timers and
+`Other(s)` is the remainder. They are *not* like-for-like: MATLAB's timers bracket
+computation only, so reading the dynamic (before Stage A) and writing maps and the
+`.fig`/`.png` exports (after Stage D) fall into its `Other(s)`, whereas Python's stage
+timers include that I/O. Only `Total(s)` is directly comparable. The measured interpreter
+startup floor is printed for each language (~10 s for MATLAB, <1 s for Python) so a small
+total can be recognised as mostly startup.
+
+**What is deliberately not measured.** Python stage checkpoints are off by default
+(`--checkpoints on` to enable): checkpointing `np.savez_compressed`es every stage array, which
+on a full-resolution subject is ~950 MB written *inside* the timed window for work no ordinary
+run does. `write_xls` is likewise off, because `script_preferences.txt` leaves `roi_list` empty
+and MATLAB therefore writes no ROI table — leaving it on makes Python run an extra whole-brain
+average-then-fit with no MATLAB counterpart. Still included on both sides, because a real run
+pays them: Python's three unconditional Stage-A/B QC figures (see `TODO.md`), MATLAB's
+`.fig`/`.png` export, and MATLAB's ~290 MB gzipped `dcedynamicCt.nii.gz`.
+
+**Guards.** `run_dce_cli.m` swallows Stage-A/B/D failures and still exits 0, so exit code
+alone is not evidence that anything ran; a MATLAB config is only scored `OK` if it also
+produced fresh Stage-A/B/D diaries with a voxel count. Each repetition gets a private
+timepoint directory of symlinks, so MATLAB writes its outputs there instead of into the
+dataset and repeats stay independent. Both pipelines are handed the same resolved files and
+the same `snr_filter` / `noise_pixsize` / `start_t` / smoothing settings read from
+`script_preferences.txt`. Fitted voxel counts are reported per config and a mismatch is
+flagged — configurations that fit different voxels are not measuring the same workload.
+
 ## Helpers
 
 ```bash
 python tests/python/run_dce_parity.py --suite multi-model      # prints parity summary metrics
-python tests/python/run_dce_benchmark.py                       # benchmarks
+python tests/python/run_dce_benchmark.py --dataset-root <bids-root>   # benchmarks, see below
 python tests/python/run_dce_postfit_analysis.py --analysis ftest --region roi \
   --result lower_model_fit_postfit_arrays.npz --result higher_model_fit_postfit_arrays.npz \
   --output-dir /tmp/dce_postfit_ftest --print-summary-json

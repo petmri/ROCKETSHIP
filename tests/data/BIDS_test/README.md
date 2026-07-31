@@ -41,7 +41,7 @@ BIDS_test/
 | participant | group | what it is |
 |---|---|---|
 | `sub-01original` | real reference | Unmodified real-style DCE+VFA example (256×256×1×64, 3 VFA @ 2/5/10°, Δt 15.36 s). Source for `sub-02downsample`. |
-| `sub-02downsample` | real variant | 2× in-plane spatial downsample (128×128×1×64). Also the default dataset for `run_dce_benchmark.py`. |
+| `sub-02downsample` | real variant | 2× in-plane spatial downsample (128×128×1×64). |
 | `sub-05phantom` | synthetic phantom | Standard GT phantom, 27 frames @ 33.2 s, 3 VFA. |
 | `sub-06phantom` | synthetic phantom | Standard GT phantom with independent acquisition params, 23 frames @ 34.7 s, 3 VFA. |
 | `sub-07phantom` | synthetic phantom | Higher-temporal-sampling GT phantom, 105 frames @ 6.9 s, 3 VFA. |
@@ -103,4 +103,6 @@ are committed assets (regenerate the MATLAB maps with `tests/matlab/generate_t1_
 - `tests/python/test_dce_pipeline_parity_metrics.py` / `test_runtime_parity.py` — DCE fit parity on `sub-10bbbdownsample`.
 - `tests/python/test_t1_map_parity.py` / `test_runtime_parity.py` — T1-map parity on the `sub-11tiny` VFA anat.
 - `tests/python/test_dce_pipeline_settings_matrix.py` — fast DCE settings/feature sweeps on the `sub-11tiny` tiny DCE.
-- `tests/python/run_dce_benchmark.py` — backend runtime benchmark, default subject `sub-02downsample`.
+- `tests/python/run_dce_benchmark.py` — backend runtime benchmark. It no longer reads this tree:
+  it expects the `sourcedata/raw` + `derivatives/<dceprep-*>` layout and `desc-` input names,
+  which this fixture predates. Migration is tracked in `docs/project-management/TODO.md`.

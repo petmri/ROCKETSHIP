@@ -1,6 +1,6 @@
 participant_id	group	source	dce_matrix	dce_frames	temporal_resolution_s	baseline_frames	vfa_flip_angles_deg	ground_truth	description
 sub-01original	real_reference	BIDS_example/sub-01	256x256x1x64	64	15.36	n/a	2,5,10	none	Unmodified real-style reference DCE+VFA example; the source that sub-02downsample is derived from. DCE image lives in derivatives (desc-bfcz_DCE).
-sub-02downsample	real_variant	BIDS_example/sub-01	128x128x1x64	64	15.36	n/a	2,5,10	none	2x in-plane spatial downsample of the reference (downsample_x2 variant); tests resolution sensitivity. Default subject for run_dce_benchmark.py.
+sub-02downsample	real_variant	BIDS_example/sub-01	128x128x1x64	64	15.36	n/a	2,5,10	none	2x in-plane spatial downsample of the reference (downsample_x2 variant); tests resolution sensitivity.
 sub-05phantom	synthetic_phantom	synthetic_dce	64x64x6x27	27	33.21	4	2,5,10	full	Standard synthetic ground-truth phantom (Parker AIF, hematocrit 0, plasma AIF, relaxivity ~5.21). Tissue classes 1=muscle/fat, 2=brain, 3=vessel.
 sub-06phantom	synthetic_phantom	synthetic_dce	64x64x6x23	23	34.68	4	2,5,10	full	Standard synthetic ground-truth phantom with independently randomized acquisition parameters (relaxivity ~5.20, distinct AIF timing).
 sub-07phantom	synthetic_phantom	synthetic_dce	64x64x6x105	105	6.87	7	2,5,10	full	Higher-temporal-sampling synthetic ground-truth phantom (105 frames at ~6.9 s; 7 baseline frames).

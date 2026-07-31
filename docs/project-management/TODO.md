@@ -20,6 +20,25 @@ Larger feature requests should be logged in `docs/project-management/projects/fe
       `docs/project-management/projects/large-data-distribution/large_data_distribution.md`.
 
 ### 3. Modeling and Workflow Follow-Ups
+- [ ] Migrate `tests/data/BIDS_test` onto the production BIDS layout and naming so
+      `tests/python/run_dce_benchmark.py` resolves it again without a `--dataset-root` switch.
+      The benchmark now assumes `sourcedata/raw/<sub>/<ses>` plus
+      `derivatives/<dceprep-*>/<sub>/<ses>` and the `desc-` entity names
+      (`desc-AIF_T1map`, `space-DCEref_desc-brain_mask`); the fixture still uses `rawdata/`
+      and the older `label-` names, so the default invocation fails until it is converted.
+      Old-layout compatibility was deliberately not kept.
+- [ ] Port MATLAB's contrast-agent relaxivity auto-selection to Python. `run_dce_cli.m:110-127`
+      reads `InstitutionName`/`ManufacturersModelName` and `AcquisitionDateTime` from the DCE JSON
+      and picks 5.7 (MultiHance, USC pre-2017-10-01) or 3.4 (Dotarem) unless
+      `force_use_default_relaxivity` is set. `dce_pipeline._resolve_timing_metadata` only honours an
+      explicit `relaxivity` key in the JSON and otherwise hardcodes 3.4
+      (`python/dce_pipeline.py:1936-1940`), so the two pipelines silently disagree on any USC
+      pre-Oct-2017 study. Measured on `sub-203103` (`AcquisitionDateTime` 2017-03-09,
+      `InstitutionName` USCINI): MATLAB 5.7, Python 3.4. **Ktrans and vp are invariant** — `Ct` and
+      `Cp` both scale with relaxivity, so the ratio cancels in the fit — which is why map-based
+      parity never caught it. It shows up only in absolute-concentration outputs: measured
+      `python_sse / matlab_sse` = 2.8106 across 643,576 voxels, exactly `(5.7/3.4)^2`.
+      `dcedynamicCt` is affected the same way.
 - [ ] Evaluate moving T1 fitting onto CPUfit/GPUfit for performance improvements.
 - [ ] Finish Python non-fit pipeline performance: make the Stage-A/B QC figures opt-out
       (0.62 s unconditionally, and 68% of in-scope time on the small single-slice fixtures).

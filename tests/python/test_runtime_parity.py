@@ -15,6 +15,8 @@ All tests here are gated behind ``--run-runtime-parity`` and require MATLAB.
 
 from __future__ import annotations
 
+import contextlib
+import re
 import shutil
 import subprocess
 import sys
@@ -56,6 +58,31 @@ MEANINGFUL_MATLAB_SECONDS = 15.0
 
 # T1 plausibility band shared with test_t1_map_parity (non-identifiable voxels excluded).
 T1_MIN_MS, T1_MAX_MS = 100.0, 4000.0
+
+
+DCE_PREFERENCES_PATH = REPO_ROOT / "dce" / "dce_preferences.txt"
+_FORCE_CPU_RE = re.compile(rb"force_cpu\s*=\s*[^\r\n]*")
+
+
+@contextlib.contextmanager
+def _force_cpu_for_matlab():
+    """Temporarily set force_cpu = 1 in dce_preferences.txt for this run only.
+
+    generate_dce_tofts_parity_map.m refuses to run on a CUDA-gpufit machine
+    unless force_cpu = 1 (baselines must come from the CPU fit()/confint() path;
+    see tests/README.md). This test's Python side already forces backend="cpu"
+    for the same comparison, so the two sides should agree without hand-editing
+    the tracked, CRLF-line-ended prefs file before every run. The original bytes
+    are restored verbatim (not regenerated) even if the run raises.
+    """
+    original = DCE_PREFERENCES_PATH.read_bytes()
+    patched, n = _FORCE_CPU_RE.subn(b"force_cpu = 1", original, count=1)
+    assert n == 1, f"could not find force_cpu setting in {DCE_PREFERENCES_PATH}"
+    DCE_PREFERENCES_PATH.write_bytes(patched)
+    try:
+        yield
+    finally:
+        DCE_PREFERENCES_PATH.write_bytes(original)
 
 
 def _require_matlab(matlab_cmd: str) -> str:
@@ -206,7 +233,8 @@ def test_runtime_parity_dce_tofts(
         f"'noiseRoiPath', '{paths['noise']}', "
         f"'models', {{'tofts'}});"
     )
-    matlab_seconds = _time_matlab(matlab_cmd, batch)
+    with _force_cpu_for_matlab():
+        matlab_seconds = _time_matlab(matlab_cmd, batch)
     ml_ktrans_path = ml_out / "Dyn-1_tofts_fit_Ktrans.nii"
     assert ml_ktrans_path.exists(), f"MATLAB did not write {ml_ktrans_path}"
 
