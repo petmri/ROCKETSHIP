@@ -3650,8 +3650,12 @@ def _predict_curves_batch(
             pred = model_patlak_cfit_batch(col[0], col[1], cp, timer)
         elif model_name == "tissue_uptake":
             ktrans, fp, vp = col[0], col[1], col[2]
-            usable &= np.abs(fp) > 1e-12
-            tp = vp / np.where(usable, fp, 1.0)
+            # The runners store Vp = (Fp + PS) * Tp with PS = Ktrans*Fp/(Fp - Ktrans),
+            # i.e. Vp = Tp * Fp^2 / (Fp - Ktrans); invert that to recover the Tp the
+            # forward model takes. Voxels at the runner's PS-saturation edge
+            # (Ktrans >= Fp) carry no recoverable Tp, so they stay unusable.
+            usable &= (np.abs(fp) > 1e-12) & ((fp - ktrans) > 1e-12)
+            tp = vp * (fp - ktrans) / np.where(usable, fp * fp, 1.0)
             usable &= np.isfinite(tp) & (tp > 0.0)
             pred = model_tissue_uptake_cfit_batch(
                 ktrans, fp, np.where(usable, tp, 1.0), cp, timer
