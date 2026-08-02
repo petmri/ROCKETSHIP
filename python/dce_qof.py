@@ -43,6 +43,36 @@ _MODEL_PARAMS: Dict[str, Dict[str, int]] = {
 }
 
 
+def bolus_window_from_timing(
+    start_injection_min: Optional[float],
+    end_injection_min: Optional[float],
+    time_resolution_min: Optional[float],
+    n_frames: int,
+    timer_min0: float = 0.0,
+    *,
+    margin_frames: int = 2,
+) -> Optional[Tuple[int, int]]:
+    """Derive the wash-in exclude window from injection timing in minutes.
+
+    Shared by the offline checkpoint path and the in-pipeline
+    `write_qof_maps` path so both produce the same σ estimate for the same
+    data. Returns `None` when the timing is absent or the frame step is not
+    positive.
+    """
+    if time_resolution_min is None or start_injection_min is None:
+        return None
+    dt = float(time_resolution_min)
+    if not dt > 0:
+        return None
+    start_min = float(start_injection_min)
+    onset = (start_min - float(timer_min0)) / dt
+    if end_injection_min is None:
+        duration = 0.0
+    else:
+        duration = max(0.0, (float(end_injection_min) - start_min) / dt)
+    return bolus_exclude_window(onset, duration, n_frames, margin_frames=margin_frames)
+
+
 def bolus_window_from_checkpoint(
     checkpoint_path: Path,
     n_frames: int,
@@ -60,17 +90,14 @@ def bolus_window_from_checkpoint(
     if not checkpoint_path.exists():
         return None
     meta = json.loads(checkpoint_path.read_text(encoding="utf-8"))
-    dt = meta.get("time_resolution_min")
-    start_min = meta.get("start_injection_min")
-    end_min = meta.get("end_injection_min")
-    if dt is None or start_min is None or not float(dt) > 0:
-        return None
-    onset = (float(start_min) - float(timer_min0)) / float(dt)
-    if end_min is None:
-        duration = 0.0
-    else:
-        duration = max(0.0, (float(end_min) - float(start_min)) / float(dt))
-    return bolus_exclude_window(onset, duration, n_frames, margin_frames=margin_frames)
+    return bolus_window_from_timing(
+        meta.get("start_injection_min"),
+        meta.get("end_injection_min"),
+        meta.get("time_resolution_min"),
+        n_frames,
+        timer_min0,
+        margin_frames=margin_frames,
+    )
 
 
 def compute_qof_arrays(

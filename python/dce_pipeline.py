@@ -6,6 +6,7 @@ import ast
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from functools import lru_cache
+import inspect
 import json
 import math
 import re
@@ -22,7 +23,14 @@ from dce_fit_backends import (
     fit_tissue_uptake_stage_d,
     fit_tofts_stage_d,
 )
+from accel_backend import (
+    ALLOWED_BACKENDS,
+    load_fit_module_for_acceleration as _load_fit_module_for_acceleration,
+    probe_acceleration_backend,
+    resolve_backend_selection,
+)
 from dce_models import (
+    _loss_from_robust as _scipy_loss_from_robust,
     model_2cxm_cfit_batch,
     model_extended_tofts_cfit_batch,
     model_fxr_cfit_batch,
@@ -33,7 +41,6 @@ from dce_models import (
 )
 
 
-ALLOWED_BACKENDS = {"auto", "cpu", "gpufit"}
 ALLOWED_AIF_MODES = {"auto", "fitted", "raw", "imported"}
 ALLOWED_STAGE_A_MODES = {"real", "scaffold"}
 ALLOWED_STAGE_B_MODES = {"real", "scaffold", "auto"}
@@ -334,17 +341,6 @@ def _load_dce_preferences(config: "DcePipelineConfig") -> Dict[str, str]:
     return _parse_preference_file(str(path), int(stat.st_mtime_ns))
 
 
-def _scipy_loss_from_robust(value: Any) -> str:
-    mode = str(value).strip().lower()
-    if mode in {"", "off", "none", "linear"}:
-        return "linear"
-    if mode == "lar":
-        return "soft_l1"
-    if mode == "bisquare":
-        return "cauchy"
-    return "linear"
-
-
 def _to_path_list(values: Optional[List[str]]) -> List[Path]:
     if not values:
         return []
@@ -356,85 +352,13 @@ def _json_default(value: Any) -> Any:
         return str(value)
     if isinstance(value, np.ndarray):
         return value.tolist()
-    if isinstance(value, (np.float32, np.float64, np.float16)):
+    if isinstance(value, np.floating):
         return float(value)
-    if isinstance(value, (np.int32, np.int64, np.int16, np.int8)):
+    if isinstance(value, np.integer):
         return int(value)
+    if isinstance(value, np.bool_):
+        return bool(value)
     raise TypeError(f"Not JSON serializable: {type(value)}")
-
-
-@lru_cache(maxsize=1)
-def probe_acceleration_backend() -> Dict[str, Any]:
-    """Detect available acceleration backend in priority order."""
-
-    pygpufit_module: Any = None
-    pycpufit_module: Any = None
-    pygpufit_error: Optional[str] = None
-    pycpufit_error: Optional[str] = None
-    cuda_available = False
-
-    try:
-        import pygpufit.gpufit as gf  # type: ignore
-
-        pygpufit_module = gf
-    except Exception as exc:
-        pygpufit_error = str(exc)
-
-    if pygpufit_module is not None:
-        try:
-            cuda_available = bool(pygpufit_module.cuda_available())
-        except Exception:
-            cuda_available = False
-
-    try:
-        import pycpufit.cpufit as cf  # type: ignore
-
-        pycpufit_module = cf
-    except Exception as exc:
-        pycpufit_error = str(exc)
-
-    if cuda_available:
-        return {
-            "backend": "gpufit_cuda",
-            "reason": "pygpufit imported and CUDA is available",
-            "cuda_available": True,
-            "pygpufit_imported": pygpufit_module is not None,
-            "pycpufit_imported": pycpufit_module is not None,
-            "pygpufit_error": pygpufit_error,
-            "pycpufit_error": pycpufit_error,
-        }
-
-    if pycpufit_module is not None:
-        return {
-            "backend": "cpufit_cpu",
-            "reason": "using pycpufit CPU backend",
-            "cuda_available": cuda_available,
-            "pygpufit_imported": pygpufit_module is not None,
-            "pycpufit_imported": True,
-            "pygpufit_error": pygpufit_error,
-            "pycpufit_error": pycpufit_error,
-        }
-
-    if pygpufit_module is not None:
-        return {
-            "backend": "gpufit_cpu_fallback",
-            "reason": "pygpufit imported without CUDA and pycpufit unavailable; using pygpufit fallback path",
-            "cuda_available": cuda_available,
-            "pygpufit_imported": True,
-            "pycpufit_imported": False,
-            "pygpufit_error": pygpufit_error,
-            "pycpufit_error": pycpufit_error,
-        }
-
-    return {
-        "backend": "none",
-        "reason": "no pygpufit/pycpufit backend detected",
-        "cuda_available": False,
-        "pygpufit_imported": False,
-        "pycpufit_imported": False,
-        "pygpufit_error": pygpufit_error,
-        "pycpufit_error": pycpufit_error,
-    }
 
 
 def is_gpufit_available() -> bool:
@@ -444,48 +368,10 @@ def is_gpufit_available() -> bool:
 
 
 def _resolve_backend_selection(requested_backend: str) -> Dict[str, str]:
-    backend = requested_backend.strip().lower()
-    if backend not in ALLOWED_BACKENDS:
-        raise ValueError(f"Unsupported backend '{requested_backend}'. Allowed: {sorted(ALLOWED_BACKENDS)}")
-
-    if backend == "cpu":
-        return {
-            "requested_backend": backend,
-            "selected_backend": "cpu",
-            "acceleration_backend": "none",
-            "reason": "backend=cpu forces pure CPU fitting path",
-        }
-
-    probe = probe_acceleration_backend()
-    probe_backend = str(probe.get("backend", "none"))
-    probe_reason = str(probe.get("reason", ""))
-    pygpufit_imported = bool(probe.get("pygpufit_imported", False))
-
-    if backend == "gpufit":
-        if not pygpufit_imported:
-            raise RuntimeError("GPUfit backend requested but pygpufit could not be imported")
-        acceleration_backend = probe_backend if probe_backend != "none" else "gpufit_cpu_fallback"
-        return {
-            "requested_backend": backend,
-            "selected_backend": "gpufit",
-            "acceleration_backend": acceleration_backend,
-            "reason": f"backend=gpufit selected acceleration backend '{acceleration_backend}' ({probe_reason})",
-        }
-
-    # auto
-    if probe_backend in {"gpufit_cuda", "cpufit_cpu", "gpufit_cpu_fallback"}:
-        return {
-            "requested_backend": backend,
-            "selected_backend": "gpufit",
-            "acceleration_backend": probe_backend,
-            "reason": f"backend=auto selected acceleration backend '{probe_backend}' ({probe_reason})",
-        }
-    return {
-        "requested_backend": backend,
-        "selected_backend": "cpu",
-        "acceleration_backend": "none",
-        "reason": "backend=auto fell back to pure CPU fitting path",
-    }
+    # The probe is passed as a thunk rather than called here so that it resolves
+    # through *this* module's namespace -- tests patch
+    # `dce_pipeline.probe_acceleration_backend` and expect selection to see it.
+    return resolve_backend_selection(requested_backend, lambda: probe_acceleration_backend())
 
 
 def resolve_backend(requested_backend: str) -> str:
@@ -861,8 +747,6 @@ def _resolve_dynamic_metadata(
             fa_deg = float(payload["FlipAngle"])
             metadata_sources["fa_deg"] = f"{source_prefix}.FlipAngle"
 
-    relaxivity_val = None
-    relaxivity_key = None
     relaxivity_val, relaxivity_key = _payload_lookup(
         (
             "relaxivity",
@@ -878,8 +762,6 @@ def _resolve_dynamic_metadata(
         relaxivity = float(relaxivity_val)
         metadata_sources["relaxivity"] = f"{source_prefix}.{relaxivity_key}"
 
-    hematocrit_val = None
-    hematocrit_key = None
     hematocrit_val, hematocrit_key = _payload_lookup(
         (
             "hematocrit",
@@ -987,21 +869,6 @@ def _resolve_timepoint_window(
         "n_timepoints_output": int(end_1b - start_1b + 1),
     }
     return start_1b - 1, end_1b, info
-
-
-def _moving_average_smooth_1d(values: np.ndarray, window: int) -> np.ndarray:
-    arr = np.asarray(values, dtype=np.float64).reshape(-1)
-    if arr.size == 0:
-        return arr.copy()
-    window = max(1, int(window))
-    if window == 1 or arr.size == 1:
-        return arr.copy()
-    if window % 2 == 0:
-        window += 1
-    pad = window // 2
-    padded = np.pad(arr, (pad, pad), mode="edge")
-    kernel = np.ones(window, dtype=np.float64) / float(window)
-    return np.convolve(padded, kernel, mode="valid")
 
 
 def _matlab_moving_average_smooth_1d(values: np.ndarray, span: int) -> np.ndarray:
@@ -1669,13 +1536,16 @@ def _clean_ab(
 
     for col in np.where((bad_counts > 0) & ~over_threshold)[0]:
         vec = cleaned[:, col]
-        bad = np.where(bad_mask[:, col])[0]
+        col_bad = bad_mask[:, col]
+        bad = np.where(col_bad)[0]
         for idx in bad:
             start = max(0, int(idx) - 5)
             end = min(n_time, int(idx) + 6)
             neighbors = np.arange(start, end, dtype=np.int64)
             neighbors = neighbors[neighbors != int(idx)]
-            neighbors = neighbors[~np.isin(neighbors, bad)]
+            # `bad` is exactly where(col_bad), so indexing the mask selects the
+            # same neighbours in the same order as np.isin, without the scan.
+            neighbors = neighbors[~col_bad[neighbors]]
             if neighbors.size < 2:
                 keep[col] = False
                 break
@@ -1748,6 +1618,62 @@ def _clean_r1(
             cleaned[:, col] = np.asarray(vec, dtype=np.float64)
 
     return cleaned[:, keep], t1_values[keep], roi_indices[keep]
+
+
+def _signal_to_r1(
+    signal: np.ndarray,
+    t1_values: np.ndarray,
+    indices: np.ndarray,
+    *,
+    baseline_slice: slice,
+    tr_sec: float,
+    fa_deg: float,
+    ab_threshold: float,
+    r1_threshold: float,
+    label: str,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """SPGR signal -> R1 for one voxel set, re-anchored to the baseline 1/T1.
+
+    Shared by the AIF and ROI paths, which differ only in their cleaning
+    thresholds. Returns `(signal, baseline_mean, r1, t1_values, indices)`.
+
+    Note the asymmetry, which is deliberate and pre-existing: `signal` and
+    `baseline_mean` are filtered only by the zero-baseline screen, while
+    `r1`/`t1_values`/`indices` are additionally filtered by the AB and R1
+    cleaners. Callers depend on both forms, so they are returned separately.
+    """
+    baseline_mean = np.mean(signal[baseline_slice, :], axis=0)
+
+    # Filter out voxels with zero/near-zero baseline signal to prevent divide-by-zero
+    valid_baseline = baseline_mean > 1e-10
+    if not np.any(valid_baseline):
+        raise ValueError(f"All {label} voxels have zero baseline signal")
+    signal = signal[:, valid_baseline]
+    t1_values = t1_values[valid_baseline]
+    indices = indices[valid_baseline]
+    baseline_mean = baseline_mean[valid_baseline]
+
+    # Operation order below is load-bearing: this is a parity port, and folding
+    # the two products into a shared sub-expression reassociates the arithmetic
+    # and shifts results in the last bits.
+    cos_fa = np.cos(np.deg2rad(fa_deg))
+    exp_tr = np.exp(-tr_sec / t1_values)
+    sstar = (1.0 - exp_tr) / (1.0 - cos_fa * exp_tr)
+    a = 1.0 - cos_fa * sstar[np.newaxis, :] * signal / baseline_mean[np.newaxis, :]
+    b = 1.0 - sstar[np.newaxis, :] * signal / baseline_mean[np.newaxis, :]
+    ab = a / b
+
+    ab, t1_values, indices = _clean_ab(ab, t1_values, indices, threshold_fraction=ab_threshold)
+    if t1_values.size == 0:
+        raise ValueError(f"All {label} voxels removed after AB cleaning")
+
+    r1 = (1.0 / tr_sec) * np.log(ab)
+    r1, t1_values, indices = _clean_r1(r1, t1_values, indices, threshold_fraction=r1_threshold)
+    if t1_values.size == 0:
+        raise ValueError(f"All {label} voxels removed after R1 cleaning")
+
+    r1 = r1 + ((1.0 / t1_values) - np.mean(r1[baseline_slice, :], axis=0))[np.newaxis, :]
+    return signal, baseline_mean, r1, t1_values, indices
 
 
 def _save_stage_a_qc_figures(
@@ -1952,58 +1878,30 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     baseline_slice = slice(ss_start, ss_end)
 
     # AIF path to R1
-    sss = np.mean(stlv[baseline_slice, :], axis=0)
-    
-    # Filter out voxels with zero/near-zero baseline signal to prevent divide-by-zero
-    valid_baseline = sss > 1e-10
-    if not np.any(valid_baseline):
-        raise ValueError("All AIF voxels have zero baseline signal")
-    stlv = stlv[:, valid_baseline]
-    t1_lv = t1_lv[valid_baseline]
-    lvind = lvind[valid_baseline]
-    sss = sss[valid_baseline]
-    
-    sstar_lv = (1.0 - np.exp(-tr_sec / t1_lv)) / (1.0 - np.cos(np.deg2rad(fa_deg)) * np.exp(-tr_sec / t1_lv))
-    a = 1.0 - np.cos(np.deg2rad(fa_deg)) * sstar_lv[np.newaxis, :] * stlv / sss[np.newaxis, :]
-    b = 1.0 - sstar_lv[np.newaxis, :] * stlv / sss[np.newaxis, :]
-    ab_lv = a / b
-    ab_lv, t1_lv, lvind = _clean_ab(ab_lv, t1_lv, lvind, threshold_fraction=0.05)
-    if t1_lv.size == 0:
-        raise ValueError("All AIF voxels removed after AB cleaning")
-
-    r1_lv = (1.0 / tr_sec) * np.log(ab_lv)
-    r1_lv, t1_lv, lvind = _clean_r1(r1_lv, t1_lv, lvind, threshold_fraction=0.005)
-    if t1_lv.size == 0:
-        raise ValueError("All AIF voxels removed after R1 cleaning")
-
-    r1_lv = r1_lv + ((1.0 / t1_lv) - np.mean(r1_lv[baseline_slice, :], axis=0))[np.newaxis, :]
+    stlv, sss, r1_lv, t1_lv, lvind = _signal_to_r1(
+        stlv,
+        t1_lv,
+        lvind,
+        baseline_slice=baseline_slice,
+        tr_sec=tr_sec,
+        fa_deg=fa_deg,
+        ab_threshold=0.05,
+        r1_threshold=0.005,
+        label="AIF",
+    )
 
     # ROI path to R1
-    ss_tum = np.mean(sttum[baseline_slice, :], axis=0)
-    
-    # Filter out voxels with zero/near-zero baseline signal to prevent divide-by-zero
-    valid_baseline_tum = ss_tum > 1e-10
-    if not np.any(valid_baseline_tum):
-        raise ValueError("All ROI voxels have zero baseline signal")
-    sttum = sttum[:, valid_baseline_tum]
-    t1_tum = t1_tum[valid_baseline_tum]
-    tumind = tumind[valid_baseline_tum]
-    ss_tum = ss_tum[valid_baseline_tum]
-    
-    sstar_tum = (1.0 - np.exp(-tr_sec / t1_tum)) / (1.0 - np.cos(np.deg2rad(fa_deg)) * np.exp(-tr_sec / t1_tum))
-    a_tum = 1.0 - np.cos(np.deg2rad(fa_deg)) * sstar_tum[np.newaxis, :] * sttum / ss_tum[np.newaxis, :]
-    b_tum = 1.0 - sstar_tum[np.newaxis, :] * sttum / ss_tum[np.newaxis, :]
-    ab_tum = a_tum / b_tum
-    ab_tum, t1_tum, tumind = _clean_ab(ab_tum, t1_tum, tumind, threshold_fraction=0.7)
-    if t1_tum.size == 0:
-        raise ValueError("All ROI voxels removed after AB cleaning")
-
-    r1_toi = (1.0 / tr_sec) * np.log(ab_tum)
-    r1_toi, t1_tum, tumind = _clean_r1(r1_toi, t1_tum, tumind, threshold_fraction=0.7)
-    if t1_tum.size == 0:
-        raise ValueError("All ROI voxels removed after R1 cleaning")
-
-    r1_toi = r1_toi + ((1.0 / t1_tum) - np.mean(r1_toi[baseline_slice, :], axis=0))[np.newaxis, :]
+    sttum, ss_tum, r1_toi, t1_tum, tumind = _signal_to_r1(
+        sttum,
+        t1_tum,
+        tumind,
+        baseline_slice=baseline_slice,
+        tr_sec=tr_sec,
+        fa_deg=fa_deg,
+        ab_threshold=0.7,
+        r1_threshold=0.7,
+        label="ROI",
+    )
 
     blood_t1_source = "override" if blood_t1_override_sec is not None else "aif_t1_map"
     blood_t1_mean_sec = float(np.mean(t1_lv)) if t1_lv.size > 0 else None
@@ -3393,21 +3291,21 @@ def _stage_d_selected_models(config: DcePipelineConfig) -> Tuple[List[str], List
     return supported, skipped
 
 
-def _moving_average_1d(values: np.ndarray, window: int) -> np.ndarray:
-    if window <= 1:
-        return values.copy()
-    kernel = np.ones(int(window), dtype=np.float64) / float(window)
-    return np.convolve(values, kernel, mode="same")
-
-
 def _smooth_time_matrix(data: np.ndarray, mode: str, window: int) -> np.ndarray:
+    """Zero-padded ``mode="same"`` moving average down the time axis.
+
+    The per-column loop stays: the batched alternatives (`uniform_filter1d`'s
+    running sum, or `sliding_window_view @ kernel` dispatching to BLAS) both
+    reassociate the additions and so drift from the MATLAB reference.
+    """
     if mode == "none" or window <= 1:
         return np.asarray(data, dtype=np.float64)
 
     source = np.asarray(data, dtype=np.float64)
     smoothed = np.empty_like(source)
+    kernel = np.ones(int(window), dtype=np.float64) / float(window)
     for col in range(source.shape[1]):
-        smoothed[:, col] = _moving_average_1d(source[:, col], window)
+        smoothed[:, col] = np.convolve(source[:, col], kernel, mode="same")
     return smoothed
 
 
@@ -3442,6 +3340,50 @@ def _write_tsv_xls(path: Path, rows: List[List[Any]]) -> None:
     path.write_text("\n".join(lines) + "\n")
 
 
+def _save_map_volume(
+    config: DcePipelineConfig,
+    out_base: str,
+    volume: np.ndarray,
+    reference: Optional[Dict[str, Any]],
+) -> str:
+    """Write one scalar map as NIfTI in the reference geometry, falling back to .npy.
+
+    Shared by the parameter and QoF map writers so a header/affine fix lands in
+    one place instead of two.
+    """
+    if reference is not None:
+        try:
+            import nibabel as nib  # type: ignore
+
+            header = reference["header"].copy()
+            header.set_data_dtype(np.float32)
+            out_path = config.output_dir / f"{out_base}.nii.gz"
+            nib.save(nib.Nifti1Image(volume, reference["affine"], header), str(out_path))
+            return str(out_path)
+        except Exception:
+            pass
+
+    out_path = config.output_dir / f"{out_base}.npy"
+    np.save(out_path, volume)
+    return str(out_path)
+
+
+def _scatter_to_volume(
+    values: np.ndarray,
+    coords: Tuple[np.ndarray, ...],
+    spatial_shape: Tuple[int, int, int],
+    fill: float,
+) -> np.ndarray:
+    """Scatter per-voxel values back into a spatial volume, filling the rest with `fill`.
+
+    `fill` differs by caller on purpose -- parameter maps use 0.0, QoF maps NaN --
+    so it stays an explicit argument rather than a default.
+    """
+    volume = np.full(spatial_shape, fill, dtype=np.float32)
+    volume[coords] = np.asarray(values, dtype=np.float32)
+    return volume
+
+
 def _write_param_maps(
     config: DcePipelineConfig,
     rootname: str,
@@ -3450,39 +3392,24 @@ def _write_param_maps(
     fit_values: np.ndarray,
     tumind: np.ndarray,
     spatial_shape: Optional[Tuple[int, int, int]],
+    reference: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, str]:
     write_maps = bool(_stage_override(config, "write_param_maps", True))
     if not write_maps or spatial_shape is None:
         return {}
 
-    reference = _try_load_reference_nifti(config)
+    if reference is None:
+        reference = _try_load_reference_nifti(config)
     paths: Dict[str, str] = {}
     coords = np.unravel_index(tumind.astype(np.int64), spatial_shape, order="F")
 
     for idx, param in enumerate(param_names):
         if idx >= fit_values.shape[1]:
             break
-        volume = np.zeros(spatial_shape, dtype=np.float32)
-        volume[coords] = fit_values[:, idx].astype(np.float32)
-
-        out_base = f"{rootname}_{model_name}_fit_{param}"
-        if reference is not None:
-            try:
-                import nibabel as nib  # type: ignore
-
-                header = reference["header"].copy()
-                header.set_data_dtype(np.float32)
-                out_path = config.output_dir / f"{out_base}.nii.gz"
-                nii = nib.Nifti1Image(volume, reference["affine"], header)
-                nib.save(nii, str(out_path))
-                paths[param] = str(out_path)
-                continue
-            except Exception:
-                pass
-
-        out_path = config.output_dir / f"{out_base}.npy"
-        np.save(out_path, volume)
-        paths[param] = str(out_path)
+        volume = _scatter_to_volume(fit_values[:, idx], coords, spatial_shape, 0.0)
+        paths[param] = _save_map_volume(
+            config, f"{rootname}_{model_name}_fit_{param}", volume, reference
+        )
 
     return paths
 
@@ -3498,6 +3425,7 @@ def _write_qof_maps(
     timer: np.ndarray,
     start_injection_min: float,
     end_injection_min: Optional[float],
+    reference: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, str]:
     """Write per-voxel quality-of-fit maps (σ, reduced χ², reliable mask) next to the param maps.
 
@@ -3516,13 +3444,9 @@ def _write_qof_maps(
         n_obs = int(ct_arr.shape[0])
         dt = float(timer[1] - timer[0]) if np.asarray(timer).size > 1 else 0.0
         t0 = float(timer[0]) if np.asarray(timer).size else 0.0
-        window = None
-        if dt > 0:
-            onset = (float(start_injection_min) - t0) / dt
-            duration = 0.0
-            if end_injection_min is not None:
-                duration = max(0.0, (float(end_injection_min) - float(start_injection_min)) / dt)
-            window = dce_qof.bolus_exclude_window(onset, duration, n_obs)
+        window = dce_qof.bolus_window_from_timing(
+            start_injection_min, end_injection_min, dt, n_obs, t0
+        )
 
         chi2_max = _safe_float(_stage_override(config, "qof_chi2_max", 6.0), 6.0)
         res = dce_qof.compute_qof_arrays(
@@ -3534,7 +3458,8 @@ def _write_qof_maps(
         # break the fit outputs.
         return {}
 
-    reference = _try_load_reference_nifti(config)
+    if reference is None:
+        reference = _try_load_reference_nifti(config)
     coords = np.unravel_index(np.asarray(tumind, dtype=np.int64), spatial_shape, order="F")
     layers = {
         "qof_sigma": res["sigma"],
@@ -3543,24 +3468,10 @@ def _write_qof_maps(
     }
     paths: Dict[str, str] = {}
     for name, values in layers.items():
-        volume = np.full(spatial_shape, np.nan, dtype=np.float32)
-        volume[coords] = np.asarray(values, dtype=np.float32)
-        out_base = f"{rootname}_{model_name}_fit_{name}"
-        if reference is not None:
-            try:
-                import nibabel as nib  # type: ignore
-
-                header = reference["header"].copy()
-                header.set_data_dtype(np.float32)
-                out_path = config.output_dir / f"{out_base}.nii.gz"
-                nib.save(nib.Nifti1Image(volume, reference["affine"], header), str(out_path))
-                paths[name] = str(out_path)
-                continue
-            except Exception:
-                pass
-        out_path = config.output_dir / f"{out_base}.npy"
-        np.save(out_path, volume)
-        paths[name] = str(out_path)
+        volume = _scatter_to_volume(values, coords, spatial_shape, np.nan)
+        paths[name] = _save_map_volume(
+            config, f"{rootname}_{model_name}_fit_{name}", volume, reference
+        )
     return paths
 
 
@@ -3587,14 +3498,13 @@ def _fit_fxr_curve(
         raise ValueError(f"Unsupported model '{model_name}'")
     if r1o is None:
         raise ValueError("FXR fitting requires R1 baseline values")
-    ct_list = [float(v) for v in ct]
-    cp_list = [float(v) for v in cp]
-    timer_list = [float(v) for v in timer]
+    # `model_fxr_fit` takes Iterable[float] and rebuilds its own float lists, so
+    # converting here just does the work twice -- once per voxel.
     return np.asarray(
         model_fxr_fit(
-            ct_list,
-            cp_list,
-            timer_list,
+            ct,
+            cp,
+            timer,
             float(r1o),
             float(r1o),
             float(relaxivity),
@@ -3788,16 +3698,6 @@ def _write_postfit_arrays(
     return str(out_path)
 
 
-def _load_fit_module_for_acceleration(acceleration_backend: str) -> Any:
-    if acceleration_backend == "cpufit_cpu":
-        import pycpufit.cpufit as fit_module  # type: ignore
-
-        return fit_module
-    import pygpufit.gpufit as fit_module  # type: ignore
-
-    return fit_module
-
-
 @lru_cache(maxsize=1)
 def _cpufit_import_available() -> bool:
     try:
@@ -3914,13 +3814,17 @@ def _fit_auc_matrix(
     auc_cp = float(np.trapz(cp, t))
     auc_sp = float(np.trapz(stlv, t))
 
+    # Integrate every voxel at once. The transpose must be made contiguous first:
+    # reducing along the fast axis keeps numpy's pairwise summation order, so this
+    # is bit-for-bit identical to the per-voxel loop, whereas `axis=0` is not.
+    auc_c = np.trapz(np.ascontiguousarray(ct_use.T), t, axis=1)
+    auc_s = np.trapz(np.ascontiguousarray(sttum_use.T), t, axis=1)
+
     out = np.zeros((ct_use.shape[1], 4), dtype=np.float64)
-    for i in range(ct_use.shape[1]):
-        auc_c = float(np.trapz(ct_use[:, i], t))
-        auc_s = float(np.trapz(sttum_use[:, i], t))
-        nauc_c = auc_c / auc_cp if abs(auc_cp) > 1e-12 else float("nan")
-        nauc_s = auc_s / auc_sp if abs(auc_sp) > 1e-12 else float("nan")
-        out[i, :] = [auc_c, auc_s, nauc_c, nauc_s]
+    out[:, 0] = auc_c
+    out[:, 1] = auc_s
+    out[:, 2] = auc_c / auc_cp if abs(auc_cp) > 1e-12 else np.nan
+    out[:, 3] = auc_s / auc_sp if abs(auc_sp) > 1e-12 else np.nan
     return out
 
 
@@ -3958,6 +3862,18 @@ def _load_roi_columns(
         roi_columns.append(np.asarray(tum_pos, dtype=np.int64))
 
     return roi_paths, roi_names, roi_columns
+
+
+def _log_backend_fallback(
+    model_name: str, backend: str, next_candidate: Optional[str], reason: str
+) -> None:
+    """Report why a Stage-D backend was abandoned and what happens next."""
+    tail = (
+        f"trying fallback backend '{next_candidate}'."
+        if next_candidate is not None
+        else "no fallback remains."
+    )
+    print(f"[DCE] Stage-D {model_name}: backend '{backend}' {reason}; {tail}", flush=True)
 
 
 def _fit_stage_d_model(
@@ -4006,38 +3922,23 @@ def _fit_stage_d_model(
                 if result is not None:
                     if _accelerated_output_has_usable_primary_params(model_name, result):
                         return result
-                    if next_candidate is not None:
-                        print(
-                            f"[DCE] Stage-D {model_name}: backend '{backend_candidate}' produced non-finite "
-                            f"core parameter output; trying fallback backend '{next_candidate}'.",
-                            flush=True,
-                        )
-                    else:
-                        print(
-                            f"[DCE] Stage-D {model_name}: backend '{backend_candidate}' produced non-finite "
-                            "core parameter output; no fallback remains.",
-                            flush=True,
-                        )
+                    _log_backend_fallback(
+                        model_name,
+                        backend_candidate,
+                        next_candidate,
+                        "produced non-finite core parameter output",
+                    )
                     continue
+                # Only reported when a fallback exists, matching the original: a
+                # bare "no result" on the last candidate stays silent.
                 if next_candidate is not None:
-                    print(
-                        f"[DCE] Stage-D {model_name}: backend '{backend_candidate}' returned no result; "
-                        f"trying fallback backend '{next_candidate}'.",
-                        flush=True,
+                    _log_backend_fallback(
+                        model_name, backend_candidate, next_candidate, "returned no result"
                     )
             except Exception as exc:
-                if next_candidate is not None:
-                    print(
-                        f"[DCE] Stage-D {model_name}: backend '{backend_candidate}' unavailable "
-                        f"({exc}); trying fallback backend '{next_candidate}'.",
-                        flush=True,
-                    )
-                else:
-                    print(
-                        f"[DCE] Stage-D {model_name}: backend '{backend_candidate}' unavailable ({exc}); "
-                        "no fallback remains.",
-                        flush=True,
-                    )
+                _log_backend_fallback(
+                    model_name, backend_candidate, next_candidate, f"unavailable ({exc})"
+                )
         return np.full((ct.shape[1], row_len), np.nan, dtype=np.float64)
 
     # fxr (and any other model outside the shared batched architecture, e.g. because its
@@ -4209,6 +4110,7 @@ def _run_stage_d_real(
                 fit_values=voxel_results,
                 tumind=tumind,
                 spatial_shape=spatial_shape,
+                reference=ref_meta,
             )
             if fit_voxels
             else {}
@@ -4226,6 +4128,7 @@ def _run_stage_d_real(
                 timer=timer,
                 start_injection_min=start_injection_min,
                 end_injection_min=stage_b.get("end_injection_min"),
+                reference=ref_meta,
             )
             if fit_voxels
             else {}
@@ -4518,6 +4421,27 @@ def _emit_stage_artifacts(
             )
 
 
+def _call_stage(func: Callable[..., Any], *args: Any, event_callback: Any) -> Any:
+    """Invoke a stage runner, passing `event_callback` only if it accepts one.
+
+    Probing the signature beats calling and catching TypeError: that idiom
+    cannot tell a missing kwarg from a TypeError raised inside the stage, so a
+    genuine failure deep in Stage A would silently re-run the entire stage --
+    every NIfTI load, every voxel clean, every QC figure -- before failing again
+    with a traceback pointing at the retry.
+    """
+    try:
+        params = inspect.signature(func).parameters
+    except (TypeError, ValueError):  # builtins and C callables have no signature
+        return func(*args)
+    accepts = "event_callback" in params or any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+    if accepts:
+        return func(*args, event_callback=event_callback)
+    return func(*args)
+
+
 def run_dce_pipeline(
     config: DcePipelineConfig,
     runner: Optional[DceStageRunner] = None,
@@ -4546,10 +4470,7 @@ def run_dce_pipeline(
     current_stage = "A"
     try:
         _emit_progress(event_callback, "stage_start", stage="A")
-        try:
-            stage_a = active_runner.run_a(config, event_callback=event_callback)
-        except TypeError:
-            stage_a = active_runner.run_a(config)  # type: ignore[misc]
+        stage_a = _call_stage(active_runner.run_a, config, event_callback=event_callback)
         if config.checkpoint_dir:
             checkpoint_a = _write_stage_checkpoint(config.checkpoint_dir, "A", stage_a)
             _emit_progress(event_callback, "checkpoint_written", stage="A", path=str(checkpoint_a))
@@ -4565,10 +4486,7 @@ def run_dce_pipeline(
 
         current_stage = "B"
         _emit_progress(event_callback, "stage_start", stage="B")
-        try:
-            stage_b = active_runner.run_b(config, stage_a, event_callback=event_callback)
-        except TypeError:
-            stage_b = active_runner.run_b(config, stage_a)  # type: ignore[misc]
+        stage_b = _call_stage(active_runner.run_b, config, stage_a, event_callback=event_callback)
         if config.checkpoint_dir:
             checkpoint_b = _write_stage_checkpoint(config.checkpoint_dir, "B", stage_b)
             _emit_progress(event_callback, "checkpoint_written", stage="B", path=str(checkpoint_b))
@@ -4584,10 +4502,9 @@ def run_dce_pipeline(
 
         current_stage = "D"
         _emit_progress(event_callback, "stage_start", stage="D")
-        try:
-            stage_d = active_runner.run_d(config, stage_a, stage_b, event_callback=event_callback)
-        except TypeError:
-            stage_d = active_runner.run_d(config, stage_a, stage_b)  # type: ignore[misc]
+        stage_d = _call_stage(
+            active_runner.run_d, config, stage_a, stage_b, event_callback=event_callback
+        )
         if config.checkpoint_dir:
             checkpoint_d = _write_stage_checkpoint(config.checkpoint_dir, "D", stage_d)
             _emit_progress(event_callback, "checkpoint_written", stage="D", path=str(checkpoint_d))

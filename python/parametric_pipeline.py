@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from functools import lru_cache
 import json
 import math
 from pathlib import Path
@@ -12,10 +11,13 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from accel_backend import (
+    ALLOWED_BACKENDS,
+    load_fit_module_for_acceleration as _load_fit_module_for_acceleration,
+    probe_acceleration_backend,
+    resolve_backend_selection,
+)
 from parametric_models import t1_fa_nonlinear_fit, t1_fa_two_point_fit
-
-
-ALLOWED_BACKENDS = {"auto", "cpu", "gpufit"}
 
 
 def _json_default(value: Any) -> Any:
@@ -312,132 +314,11 @@ def _resolve_b1_scale_map(config: ParametricT1Config, spatial_shape: Tuple[int, 
     return b1_map, b1_path
 
 
-@lru_cache(maxsize=1)
-def probe_acceleration_backend() -> Dict[str, Any]:
-    """Detect available acceleration backend in priority order."""
-    pygpufit_module: Any = None
-    pycpufit_module: Any = None
-    pygpufit_error: Optional[str] = None
-    pycpufit_error: Optional[str] = None
-    cuda_available = False
-
-    try:
-        import pygpufit.gpufit as gf  # type: ignore
-
-        pygpufit_module = gf
-    except Exception as exc:
-        pygpufit_error = str(exc)
-
-    if pygpufit_module is not None:
-        try:
-            cuda_available = bool(pygpufit_module.cuda_available())
-        except Exception:
-            cuda_available = False
-
-    try:
-        import pycpufit.cpufit as cf  # type: ignore
-
-        pycpufit_module = cf
-    except Exception as exc:
-        pycpufit_error = str(exc)
-
-    if cuda_available:
-        return {
-            "backend": "gpufit_cuda",
-            "reason": "pygpufit imported and CUDA is available",
-            "cuda_available": True,
-            "pygpufit_imported": pygpufit_module is not None,
-            "pycpufit_imported": pycpufit_module is not None,
-            "pygpufit_error": pygpufit_error,
-            "pycpufit_error": pycpufit_error,
-        }
-
-    if pycpufit_module is not None:
-        return {
-            "backend": "cpufit_cpu",
-            "reason": "using pycpufit CPU backend",
-            "cuda_available": cuda_available,
-            "pygpufit_imported": pygpufit_module is not None,
-            "pycpufit_imported": True,
-            "pygpufit_error": pygpufit_error,
-            "pycpufit_error": pycpufit_error,
-        }
-
-    if pygpufit_module is not None:
-        return {
-            "backend": "gpufit_cpu_fallback",
-            "reason": "pygpufit imported without CUDA and pycpufit unavailable; using pygpufit fallback path",
-            "cuda_available": cuda_available,
-            "pygpufit_imported": True,
-            "pycpufit_imported": False,
-            "pygpufit_error": pygpufit_error,
-            "pycpufit_error": pycpufit_error,
-        }
-
-    return {
-        "backend": "none",
-        "reason": "no pygpufit/pycpufit backend detected",
-        "cuda_available": False,
-        "pygpufit_imported": False,
-        "pycpufit_imported": False,
-        "pygpufit_error": pygpufit_error,
-        "pycpufit_error": pycpufit_error,
-    }
-
-
 def _resolve_backend_selection(requested_backend: str) -> Dict[str, str]:
-    backend = requested_backend.strip().lower()
-    if backend not in ALLOWED_BACKENDS:
-        raise ValueError(f"Unsupported backend '{requested_backend}'. Allowed: {sorted(ALLOWED_BACKENDS)}")
-
-    if backend == "cpu":
-        return {
-            "requested_backend": backend,
-            "selected_backend": "cpu",
-            "acceleration_backend": "none",
-            "reason": "backend=cpu forces pure CPU fitting path",
-        }
-
-    probe = probe_acceleration_backend()
-    probe_backend = str(probe.get("backend", "none"))
-    probe_reason = str(probe.get("reason", ""))
-    pygpufit_imported = bool(probe.get("pygpufit_imported", False))
-
-    if backend == "gpufit":
-        if not pygpufit_imported:
-            raise RuntimeError("GPUfit backend requested but pygpufit could not be imported")
-        acceleration_backend = probe_backend if probe_backend != "none" else "gpufit_cpu_fallback"
-        return {
-            "requested_backend": backend,
-            "selected_backend": "gpufit",
-            "acceleration_backend": acceleration_backend,
-            "reason": f"backend=gpufit selected acceleration backend '{acceleration_backend}' ({probe_reason})",
-        }
-
-    if probe_backend in {"gpufit_cuda", "cpufit_cpu", "gpufit_cpu_fallback"}:
-        return {
-            "requested_backend": backend,
-            "selected_backend": "gpufit",
-            "acceleration_backend": probe_backend,
-            "reason": f"backend=auto selected acceleration backend '{probe_backend}' ({probe_reason})",
-        }
-
-    return {
-        "requested_backend": backend,
-        "selected_backend": "cpu",
-        "acceleration_backend": "none",
-        "reason": "backend=auto fell back to pure CPU fitting path",
-    }
-
-
-def _load_fit_module_for_acceleration(acceleration_backend: str) -> Any:
-    if acceleration_backend == "cpufit_cpu":
-        import pycpufit.cpufit as fit_module  # type: ignore
-
-        return fit_module
-    import pygpufit.gpufit as fit_module  # type: ignore
-
-    return fit_module
+    # The probe is passed as a thunk rather than called here so that it resolves
+    # through *this* module's namespace -- tests patch
+    # `parametric_pipeline.probe_acceleration_backend` and expect selection to see it.
+    return resolve_backend_selection(requested_backend, lambda: probe_acceleration_backend())
 
 
 def _apply_odd_echo_selection(vfa_data: np.ndarray, flip_angles_deg: np.ndarray) -> Tuple[np.ndarray, np.ndarray, List[int]]:
