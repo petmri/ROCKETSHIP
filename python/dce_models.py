@@ -288,15 +288,61 @@ def _exp_weighted_cumulative_trapz_batch(
     return out, overflowed
 
 
-def _resample_for_osipi_style_fit(
-    ct_vec: List[float],
-    cp_vec: List[float],
-    t_min_vec: List[float],
-) -> Optional[tuple[np.ndarray, np.ndarray, np.ndarray]]:
-    """Quadratic resampling used by OSIPI LEK reference implementations.
+class OsipiResampleGrid:
+    """The dense resample grid OSIPI LEK reference implementations fit 2CXM on.
+
+    Those implementations quadratically resample to 0.1 s before fitting, so a
+    five-minute study becomes a ~3000-point curve. Everything about that grid
+    except the tissue curve -- the sample times, the resampled AIF, and the
+    spline solve behind it -- depends only on cp and the timer, which are the
+    same for every voxel and every multistart candidate. Building it once and
+    reusing it takes the AIF spline out of the per-voxel path entirely; only
+    `resample_ct` still runs per voxel, and its output is a single ~3000-point
+    vector rather than a whole (n_interp, n_voxels) matrix, which for a
+    full-ROI Stage-D batch would be hundreds of megabytes.
+
+    Holds only the arrays it needs, never the caller's cp/ct/settings scope.
+    """
+
+    __slots__ = ("t_sample", "t_interp", "cp_interp", "n_samples")
+
+    def __init__(
+        self,
+        t_sample: np.ndarray,
+        t_interp: np.ndarray,
+        cp_interp: np.ndarray,
+        n_samples: int,
+    ) -> None:
+        self.t_sample = t_sample
+        self.t_interp = t_interp
+        self.cp_interp = cp_interp
+        # Count of *acquired* samples, kept for the CI degrees-of-freedom
+        # rescale in `_fit_2cxm_osipi_canonical` -- see the note there.
+        self.n_samples = n_samples
+
+    def resample_ct(self, ct_vec: Iterable[float]) -> np.ndarray:
+        """Resample one voxel's tissue curve onto the grid."""
+        ct_arr = np.asarray(ct_vec, dtype=np.float64)
+        ct_interp_fn = interp1d(
+            self.t_sample,
+            ct_arr,
+            kind="quadratic",
+            bounds_error=False,
+            fill_value=(0.0, float(ct_arr[-1])),
+        )
+        return np.asarray(ct_interp_fn(self.t_interp), dtype=np.float64)
+
+
+def build_osipi_resample_grid(
+    cp_vec: Iterable[float], t_min_vec: List[float]
+) -> Optional[OsipiResampleGrid]:
+    """Build the OSIPI resample grid, or None if the timer can't support one.
+
+    Rejection depends only on the timer (fewer than three samples, non-
+    increasing, or shorter than one interpolation step), so a caller that gets
+    None here knows no voxel in the batch is fittable.
 
     Args:
-      ct_vec: Tissue concentration samples.
       cp_vec: Plasma concentration samples.
       t_min_vec: Time samples in minutes.
     """
@@ -305,7 +351,6 @@ def _resample_for_osipi_style_fit(
 
     t_arr = np.asarray(t_min_vec, dtype=np.float64)
     cp_arr = np.asarray(cp_vec, dtype=np.float64)
-    ct_arr = np.asarray(ct_vec, dtype=np.float64)
 
     t_shift = t_arr - float(t_arr[0])
     dt = np.diff(t_shift)
@@ -326,16 +371,8 @@ def _resample_for_osipi_style_fit(
         bounds_error=False,
         fill_value=(0.0, float(cp_arr[-1])),
     )
-    ct_interp_fn = interp1d(
-        t_shift,
-        ct_arr,
-        kind="quadratic",
-        bounds_error=False,
-        fill_value=(0.0, float(ct_arr[-1])),
-    )
-    return t_interp, np.asarray(cp_interp_fn(t_interp), dtype=np.float64), np.asarray(
-        ct_interp_fn(t_interp), dtype=np.float64
-    )
+    cp_interp = np.asarray(cp_interp_fn(t_interp), dtype=np.float64)
+    return OsipiResampleGrid(t_shift, t_interp, cp_interp, len(t_min_vec))
 
 
 def _two_cxm_curve_osipi(
@@ -394,21 +431,23 @@ def _e_space_bounds(ktrans_lo: float, ktrans_hi: float, fp_lo: float, fp_hi: flo
 
 
 def _fit_2cxm_osipi_canonical(
-    ct_vec: List[float],
-    cp_vec: List[float],
-    t_min_vec: List[float],
+    ct_interp: np.ndarray,
+    grid: OsipiResampleGrid,
     settings: Optional[Dict[str, float]] = None,
 ) -> Optional[List[float]]:
     """Return OSIPI LEK 2CXM fit in canonical units.
+
+    Takes the tissue curve already resampled onto `grid` (see
+    `OsipiResampleGrid.resample_ct`) rather than raw samples, so a caller
+    fitting many candidates for one voxel resamples once, and a caller
+    fitting many voxels reuses one grid.
 
     Canonical units:
       - timer: minutes
       - ktrans/fp: per-minute
     """
-    sample = _resample_for_osipi_style_fit(ct_vec, cp_vec, t_min_vec)
-    if sample is None:
-        return None
-    t_interp, cp_interp, ct_interp = sample
+    t_interp = grid.t_interp
+    cp_interp = grid.cp_interp
 
     settings = settings or {}
     vp0 = float(settings.get("initial_value_vp", 0.01))
@@ -466,7 +505,7 @@ def _fit_2cxm_osipi_canonical(
     # pcov to the real dof: cov_real = pcov * dof_interp / dof_real.
     cov = np.asarray(pcov, dtype=float)
     dof_interp = int(len(ct_interp)) - 4
-    dof = int(len(t_min_vec)) - 4
+    dof = int(grid.n_samples) - 4
     if dof > 0 and dof_interp > 0:
         cov = cov * (float(dof_interp) / float(dof))
     else:
@@ -509,6 +548,78 @@ def _fit_2cxm_osipi_canonical(
     ]
 
 
+class ForwardInputs:
+    """Pre-coerced cp/timer plus the integrals that don't vary with fit parameters.
+
+    `cp` and the timer are fixed for an entire fit, so coercing them to float
+    lists -- and integrating cp over the timer -- is loop-invariant across every
+    residual evaluation, every candidate start, and every voxel sharing an AIF.
+    Runners build one of these per voxel set and pass it to the `_*_curve`
+    forward models; the public `model_*_cfit` functions build a throwaway one so
+    their standalone signatures and validation are unchanged.
+
+    Holds only the two vectors it needs rather than closing over the caller's
+    scope, so it never pins a voxel-sized array alive.
+
+    cp is kept in both forms on purpose: the O(n) recurrences below index it as
+    a list (faster than element access on an ndarray), while the forward models
+    combine their results with it as an array.
+
+    `cp` and `t` must already be lists of Python floats -- callers coerce.
+    """
+
+    __slots__ = ("cp", "t", "n", "cp_arr", "_cum")
+
+    def __init__(self, cp: List[float], t: List[float]) -> None:
+        self.cp = cp
+        self.t = t
+        self.n = len(t)
+        self.cp_arr = np.asarray(cp, dtype=np.float64)
+        self._cum: Optional[np.ndarray] = None
+
+    @property
+    def cum(self) -> np.ndarray:
+        """Cumulative trapezoid of cp over t, computed at most once per instance."""
+        if self._cum is None:
+            self._cum = np.asarray(_cumulative_trapz_values(self.cp, self.t), dtype=np.float64)
+        return self._cum
+
+
+def _coerce_forward_inputs(cp: Iterable[float], t: Iterable[float], t_name: str) -> ForwardInputs:
+    """Build a `ForwardInputs` from arbitrary iterables, with the public length check."""
+    cp_vec = [float(v) for v in cp]
+    t_vec = [float(v) for v in t]
+    if len(cp_vec) != len(t_vec):
+        raise ValueError(f"cp and {t_name} lengths differ: {len(cp_vec)} vs {len(t_vec)}")
+    return ForwardInputs(cp_vec, t_vec)
+
+
+def _empty_curve() -> np.ndarray:
+    """Zero-length curve, returned fresh so callers may write into the result."""
+    return np.zeros(0, dtype=np.float64)
+
+
+# The `_*_curve` forward models below return float64 ndarrays, not lists: their
+# only hot caller is a `least_squares`/`curve_fit` residual, which needs an
+# array and would otherwise re-convert element by element on every evaluation.
+# The sequential O(n) recurrences they build on stay in pure Python -- numpy
+# would reassociate them -- so only the final elementwise combination is
+# vectorized, which is bit-for-bit the same arithmetic in the same order. The
+# public `model_*_cfit` wrappers hand back lists, as the MATLAB ports they are
+# documented against do.
+
+
+def _tofts_curve(ktrans: float, ve: float, fi: ForwardInputs) -> np.ndarray:
+    if fi.n == 0:
+        return _empty_curve()
+    if ve == 0:
+        raise ValueError("ve must be non-zero")
+
+    kep = float(ktrans) / float(ve)
+    conv = _exp_weighted_cumulative_trapz_values(fi.cp, fi.t, kep)
+    return float(ktrans) * np.asarray(conv, dtype=np.float64)
+
+
 def model_tofts_cfit(ktrans: float, ve: float, cp: Iterable[float], t1: Iterable[float]) -> List[float]:
     """Port of `dce/model_tofts_cfit.m`.
 
@@ -525,19 +636,14 @@ def model_tofts_cfit(ktrans: float, ve: float, cp: Iterable[float], t1: Iterable
     Returns:
       Ct vector as a Python list (same length as inputs).
     """
-    cp_vec = [float(v) for v in cp]
-    t_vec = [float(v) for v in t1]
+    return _tofts_curve(ktrans, ve, _coerce_forward_inputs(cp, t1, "t1")).tolist()
 
-    if len(cp_vec) != len(t_vec):
-        raise ValueError(f"cp and t1 lengths differ: {len(cp_vec)} vs {len(t_vec)}")
-    if len(t_vec) == 0:
-        return []
-    if ve == 0:
-        raise ValueError("ve must be non-zero")
 
-    kep = float(ktrans) / float(ve)
-    conv = _exp_weighted_cumulative_trapz_values(cp_vec, t_vec, kep)
-    return [float(ktrans) * conv[i] for i in range(len(conv))]
+def _patlak_curve(ktrans: float, vp: float, fi: ForwardInputs) -> np.ndarray:
+    if fi.n == 0:
+        return _empty_curve()
+
+    return (float(ktrans) * fi.cum) + (float(vp) * fi.cp_arr)
 
 
 def model_patlak_cfit(ktrans: float, vp: float, cp: Iterable[float], time: Iterable[float]) -> List[float]:
@@ -556,27 +662,27 @@ def model_patlak_cfit(ktrans: float, vp: float, cp: Iterable[float], time: Itera
     Returns:
       Ct vector as a Python list (same length as inputs).
     """
-    cp_vec = [float(v) for v in cp]
-    t_vec = [float(v) for v in time]
+    return _patlak_curve(ktrans, vp, _coerce_forward_inputs(cp, time, "time")).tolist()
 
-    if len(cp_vec) != len(t_vec):
-        raise ValueError(f"cp and time lengths differ: {len(cp_vec)} vs {len(t_vec)}")
-    if len(t_vec) == 0:
-        return []
 
-    cum = _cumulative_trapz_values(cp_vec, t_vec)
-    return [(float(ktrans) * cum[i]) + (float(vp) * cp_vec[i]) for i in range(len(t_vec))]
+def _vp_curve(vp: float, fi: ForwardInputs) -> np.ndarray:
+    return vp * fi.cp_arr
 
 
 def model_vp_cfit(vp: float, cp: Iterable[float], time: Iterable[float]) -> List[float]:
     """Port of `dce/model_vp_cfit.m`."""
-    cp_vec = [float(v) for v in cp]
-    t_vec = [float(v) for v in time]
+    return _vp_curve(vp, _coerce_forward_inputs(cp, time, "time")).tolist()
 
-    if len(cp_vec) != len(t_vec):
-        raise ValueError(f"cp and time lengths differ: {len(cp_vec)} vs {len(t_vec)}")
 
-    return [vp * cp_vec[i] for i in range(len(t_vec))]
+def _tissue_uptake_curve(ktrans: float, fp: float, tp: float, fi: ForwardInputs) -> np.ndarray:
+    if fi.n == 0:
+        return _empty_curve()
+    if tp == 0:
+        raise ValueError("tp must be non-zero")
+
+    weighted = _exp_weighted_cumulative_trapz_values(fi.cp, fi.t, 1.0 / float(tp))
+    scale_exp = float(fp) - float(ktrans)
+    return (float(ktrans) * fi.cum) + (scale_exp * np.asarray(weighted, dtype=np.float64))
 
 
 def model_tissue_uptake_cfit(
@@ -587,38 +693,15 @@ def model_tissue_uptake_cfit(
     t: Iterable[float],
 ) -> List[float]:
     """Port of `dce/model_tissue_uptake_cfit.m`."""
-    cp_vec = [float(v) for v in cp]
-    t_vec = [float(v) for v in t]
-
-    if len(cp_vec) != len(t_vec):
-        raise ValueError(f"cp and t lengths differ: {len(cp_vec)} vs {len(t_vec)}")
-    if len(t_vec) == 0:
-        return []
-    if tp == 0:
-        raise ValueError("tp must be non-zero")
-
-    cum = _cumulative_trapz_values(cp_vec, t_vec)
-    weighted = _exp_weighted_cumulative_trapz_values(cp_vec, t_vec, 1.0 / float(tp))
-    scale_exp = float(fp) - float(ktrans)
-    return [float(ktrans) * cum[i] + (scale_exp * weighted[i]) for i in range(len(t_vec))]
+    return _tissue_uptake_curve(ktrans, fp, tp, _coerce_forward_inputs(cp, t, "t")).tolist()
 
 
-def model_2cxm_cfit(
-    ktrans: float,
-    ve: float,
-    vp: float,
-    fp: float,
-    cp: Iterable[float],
-    t1: Iterable[float],
-) -> List[float]:
-    """Port of `dce/model_2cxm_cfit.m`."""
-    cp_vec = [float(v) for v in cp]
-    t_vec = [float(v) for v in t1]
+def _2cxm_curve(ktrans: float, ve: float, vp: float, fp: float, fi: ForwardInputs) -> np.ndarray:
+    cp_vec = fi.cp
+    t_vec = fi.t
 
-    if len(cp_vec) != len(t_vec):
-        raise ValueError(f"cp and t1 lengths differ: {len(cp_vec)} vs {len(t_vec)}")
-    if len(t_vec) == 0:
-        return []
+    if fi.n == 0:
+        return _empty_curve()
     if vp + ve == 0:
         raise ValueError("vp + ve must be non-zero")
 
@@ -656,13 +739,67 @@ def model_2cxm_cfit(
     conv_plus = _exp_weighted_cumulative_trapz_values(cp_vec, t_vec, float(k_plus))
     conv_minus = _exp_weighted_cumulative_trapz_values(cp_vec, t_vec, float(k_minus))
 
-    ct = [0.0] * len(t_vec)
-    for i in range(len(t_vec)):
-        cti = (float(f_plus) * conv_plus[i]) + (float(f_minus) * conv_minus[i])
-        if not math.isfinite(cti):
-            cti = 0.0
-        ct[i] = cti
+    ct = (float(f_plus) * np.asarray(conv_plus, dtype=np.float64)) + (
+        float(f_minus) * np.asarray(conv_minus, dtype=np.float64)
+    )
+    # Overflow in the exponentials can leave inf/nan; those samples read as zero.
+    ct[~np.isfinite(ct)] = 0.0
     return ct
+
+
+def model_2cxm_cfit(
+    ktrans: float,
+    ve: float,
+    vp: float,
+    fp: float,
+    cp: Iterable[float],
+    t1: Iterable[float],
+) -> List[float]:
+    """Port of `dce/model_2cxm_cfit.m`."""
+    return _2cxm_curve(ktrans, ve, vp, fp, _coerce_forward_inputs(cp, t1, "t1")).tolist()
+
+
+def _fxr_curve(
+    ktrans: float,
+    ve: float,
+    tau: float,
+    fi: ForwardInputs,
+    r1o: float,
+    r1i: float,
+    r1: float,
+    fw: float,
+) -> np.ndarray:
+    cp_vec = fi.cp
+    t_vec = fi.t
+
+    if fi.n == 0:
+        return _empty_curve()
+    if ve == 0:
+        raise ValueError("ve must be non-zero")
+    if fw == 0:
+        raise ValueError("fw must be non-zero")
+    if tau <= 0:
+        raise ValueError("tau must be positive")
+
+    po = ve / fw
+    if po == 0:
+        raise ValueError("ve/fw must be non-zero")
+
+    conv = _exp_weighted_cumulative_trapz_values(cp_vec, t_vec, float(ktrans) / float(ve))
+    ct = float(ktrans) * np.asarray(conv, dtype=np.float64)
+
+    xx = (r1o - r1i + (1.0 / tau)) / po
+    with np.errstate(over="ignore", invalid="ignore"):
+        inner = (2.0 / tau) - (r1 * ct) - xx
+        yy = (inner * inner) + (4.0 * (1.0 - po) / (tau * tau * po))
+    # `x ** 2` on a Python float raises OverflowError when the square is not
+    # representable, and `model_fxr_fit`'s residual leans on that to bail out of
+    # a runaway trial step. numpy quietly yields inf instead, so squaring a
+    # finite value into infinity is re-raised here to keep that control flow.
+    if np.any(np.isinf(yy) & np.isfinite(inner)):
+        raise OverflowError("fxr: squared term is too large")
+    np.maximum(yy, 0.0, out=yy)
+    return 0.5 * ((2.0 * r1i) + (r1 * ct) + xx - np.sqrt(yy))
 
 
 def model_fxr_cfit(
@@ -677,36 +814,19 @@ def model_fxr_cfit(
     fw: float,
 ) -> List[float]:
     """Port of `dce/model_fxr_cfit.m`."""
-    cp_vec = [float(v) for v in cp]
-    t_vec = [float(v) for v in t1]
+    return _fxr_curve(
+        ktrans, ve, tau, _coerce_forward_inputs(cp, t1, "t1"), r1o, r1i, r1, fw
+    ).tolist()
 
-    if len(cp_vec) != len(t_vec):
-        raise ValueError(f"cp and t1 lengths differ: {len(cp_vec)} vs {len(t_vec)}")
-    if len(t_vec) == 0:
-        return []
+
+def _extended_tofts_curve(ktrans: float, ve: float, vp: float, fi: ForwardInputs) -> np.ndarray:
+    if fi.n == 0:
+        return _empty_curve()
     if ve == 0:
         raise ValueError("ve must be non-zero")
-    if fw == 0:
-        raise ValueError("fw must be non-zero")
-    if tau <= 0:
-        raise ValueError("tau must be positive")
 
-    po = ve / fw
-    if po == 0:
-        raise ValueError("ve/fw must be non-zero")
-
-    conv = _exp_weighted_cumulative_trapz_values(cp_vec, t_vec, float(ktrans) / float(ve))
-    ct = [float(ktrans) * conv[i] for i in range(len(t_vec))]
-
-    xx = (r1o - r1i + (1.0 / tau)) / po
-    r1t = [0.0] * len(ct)
-    for i, ct_i in enumerate(ct):
-        yy = ((2.0 / tau - r1 * ct_i - xx) ** 2) + (4.0 * (1.0 - po) / (tau * tau * po))
-        if yy < 0:
-            yy = 0.0
-        r1t[i] = 0.5 * (2.0 * r1i + r1 * ct_i + xx - math.sqrt(yy))
-
-    return r1t
+    conv = _exp_weighted_cumulative_trapz_values(fi.cp, fi.t, float(ktrans) / float(ve))
+    return (float(ktrans) * np.asarray(conv, dtype=np.float64)) + (float(vp) * fi.cp_arr)
 
 
 def model_extended_tofts_cfit(
@@ -722,18 +842,7 @@ def model_extended_tofts_cfit(
       Ct(k) = Ktrans * trapz(T, CP .* exp((-Ktrans/ve) * (T(end)-T))) + vp * Cp(k)
       with the trapz term set to zero at first sample.
     """
-    cp_vec = [float(v) for v in cp]
-    t_vec = [float(v) for v in t1]
-
-    if len(cp_vec) != len(t_vec):
-        raise ValueError(f"cp and t1 lengths differ: {len(cp_vec)} vs {len(t_vec)}")
-    if len(t_vec) == 0:
-        return []
-    if ve == 0:
-        raise ValueError("ve must be non-zero")
-
-    conv = _exp_weighted_cumulative_trapz_values(cp_vec, t_vec, float(ktrans) / float(ve))
-    return [(float(ktrans) * conv[i]) + (float(vp) * cp_vec[i]) for i in range(len(t_vec))]
+    return _extended_tofts_curve(ktrans, ve, vp, _coerce_forward_inputs(cp, t1, "t1")).tolist()
 
 
 # --- Batched curve evaluation -------------------------------------------------
@@ -1213,10 +1322,11 @@ def model_vp_fit(
     if prefs:
         settings.update(prefs)
 
-    def residual(params: List[float]) -> List[float]:
-        vp = params[0]
-        pred = model_vp_cfit(vp, cp_vec, t_vec)
-        return [pred[i] - ct_vec[i] for i in range(len(ct_vec))]
+    fi = ForwardInputs(cp_vec, t_vec)
+    ct_arr = np.asarray(ct_vec, dtype=np.float64)
+
+    def residual(params: List[float]) -> np.ndarray:
+        return _vp_curve(params[0], fi) - ct_arr
 
     lb = [float(settings["lower_limit_vp"])]
     ub = [float(settings["upper_limit_vp"])]
@@ -1325,13 +1435,15 @@ def model_fxr_fit(
     if prefs:
         settings.update(prefs)
 
-    def residual(params: List[float]) -> List[float]:
+    fi = ForwardInputs(cp_vec, t_vec)
+    ct_arr = np.asarray(ct_vec, dtype=np.float64)
+
+    def residual(params: List[float]) -> np.ndarray:
         ktrans, ve, tau = params
         try:
-            pred = model_fxr_cfit(ktrans, ve, tau, cp_vec, t_vec, r1o, r1i, r1, fw)
-            return [pred[i] - ct_vec[i] for i in range(len(ct_vec))]
+            return _fxr_curve(ktrans, ve, tau, fi, r1o, r1i, r1, fw) - ct_arr
         except (ValueError, OverflowError):
-            return [1e12] * len(ct_vec)
+            return np.full(ct_arr.size, 1e12, dtype=np.float64)
 
     lb = [
         float(settings["lower_limit_ktrans"]),
