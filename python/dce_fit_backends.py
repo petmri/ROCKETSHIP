@@ -3,8 +3,10 @@ multi-start optimization, shared by the CPU/python and accelerated
 (cpufit/gpufit) backends.
 
 Wired up for every accelerated-eligible model: patlak, tofts, ex_tofts,
-tissue_uptake, 2cxm. Replaces dce_models._best_fit_over_starts and
-dce_pipeline._accel_multistart_refine, both now dead and removed.
+tissue_uptake, 2cxm. Supersedes dce_pipeline._accel_multistart_refine (removed)
+and dce_models._best_fit_over_starts (removed once vp's single-start fit was
+inlined). The two models outside this machinery -- vp and fxr -- still run their
+own one-shot `least_squares` in dce_models.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from scipy.optimize import least_squares
 from dce_models import (
     _canonical_time_context,
     _ci_bounds_from_fit,
+    _e_space_bounds,
     _fit_2cxm_osipi_canonical,
     _least_squares_kwargs,
     _merge_prefs_in_canonical_units,
@@ -252,18 +255,6 @@ def _clamp_to_bounds(candidates: np.ndarray, bounds_row: np.ndarray) -> np.ndarr
     return np.clip(candidates, lo, hi)
 
 
-def _e_space_bounds(ktrans_lo: float, ktrans_hi: float, fp_lo: float, fp_hi: float) -> Tuple[float, float]:
-    """Map (Ktrans, Fp) bounds to extraction-fraction bounds E=Ktrans/Fp in (0, 1).
-
-    Same formula `dce_pipeline._extraction_fraction_init_bounds` used (now
-    removed) for its bounds half; kept separate from the per-candidate E
-    initial-value clip, which each caller applies per voxel/candidate.
-    """
-    e_lo = min(max(ktrans_lo / max(fp_hi, 1e-12), 0.0), 1.0 - 1e-10)
-    e_hi = min(max(ktrans_hi / max(fp_lo, 1e-12), e_lo + 1e-10), 1.0 - 1e-8)
-    return float(e_lo), float(e_hi)
-
-
 # Hardcoded canonical (per-minute) defaults -- already in the internal fit
 # units, unlike caller-supplied prefs which follow the input timer's unit.
 # Kept as a standalone constant so `_run_tissue_uptake_python` can merge the
@@ -342,7 +333,7 @@ def assemble_tissue_uptake_candidates(inputs: FitInputs) -> np.ndarray:
     # regardless of the input timer's unit. No-op whenever the timer is
     # already minutes-native (rate_in_to_min=1, true for every real pipeline
     # run and for the accelerated backend, which never applies this scaling).
-    _, _, rate_in_to_min, _ = _canonical_time_context([float(v) for v in inputs.timer], settings)
+    _, _, rate_in_to_min, _ = _canonical_time_context(inputs.timer.tolist(), settings)
     k0_raw = k0 / rate_in_to_min
     fp0_raw = fp0 / rate_in_to_min
 
@@ -447,7 +438,7 @@ def assemble_2cxm_candidates(inputs: FitInputs) -> np.ndarray:
     # exact value regardless of timer unit (no-op when timer is minutes-native,
     # true for every real pipeline run and for the accelerated backend, which
     # never applies this scaling). See assemble_tissue_uptake_candidates.
-    _, _, rate_in_to_min, _ = _canonical_time_context([float(v) for v in inputs.timer], settings)
+    _, _, rate_in_to_min, _ = _canonical_time_context(inputs.timer.tolist(), settings)
     fixed_row = np.array(
         [
             float(settings["initial_value_ktrans"]) / rate_in_to_min,
@@ -487,8 +478,8 @@ def _run_scipy_per_voxel(
     lb = [float(inputs.bounds_row[2 * j]) for j in range(n_params)]
     ub = [float(inputs.bounds_row[2 * j + 1]) for j in range(n_params)]
     lsq_kwargs = _least_squares_kwargs(settings, default_max_nfev=2000)
-    cp_vec = [float(v) for v in inputs.cp]
-    t_vec = [float(v) for v in inputs.timer]
+    cp_vec = inputs.cp.tolist()
+    t_vec = inputs.timer.tolist()
 
     n_voxels = inputs.n_voxels
     params = np.full((n_voxels, n_params), np.nan, dtype=np.float64)
@@ -497,19 +488,19 @@ def _run_scipy_per_voxel(
     extra = np.empty(n_voxels, dtype=object)
 
     for i in range(n_voxels):
-        ct_vec = [float(v) for v in inputs.ct[:, i]]
+        ct_vec = inputs.ct[:, i].tolist()
 
         def residual(params_vec, ct_vec=ct_vec):
             pred = cfit_fn(params_vec, cp_vec, t_vec)
             return [pred[j] - ct_vec[j] for j in range(len(ct_vec))]
 
-        x0 = [float(v) for v in initial_parameters[i]]
+        x0 = initial_parameters[i].tolist()
         try:
             fit = least_squares(residual, x0=x0, bounds=(lb, ub), **lsq_kwargs)
         except Exception:
             continue
         params[i, :] = fit.x
-        chi[i] = float(sum(v * v for v in fit.fun))
+        chi[i] = float(sum(v * v for v in fit.fun.tolist()))
         success[i] = True
         extra[i] = _ci_bounds_from_fit(fit)
 
@@ -549,7 +540,9 @@ def _run_ex_tofts_python(
     )
 
 
-_TISSUE_UPTAKE_RATE_KEYS = [
+# Ktrans/Fp bound+initial keys, shared by every model parametrized on those two
+# rate constants (tissue_uptake and 2cxm today).
+_KTRANS_FP_RATE_KEYS = [
     "lower_limit_ktrans",
     "upper_limit_ktrans",
     "initial_value_ktrans",
@@ -576,13 +569,13 @@ def _run_tissue_uptake_python(
     that another candidate fits fine.
     """
     settings = inputs.prefs
-    t_vec = [float(v) for v in inputs.timer]
-    cp_vec = [float(v) for v in inputs.cp]
+    t_vec = inputs.timer.tolist()
+    cp_vec = inputs.cp.tolist()
     timer_min, _, rate_in_to_min, rate_min_to_output = _canonical_time_context(t_vec, settings)
     canonical = _merge_prefs_in_canonical_units(
         _TISSUE_UPTAKE_DEFAULTS,
         inputs.raw_prefs,
-        rate_keys=_TISSUE_UPTAKE_RATE_KEYS,
+        rate_keys=_KTRANS_FP_RATE_KEYS,
         time_constant_keys=_TISSUE_UPTAKE_TIME_CONSTANT_KEYS,
         rate_in_to_min=rate_in_to_min,
     )
@@ -605,7 +598,7 @@ def _run_tissue_uptake_python(
     extra = np.empty(n_voxels, dtype=object)
 
     for i in range(n_voxels):
-        ct_vec = [float(v) for v in inputs.ct[:, i]]
+        ct_vec = inputs.ct[:, i].tolist()
         ktrans0_raw, fp0_raw, vp0_raw = (float(v) for v in initial_parameters[i])
         ktrans0 = ktrans0_raw * rate_in_to_min
         fp0 = fp0_raw * rate_in_to_min
@@ -634,7 +627,7 @@ def _run_tissue_uptake_python(
         params[i, 0] = ktrans_fit * rate_min_to_output
         params[i, 1] = fp_fit * rate_min_to_output
         params[i, 2] = vp_fit
-        chi[i] = float(sum(v * v for v in fit.fun))
+        chi[i] = float(sum(v * v for v in fit.fun.tolist()))
         success[i] = True
 
         ci_lo, ci_hi = _ci_bounds_from_fit(fit)
@@ -646,14 +639,6 @@ def _run_tissue_uptake_python(
     return params, success, chi, extra
 
 
-_2CXM_RATE_KEYS = [
-    "lower_limit_ktrans",
-    "upper_limit_ktrans",
-    "initial_value_ktrans",
-    "lower_limit_fp",
-    "upper_limit_fp",
-    "initial_value_fp",
-]
 
 
 def _run_2cxm_python(
@@ -668,11 +653,11 @@ def _run_2cxm_python(
     since none of its existing math is touched.
     """
     settings = inputs.prefs
-    t_vec = [float(v) for v in inputs.timer]
-    cp_vec = [float(v) for v in inputs.cp]
+    t_vec = inputs.timer.tolist()
+    cp_vec = inputs.cp.tolist()
     timer_min, _, rate_in_to_min, rate_min_to_output = _canonical_time_context(t_vec, settings)
     canonical = _merge_prefs_in_canonical_units(
-        _2CXM_DEFAULTS, inputs.raw_prefs, rate_keys=_2CXM_RATE_KEYS, rate_in_to_min=rate_in_to_min
+        _2CXM_DEFAULTS, inputs.raw_prefs, rate_keys=_KTRANS_FP_RATE_KEYS, rate_in_to_min=rate_in_to_min
     )
 
     n_voxels = inputs.n_voxels
@@ -682,7 +667,7 @@ def _run_2cxm_python(
     extra = np.empty(n_voxels, dtype=object)
 
     for i in range(n_voxels):
-        ct_vec = [float(v) for v in inputs.ct[:, i]]
+        ct_vec = inputs.ct[:, i].tolist()
         ktrans0_raw, ve0, vp0, fp0_raw = (float(v) for v in initial_parameters[i])
         candidate_settings = dict(canonical)
         candidate_settings["initial_value_ktrans"] = ktrans0_raw * rate_in_to_min

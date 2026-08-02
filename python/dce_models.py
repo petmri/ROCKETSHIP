@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 import math
 from typing import Dict, Iterable, List, Optional
 
@@ -150,6 +151,17 @@ def _least_squares_kwargs(settings: Dict[str, object], default_max_nfev: int) ->
     return kwargs
 
 
+@lru_cache(maxsize=64)
+def _student_t_quantile(level: float, dof: int) -> float:
+    """Two-sided t quantile, memoized on (level, dof).
+
+    `dof = n_obs - n_params` is constant for a whole run, but CIs are built per
+    voxel per candidate start, so this was the single most-repeated scipy call
+    in a fit. Memoizing a deterministic scalar is exact.
+    """
+    return float(_student_t.ppf(1.0 - (1.0 - level) / 2.0, dof))
+
+
 def _ci_stderrs_from_covariance(cov: np.ndarray) -> np.ndarray:
     """Standard errors from a parameter covariance matrix (NaN where undefined)."""
     var = np.asarray(np.diag(cov), dtype=float)
@@ -173,7 +185,7 @@ def _ci_from_stderrs(
     if dof <= 0:
         nan = [float("nan")] * est.size
         return nan, nan
-    tval = float(_student_t.ppf(1.0 - (1.0 - level) / 2.0, dof))
+    tval = _student_t_quantile(level, int(dof))
     lows: List[float] = []
     highs: List[float] = []
     for i in range(est.size):
@@ -215,23 +227,38 @@ def _ci_bounds_from_fit(fit, *, level: float = 0.95) -> tuple[List[float], List[
 
 
 def _cumulative_trapz_values(y: List[float], t: List[float]) -> List[float]:
-    """Return cumulative trapezoid integral with output aligned to sample indices."""
-    out = [0.0] * len(t)
-    for i in range(1, len(t)):
-        dt = float(t[i] - t[i - 1])
-        out[i] = out[i - 1] + (0.5 * dt * (float(y[i - 1]) + float(y[i])))
+    """Return cumulative trapezoid integral with output aligned to sample indices.
+
+    Callers pass already-coerced float sequences, so the per-sample `float()`
+    calls this used to make were pure overhead on the hottest path in the
+    codebase. Operation order is unchanged and the results are bit-identical.
+    """
+    n = len(t)
+    out = [0.0] * n
+    prev = 0.0
+    for i in range(1, n):
+        prev = prev + (0.5 * (t[i] - t[i - 1]) * (y[i - 1] + y[i]))
+        out[i] = prev
     return out
 
 
 def _exp_weighted_cumulative_trapz_values(y: List[float], t: List[float], lam: float) -> List[float]:
-    """Compute trapz(t, y * exp(-lam * (t_k - t))) for each endpoint k in O(n)."""
-    out = [0.0] * len(t)
-    for k in range(1, len(t)):
-        dt = float(t[k] - t[k - 1])
+    """Compute trapz(t, y * exp(-lam * (t_k - t))) for each endpoint k in O(n).
+
+    As in `_cumulative_trapz_values`, the per-sample `float()` coercions are
+    dropped and the running total is carried in a local instead of re-read from
+    the output list. Same operations in the same order, bit-identical results.
+    """
+    n = len(t)
+    out = [0.0] * n
+    prev = 0.0
+    for k in range(1, n):
+        dt = t[k] - t[k - 1]
         decay = math.exp(-lam * dt)
         # Trapezoid on the new interval, weighted at t_k.
-        interval = 0.5 * dt * ((float(y[k - 1]) * decay) + float(y[k]))
-        out[k] = (decay * out[k - 1]) + interval
+        interval = 0.5 * dt * ((y[k - 1] * decay) + y[k])
+        prev = (decay * prev) + interval
+        out[k] = prev
     return out
 
 
@@ -353,6 +380,19 @@ def _two_cxm_curve_osipi(
     return out
 
 
+def _e_space_bounds(ktrans_lo: float, ktrans_hi: float, fp_lo: float, fp_hi: float) -> tuple[float, float]:
+    """Map (Ktrans, Fp) bounds to extraction-fraction bounds E=Ktrans/Fp in (0, 1).
+
+    Lives here, next to the 2CXM E-parametrization it belongs to, and is used by
+    both this module's canonical 2CXM fit and the accelerated tissue_uptake/2cxm
+    runners in `dce_fit_backends`. Kept separate from the per-candidate E
+    initial-value clip, which each caller applies per voxel/candidate.
+    """
+    e_lo = min(max(ktrans_lo / max(fp_hi, 1e-12), 0.0), 1.0 - 1e-10)
+    e_hi = min(max(ktrans_hi / max(fp_lo, 1e-12), e_lo + 1e-10), 1.0 - 1e-8)
+    return float(e_lo), float(e_hi)
+
+
 def _fit_2cxm_osipi_canonical(
     ct_vec: List[float],
     cp_vec: List[float],
@@ -388,8 +428,7 @@ def _fit_2cxm_osipi_canonical(
 
     e0 = ktrans0 / max(fp0, 1e-12)
     e0 = min(max(e0, 1e-8), 1.0 - 1e-8)
-    e_lo = min(max(ktrans_lo / max(fp_hi, 1e-12), 0.0), 1.0 - 1e-10)
-    e_hi = min(max(ktrans_hi / max(fp_lo, 1e-12), e_lo + 1e-10), 1.0 - 1e-8)
+    e_lo, e_hi = _e_space_bounds(ktrans_lo, ktrans_hi, fp_lo, fp_hi)
     e0 = min(max(e0, e_lo + 1e-10), e_hi - 1e-10)
     maxfev = int(_safe_float_setting(settings, "max_nfev", 4000.0))
 
@@ -944,7 +983,6 @@ def model_patlak_linear(ct: Iterable[float], cp: Iterable[float], timer: Iterabl
         denom = cp_vec[t]
         if abs(denom) > tiny:
             y_value[t] = ct_vec[t] / denom
-        if abs(denom) > tiny:
             x_value[t] = cum[t] / denom
 
     # Trim to after injection (MATLAB drops first element)
@@ -962,24 +1000,20 @@ def model_patlak_linear(ct: Iterable[float], cp: Iterable[float], timer: Iterabl
     x_centered = [x - x_bar for x in x_trim]
     y_centered = [y - y_bar for y in y_trim]
 
+    # Each reduction is bound once; `model_patlak_linear_batch` already does the
+    # same, and the two must stay structurally aligned to keep their last-ULP
+    # agreement.
     sum_x2 = sum(x * x for x in x_centered)
-    if sum_x2 == 0.0:
-        slope = 0.0
-    else:
-        slope = sum(x * y for x, y in zip(x_centered, y_centered)) / sum_x2
+    sum_y2 = sum(y * y for y in y_centered)
+    sum_xy = sum(x * y for x, y in zip(x_centered, y_centered))
+
+    slope = 0.0 if sum_x2 == 0.0 else sum_xy / sum_x2
     intercept = y_bar - (slope * x_bar)
 
-    numer = sum(x * y for x, y in zip(x_centered, y_centered))
-    denom = math.sqrt(sum(x * x for x in x_centered) * sum(y * y for y in y_centered))
-    if denom == 0.0:
-        r_squared = 0.0
-    else:
-        r_squared = (numer / denom) ** 2
+    denom = math.sqrt(sum_x2 * sum_y2)
+    r_squared = 0.0 if denom == 0.0 else (sum_xy / denom) ** 2
 
-    sum_squared_error = (1.0 - r_squared) * sum(y * y for y in y_centered)
-
-    if not math.isfinite(r_squared):
-        r_squared = 0.0
+    sum_squared_error = (1.0 - r_squared) * sum_y2
 
     return [slope, intercept, sum_squared_error, -1.0, -1.0, -1.0, -1.0]
 
@@ -1149,30 +1183,6 @@ def _clip_start_to_bounds(start: List[float], lb: List[float], ub: List[float]) 
     return out
 
 
-def _best_fit_over_starts(
-    residual_fn,
-    starts: List[List[float]],
-    lb: List[float],
-    ub: List[float],
-    lsq_kwargs: Dict[str, object],
-):
-    best_fit = None
-    best_sse = math.inf
-    for start in starts:
-        x0 = _clip_start_to_bounds(start, lb, ub)
-        fit = least_squares(
-            residual_fn,
-            x0=x0,
-            bounds=(lb, ub),
-            **lsq_kwargs,
-        )
-        sse = float(sum(v * v for v in fit.fun))
-        if sse < best_sse:
-            best_fit = fit
-            best_sse = sse
-    return best_fit, best_sse
-
-
 def model_vp_fit(
     ct: Iterable[float],
     cp: Iterable[float],
@@ -1210,10 +1220,15 @@ def model_vp_fit(
 
     lb = [float(settings["lower_limit_vp"])]
     ub = [float(settings["upper_limit_vp"])]
-    starts = [[float(settings["initial_value_vp"])]]
 
     lsq_kwargs = _least_squares_kwargs(settings, default_max_nfev=2000)
-    fit, sse = _best_fit_over_starts(residual, starts, lb, ub, lsq_kwargs)
+    fit = least_squares(
+        residual,
+        x0=_clip_start_to_bounds([float(settings["initial_value_vp"])], lb, ub),
+        bounds=(lb, ub),
+        **lsq_kwargs,
+    )
+    sse = float(sum(v * v for v in fit.fun.tolist()))
     vp = float(fit.x[0])
 
     ci_lo, ci_hi = _ci_bounds_from_fit(fit)
@@ -1232,7 +1247,6 @@ def model_tissue_uptake_fit(
     `dce_fit_backends` (the same candidate-assembly/multi-start code path
     used by the accelerated cpufit/gpufit backends for this model).
     """
-    _reject_algorithm_override(prefs, "tissue_uptake")
     from dce_fit_backends import fit_tissue_uptake_stage_d  # local: avoids an import cycle
 
     row = fit_tissue_uptake_stage_d(
@@ -1257,7 +1271,6 @@ def model_2cxm_fit(
     `dce_fit_backends` (the same candidate-assembly/multi-start code path
     used by the accelerated cpufit/gpufit backends for this model).
     """
-    _reject_algorithm_override(prefs, "2cxm")
     from dce_fit_backends import fit_2cxm_stage_d  # local: avoids an import cycle
 
     row = fit_2cxm_stage_d(
@@ -1350,7 +1363,7 @@ def model_fxr_fit(
     ktrans = float(fit.x[0])
     ve = float(fit.x[1])
     tau = float(fit.x[2])
-    sse = float(sum(v * v for v in fit.fun))
+    sse = float(sum(v * v for v in fit.fun.tolist()))
 
     ci_lo, ci_hi = _ci_bounds_from_fit(fit)
     return [
