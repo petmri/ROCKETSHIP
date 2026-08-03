@@ -24,10 +24,31 @@ Larger feature requests should be logged in `docs/project-management/projects/fe
       dense grid (2026-08-02) made cpufit/gpufit fit ~50x more points, and on CPU that erased the
       advantage entirely: cpufit 2cxm went 0.01 s -> 1.72 s on a 24-voxel batch, against 1.70 s
       for python. The numerical win was the point and it landed (backends now agree on Fp to
-      0.00% where they differed by 53%), but cpufit 2cxm currently buys nothing. gpufit is
-      untested here -- no CUDA device on this host -- and may still win, since the extra points
-      parallelize. Measure on CUDA before deciding; if it does not win there either, route 2cxm
-      to python always and drop the accelerated path for this model.
+      0.00% where they differed by 53%), but cpufit 2cxm currently buys nothing.
+      **Profiled 2026-08-02, and it is fixable in GPUfit rather than a reason to drop the path.**
+      91% of a cpufit run is inside `fit_constrained` (the spline upsampling is ~5%), the kernel
+      scales about linearly in n_points, and it is not hitting the iteration cap -- mean 48.6 LM
+      iterations with 23/24 voxels converged at the default 200. Two specific inefficiencies in
+      `~/code/GPUfit/Cpufit/lm_fit_cpp.cpp` account for it:
+        1. `exp_conv_recurrence` calls `std::exp(-kappa*dt)` *inside* the per-point loop, to
+           support a non-uniform timer. On the dense grid dt is constant by construction, so the
+           decay factor could be computed once per rate instead of once per point -- ~3000 exp
+           calls collapsing to 1. This is what python's `_exp_weighted_trapz_uniform` does, and
+           it is why vectorized python ties compiled C that has an analytic Jacobian.
+        2. `calc_curve_values` calls `calc_values_two_compartment_exchange` and then
+           `calc_derivatives_two_compartment_exchange`, and both run the same two
+           `exp_conv_recurrence` passes -- the convolutions are computed twice per iteration
+           where the derivative pass already produces the values.
+      Together that is ~12,000 `std::exp` calls per voxel-iteration against a measured 0.20 ms
+      per voxel-iteration, i.e. ~17 ns each, consistent with the transcendentals being nearly
+      the whole cost. Fixing both should restore a large cpufit margin.
+      gpufit is a separate and worse case: `Gpufit/models/two-compartment_exchange.cuh` computes
+      each point with its own `for (i = 1; i <= point_index; i++)` sum, because a gpufit model
+      function evaluates one point per thread. That is O(n^2) total work and 4 `exp` per inner
+      iteration, so the 50x point count costs ~2500x there, not 50x. A sequential recurrence does
+      not map onto gpufit's one-thread-per-point structure, so this is architectural -- it would
+      need a prefix-scan formulation or a model that evaluates a whole curve per thread. Do not
+      assume the extra points simply parallelize away. Measure on CUDA before deciding.
 - [ ] Fp is not identifiable from 2CXM at typical DCE temporal resolution, and unifying the
       backends did not change that -- it cannot. On 24 synthetic voxels with 5 s frames, median
       relative Fp error is ~150% on both backends, because the plasma MTT (1-2 s) is far below
