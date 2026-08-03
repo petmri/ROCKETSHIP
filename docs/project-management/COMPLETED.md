@@ -7,6 +7,25 @@ Do not track open items in this file; active work belongs in `docs/project-manag
 
 Completed items moved from `TODO.md` on 2026-03-05 to keep the active backlog short.
 
+## Completed Recent Updates (2026-08-02)
+- [x] **One 2CXM implementation, evaluated on the dense grid, on every backend.** Python carried
+  two 2CXM forward models and the accelerated kernel a third, and they were used at different
+  stages: the python Stage-D fit used the OSIPI 0.1 s resampled grid, the post-fit residuals used
+  the MATLAB port on the acquired grid, and cpufit/gpufit fit on the acquired grid too. Measured
+  against a closed-form 2CXM, the acquired timebase is the whole problem -- a 5 s frame costs
+  15.6% of curve peak with the trapezoid recurrence and 79.8% with a rectangle-rule convolution,
+  because the plasma MTT is routinely 1-2 s. The two python formulations were verified
+  mathematically identical (bit-identical eigenvalues and amplitudes); only their grid and
+  quadrature differed. Consolidated to a single `cxm2_curve` on the 0.1 s spline-upsampled grid,
+  used by the fit, the post-fit residuals and (via an upsampled ct/timer/cp feed) the accelerated
+  backends. `model_2cxm_cfit`/`model_2cxm_cfit_batch` and the `twocxm_forward` MATLAB contract
+  were deleted with them. Quadrature moved from `np.convolve` to the exact-in-the-exponential
+  trapezoid recurrence, run as a first-order IIR through `scipy.signal.lfilter`: 5x more accurate
+  on this grid (0.20% vs 1.11% of peak) and 35x cheaper. Python 2cxm Stage-D 15.0 s -> 1.7 s
+  (8.8x). Backend agreement on synthetic 2CXM data went from median relative differences of
+  Ktrans 1.4% / ve 2.2% / vp 22.5% / **Fp 53%** to 0.15% / 0.01% / 0.05% / 0.00%. Caveats in
+  `TODO.md`: cpufit 2cxm is no longer faster than python, and Fp remains non-identifiable.
+
 ## Completed Recent Updates (2026-07-30)
 - [x] **Python non-fit pipeline performance, round 2: batched curve evaluation.** The post-fit
   path re-evaluates every fitted voxel's forward curve in Python regardless of backend

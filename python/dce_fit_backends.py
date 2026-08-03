@@ -24,14 +24,15 @@ from dce_models import (
     _ci_bounds_from_fit,
     _e_space_bounds,
     _extended_tofts_curve,
-    _fit_2cxm_osipi_canonical,
     _least_squares_kwargs,
     _merge_prefs_in_canonical_units,
     _patlak_curve,
     _reject_algorithm_override,
     _tissue_uptake_curve,
     _tofts_curve,
-    build_osipi_resample_grid,
+    build_dense_resample_grid,
+    cxm2_curve,
+    fit_2cxm_canonical,
     model_patlak_linear_batch,
 )
 
@@ -650,7 +651,7 @@ def _run_tissue_uptake_python(
 def _run_2cxm_python(
     inputs: FitInputs, initial_parameters: np.ndarray
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Per-voxel canonical-units OSIPI curve_fit, reusing `_fit_2cxm_osipi_canonical`.
+    """Per-voxel canonical-units OSIPI curve_fit, reusing `fit_2cxm_canonical`.
 
     Each candidate is run through the exact existing (validated) canonical
     fit function unchanged, just with its `initial_value_*` settings swapped
@@ -679,7 +680,7 @@ def _run_2cxm_python(
     # Whether a grid can be built depends only on the timer, so failure here
     # means no voxel is fittable -- same all-NaN result the per-voxel `None`
     # used to produce, reached without walking the batch.
-    grid = build_osipi_resample_grid(cp_vec, timer_min)
+    grid = build_dense_resample_grid(cp_vec, timer_min)
     if grid is None:
         return params, success, chi, extra
 
@@ -692,7 +693,7 @@ def _run_2cxm_python(
         candidate_settings["initial_value_fp"] = fp0_raw * rate_in_to_min
 
         try:
-            quick = _fit_2cxm_osipi_canonical(
+            quick = fit_2cxm_canonical(
                 grid.resample_ct(inputs.ct[:, i]), grid, settings=candidate_settings
             )
         except Exception:
@@ -823,25 +824,88 @@ def _run_tissue_uptake_accelerated(
 def _run_2cxm_accelerated(
     backend: str, inputs: FitInputs, initial_parameters: np.ndarray
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Reparametrize shared [Ktrans, ve, vp, Fp] candidates into the kernel's [E, ve, vp, Fp] space."""
-    bounds = inputs.bounds_row  # [k_lo,k_hi, ve_lo,ve_hi, vp_lo,vp_hi, fp_lo,fp_hi]
-    e_lo, e_hi = _e_space_bounds(bounds[0], bounds[1], bounds[6], bounds[7])
-    e_bounds = np.array(
-        [e_lo, e_hi, bounds[2], bounds[3], bounds[4], bounds[5], bounds[6], bounds[7]], dtype=np.float64
-    )
-    e_inputs = replace(inputs, bounds_row=e_bounds)
+    """Fit 2CXM on the compiled kernel, on the same dense grid the python path uses.
 
-    ktrans0 = initial_parameters[:, 0]
+    Two conversions, both to keep this backend fitting the same problem as
+    `_run_2cxm_python`:
+
+    - Canonical minutes. Like the python runner, the timer and the Ktrans/Fp
+      bounds and starts are converted to per-minute before fitting and back
+      afterwards. A no-op for a minute timer; without it a second timer would
+      also make the 0.1 s resample step below meaningless.
+    - The dense grid. The kernel evaluates 2CXM wherever we sample it, so ct is
+      upsampled onto the 0.1 s grid alongside cp and the timer. Fitting on the
+      acquired timebase under-resolves the plasma compartment badly -- measured
+      on a synthetic voxel, Fp came back 0.43 against a truth of 0.6, and 0.59
+      once fitted on the dense grid.
+
+    Candidates also move from the shared [Ktrans, ve, vp, Fp] space into the
+    kernel's [E, ve, vp, Fp], E = Ktrans / Fp.
+    """
+    settings = inputs.prefs
+    timer_min, _, rate_in_to_min, rate_min_to_output = _canonical_time_context(
+        inputs.timer.tolist(), settings
+    )
+    canonical = _merge_prefs_in_canonical_units(
+        _2CXM_DEFAULTS, inputs.raw_prefs, rate_keys=_KTRANS_FP_RATE_KEYS, rate_in_to_min=rate_in_to_min
+    )
+
+    n_voxels = inputs.n_voxels
+    grid = build_dense_resample_grid(inputs.cp.tolist(), timer_min)
+    if grid is None:
+        # Same all-NaN outcome the python runner produces for a timer that
+        # cannot carry a dense grid.
+        return (
+            np.full((n_voxels, 4), np.nan, dtype=np.float64),
+            np.zeros(n_voxels, dtype=bool),
+            np.full(n_voxels, np.nan, dtype=np.float64),
+            np.full(n_voxels, None, dtype=object),
+        )
+
+    k_lo = float(canonical["lower_limit_ktrans"])
+    k_hi = float(canonical["upper_limit_ktrans"])
+    fp_lo = float(canonical["lower_limit_fp"])
+    fp_hi = float(canonical["upper_limit_fp"])
+    e_lo, e_hi = _e_space_bounds(k_lo, k_hi, fp_lo, fp_hi)
+    e_bounds = np.array(
+        [
+            e_lo,
+            e_hi,
+            float(canonical["lower_limit_ve"]),
+            float(canonical["upper_limit_ve"]),
+            float(canonical["lower_limit_vp"]),
+            float(canonical["upper_limit_vp"]),
+            fp_lo,
+            fp_hi,
+        ],
+        dtype=np.float64,
+    )
+
+    # Built as float32 because that is what the kernel takes: a float64
+    # intermediate would double the peak footprint of what is already the
+    # largest array in the run (~50x the acquired ct).
+    ct_dense = np.empty((grid.t_interp.size, n_voxels), dtype=np.float32)
+    for i in range(n_voxels):
+        ct_dense[:, i] = grid.resample_ct(inputs.ct[:, i])
+
+    dense_inputs = replace(
+        inputs, ct=ct_dense, cp=grid.cp_interp, timer=grid.t_interp, bounds_row=e_bounds
+    )
+
+    ktrans0 = initial_parameters[:, 0] * rate_in_to_min
     ve0 = initial_parameters[:, 1]
     vp0 = initial_parameters[:, 2]
-    fp0 = np.maximum(initial_parameters[:, 3], 1e-12)
+    fp0 = np.maximum(initial_parameters[:, 3] * rate_in_to_min, 1e-12)
     e0 = np.clip(ktrans0 / fp0, e_lo + 1e-10, e_hi - 1e-10)
     e_init = np.stack([e0, ve0, vp0, fp0], axis=-1)
 
-    params, success, chi, extra = _run_accelerated(backend, "TWO_COMPARTMENT_EXCHANGE", 4, e_inputs, e_init)
+    params, success, chi, extra = _run_accelerated(
+        backend, "TWO_COMPARTMENT_EXCHANGE", 4, dense_inputs, e_init
+    )
     # Kernel params are [E, ve, vp, Fp]; recover Ktrans = E * Fp.
-    ktrans_out = params[:, 0] * params[:, 3]
-    out_params = np.stack([ktrans_out, params[:, 1], params[:, 2], params[:, 3]], axis=-1)
+    ktrans_out = params[:, 0] * params[:, 3] * rate_min_to_output
+    fp_out = params[:, 3] * rate_min_to_output
+    out_params = np.stack([ktrans_out, params[:, 1], params[:, 2], fp_out], axis=-1)
     return out_params, success, chi, extra
 
 

@@ -20,6 +20,20 @@ Larger feature requests should be logged in `docs/project-management/projects/fe
       `docs/project-management/projects/large-data-distribution/large_data_distribution.md`.
 
 ### 3. Modeling and Workflow Follow-Ups
+- [ ] Decide whether accelerated 2CXM is still worth having. Moving every backend onto the 0.1 s
+      dense grid (2026-08-02) made cpufit/gpufit fit ~50x more points, and on CPU that erased the
+      advantage entirely: cpufit 2cxm went 0.01 s -> 1.72 s on a 24-voxel batch, against 1.70 s
+      for python. The numerical win was the point and it landed (backends now agree on Fp to
+      0.00% where they differed by 53%), but cpufit 2cxm currently buys nothing. gpufit is
+      untested here -- no CUDA device on this host -- and may still win, since the extra points
+      parallelize. Measure on CUDA before deciding; if it does not win there either, route 2cxm
+      to python always and drop the accelerated path for this model.
+- [ ] Fp is not identifiable from 2CXM at typical DCE temporal resolution, and unifying the
+      backends did not change that -- it cannot. On 24 synthetic voxels with 5 s frames, median
+      relative Fp error is ~150% on both backends, because the plasma MTT (1-2 s) is far below
+      the frame rate and upsampling cannot recover information the acquisition never recorded.
+      Ktrans/ve/vp recover to roughly 4%/3%/12%. Consider whether Fp should be reported at all
+      at this resolution, or gated on a frame-rate check.
 - [ ] Migrate `tests/data/BIDS_test` onto the production BIDS layout and naming so
       `tests/python/run_dce_benchmark.py` resolves it again without a `--dataset-root` switch.
       The benchmark now assumes `sourcedata/raw/<sub>/<ses>` plus

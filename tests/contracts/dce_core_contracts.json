@@ -38,13 +38,6 @@
       "tolerance_profile": "forward_exact"
     },
     {
-      "id": "twocxm_forward",
-      "function": "model_2cxm_cfit",
-      "inputs": ["Ktrans", "ve", "vp", "Fp", "Cp", "timer"],
-      "outputs": ["Ct"],
-      "tolerance_profile": "forward_exact"
-    },
-    {
       "id": "fxr_forward",
       "function": "model_fxr_cfit",
       "inputs": ["Ktrans", "ve", "tau", "Cp", "timer", "R1o", "R1i", "r1", "fw"],

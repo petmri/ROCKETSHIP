@@ -31,7 +31,7 @@ from accel_backend import (
 )
 from dce_models import (
     _loss_from_robust as _scipy_loss_from_robust,
-    model_2cxm_cfit_batch,
+    cxm2_curve_batch,
     model_extended_tofts_cfit_batch,
     model_fxr_cfit_batch,
     model_fxr_fit,
@@ -3571,7 +3571,7 @@ def _predict_curves_batch(
                 ktrans, fp, np.where(usable, tp, 1.0), cp, timer
             )
         elif model_name == "2cxm":
-            pred = model_2cxm_cfit_batch(col[0], col[1], col[2], col[3], cp, timer)
+            pred = cxm2_curve_batch(col[0], col[1], col[2], col[3], cp, timer)
         else:  # fxr
             r1o = np.full(n_voxels, np.nan, dtype=np.float64)
             if r1o_vector is not None:

@@ -41,7 +41,6 @@ CONTRACT_BASELINE_PATHS: Dict[str, str] = {
     "patlak_forward": "dce.forward.patlak",
     "vp_forward": "dce.forward.vp",
     "tissue_uptake_forward": "dce.forward.tissue_uptake",
-    "twocxm_forward": "dce.forward.twocxm",
     "fxr_forward": "dce.forward.fxr",
     "patlak_linear_inverse": "dce.inverse.patlak_linear",
     "tofts_fit_inverse": "dce.inverse.tofts_fit",

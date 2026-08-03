@@ -40,7 +40,6 @@ def main() -> int:
     from rocketship import (  # pylint: disable=import-outside-toplevel
         dsc_convolution_ssvd,
         import_aif,
-        model_2cxm_cfit,
         model_2cxm_fit,
         model_extended_tofts_cfit,
         model_fxr_cfit,
@@ -135,7 +134,6 @@ def main() -> int:
                 "model_tofts_fit",
                 "model_vp_cfit",
                 "model_tissue_uptake_cfit",
-                "model_2cxm_cfit",
                 "model_vp_fit",
                 "model_tissue_uptake_fit",
                 "model_2cxm_fit",
@@ -154,14 +152,6 @@ def main() -> int:
             "vp_forward": model_vp_cfit(dce_vp, cp, timer),
             "tissue_uptake_forward": model_tissue_uptake_cfit(
                 dce_ktrans, tissue_uptake_fp, tissue_uptake_tp, cp, timer
-            ),
-            "twocxm_forward": model_2cxm_cfit(
-                dce_ktrans,
-                dce_ve,
-                dce_vp,
-                tissue_uptake_fp,
-                cp,
-                timer,
             ),
             "fxr_forward": model_fxr_cfit(
                 dce_ktrans,
