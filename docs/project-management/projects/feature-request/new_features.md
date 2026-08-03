@@ -21,13 +21,26 @@
       anyway). Coarsening the dense grid from 0.1 s to 0.5 s is the alternative that keeps the
       backends identical: quadrature error 0.20% -> 0.78% of curve peak, against an AIF
       reconstruction error of ~25% that no grid choice affects, but worth only ~1.2x on its own.
-- [ ] **Analytic Jacobian for the 2CXM fit.** A 2cxm fit averages ~181 forward-model evaluations,
-      and with four parameters under a 2-point numerical Jacobian five of every six exist only to
-      estimate derivatives. The impulse response is a biexponential whose derivatives with respect
-      to all four parameters are closed-form, so an analytic `jac` is available -- messy, but real.
-      Worth roughly 2x on its own since it does not touch the 3001-length linear algebra;
-      composes with the item above. The same argument applies to the other `least_squares` models,
-      whose forward curves are also analytically differentiable.
+- [ ] **Analytic Jacobians for the python fits.** GPUfit/Cpufit already has them for all five DCE
+      models -- gpufit requires every model to supply its own Jacobian columns -- but **python has
+      none**: no `least_squares`/`curve_fit` call in `python/` passes `jac`, so every python fit
+      runs on scipy's 2-point numerical differencing. A 2cxm fit averages ~181 forward-model
+      evaluations, and with four parameters five of every six exist only to estimate derivatives.
+      Worth roughly 2x on its own (it does not touch the 3001-length linear algebra); composes with
+      the item above.
+      This is transcription, not derivation. The 2CXM derivative math is already written and
+      verified in `~/code/GPUfit/Cpufit/lm_fit_cpp.cpp`
+      (`calc_derivatives_two_compartment_exchange`, mirrored in
+      `Gpufit/models/two-compartment_exchange.cuh`): O(1) scalar partials of the internal rates
+      {rp, re, rb} -> {a, Dr, Kpos, Kneg, Eneg}, combined with the rate-derivatives of the two
+      convolutions. Same for patlak/tofts/tofts_extended/tissue_uptake.
+      It also composes with the IIR fast path rather than forcing a return to GPUfit's O(n^2)
+      direct sums. Differentiating the trapezoid recurrence
+      `G[k] = d*G[k-1] + 0.5*dt*(y[k-1]*d + y[k])` with respect to the rate gives
+      `dG[k] = d*dG[k-1] + d'*(G[k-1] + 0.5*dt*y[k-1])`, `d' = -dt*d` -- the *same pole*, driven by
+      a term built from the already-computed G. So each rate-derivative is one extra
+      `lfilter` pass and stays O(n). Verified numerically 2026-08-02 against a central difference
+      (max rel diff 1.8e-08).
 - [ ] **Compute confidence intervals only for the winning multistart candidate.** `fit_with_multistart`
       runs each candidate through a runner that calls `_ci_bounds_from_fit` per voxel
       (`dce_fit_backends.py:510` and `:640`), then keeps only the best candidate's and discards the
