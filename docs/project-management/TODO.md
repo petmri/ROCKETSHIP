@@ -26,10 +26,17 @@ Larger feature requests should be logged in `docs/project-management/projects/fe
       for python. The numerical win was the point and it landed (backends now agree on Fp to
       0.00% where they differed by 53%), but cpufit 2cxm currently buys nothing.
       **Profiled 2026-08-02, and it is fixable in GPUfit rather than a reason to drop the path.**
-      91% of a cpufit run is inside `fit_constrained` (the spline upsampling is ~5%), the kernel
-      scales about linearly in n_points, and it is not hitting the iteration cap -- mean 48.6 LM
-      iterations with 23/24 voxels converged at the default 200. Two specific inefficiencies in
-      `~/code/GPUfit/Cpufit/lm_fit_cpp.cpp` account for it:
+      91% of a cpufit run is inside `fit_constrained` (the spline upsampling is ~5%). The 50x point
+      count costs ~976x wall time (61 -> 3001 points, 0.0003 s -> 0.2927 s on a 24-voxel batch),
+      which factors cleanly into 49x points  x  7.5x LM iterations (mean 7.8 -> 58.4)  x  2.8x per
+      point per iteration (25.1 -> 69.6 ns). So the kernel is O(n) *per iteration* only; neither
+      other factor is waste to optimize away. The iteration growth is the fit doing real work it
+      previously skipped -- at 61 points the objective is nearly flat in Fp, so `tolerance=1e-6` is
+      met after 7.8 iterations and all 24 voxels report "converged" while disagreeing with python by
+      53% on Fp; on the dense grid 22/24 converge and 2 hit the 200 cap. The per-point cost rises
+      then plateaus (25 -> 36 -> 56 -> 60 -> 67 -> 70 -> 70 ns), the shape of a working set leaving
+      L1: ~1.7 KB at 61 points against ~84 KB at 3001. Two specific inefficiencies in
+      `~/code/GPUfit/Cpufit/lm_fit_cpp.cpp` account for the per-point cost:
         1. `exp_conv_recurrence` calls `std::exp(-kappa*dt)` *inside* the per-point loop, to
            support a non-uniform timer. On the dense grid dt is constant by construction, so the
            decay factor could be computed once per rate instead of once per point -- ~3000 exp
@@ -38,7 +45,10 @@ Larger feature requests should be logged in `docs/project-management/projects/fe
         2. `calc_curve_values` calls `calc_values_two_compartment_exchange` and then
            `calc_derivatives_two_compartment_exchange`, and both run the same two
            `exp_conv_recurrence` passes -- the convolutions are computed twice per iteration
-           where the derivative pass already produces the values.
+           where the derivative pass already produces the values. Both also allocate fresh
+           `std::vector<REAL>` buffers of `n_points` on every call (six per LM iteration, ~72 KB
+           at 3001 points), which is allocator traffic and cache pressure that grows with n;
+           preallocating would attack the 2.8x above as well as the exp count.
       Together that is ~12,000 `std::exp` calls per voxel-iteration against a measured 0.20 ms
       per voxel-iteration, i.e. ~17 ns each, consistent with the transcendentals being nearly
       the whole cost. Fixing both should restore a large cpufit margin.

@@ -64,6 +64,12 @@ MODEL_SELECTION_ORDER = [
     ("FXL_rr", "FXL_rr"),
 ]
 
+# Fallbacks used when neither the metadata JSON nor a stage override supplies these.
+# Stage D re-resolves relaxivity for hand-built `stage_a` dicts, so both readers must
+# agree on the same number.
+DEFAULT_RELAXIVITY = 3.4
+DEFAULT_HEMATOCRIT = 0.45
+
 MODEL_LAYOUTS: Dict[str, Dict[str, Any]] = {
     "tofts": {
         "headings": [
@@ -347,6 +353,16 @@ def _to_path_list(values: Optional[List[str]]) -> List[Path]:
     return [Path(v).expanduser().resolve() for v in values]
 
 
+def _json_sidecar_for(path: Path) -> Optional[Path]:
+    """Return the JSON sidecar path for a NIfTI file, or None if the name does not map to one."""
+    text = str(path)
+    if text.endswith(".nii.gz"):
+        return Path(text[:-7] + ".json")
+    if path.suffix.lower() == ".nii":
+        return path.with_suffix(".json")
+    return None
+
+
 def _json_default(value: Any) -> Any:
     if isinstance(value, Path):
         return str(value)
@@ -598,11 +614,9 @@ def _resolve_dynamic_metadata(
         candidates.append(Path(str(metadata_path)).expanduser().resolve())
 
     for dynamic in config.dynamic_files:
-        dynamic_text = str(dynamic)
-        if dynamic_text.endswith(".nii.gz"):
-            candidates.append(Path(dynamic_text[:-7] + ".json"))
-        elif dynamic.suffix.lower() == ".nii":
-            candidates.append(dynamic.with_suffix(".json"))
+        sidecar = _json_sidecar_for(dynamic)
+        if sidecar is not None:
+            candidates.append(sidecar)
 
     candidates.extend(sorted((config.subject_source_path / "dce").glob("*DCE.json")))
 
@@ -747,7 +761,17 @@ def _resolve_dynamic_metadata(
             fa_deg = float(payload["FlipAngle"])
             metadata_sources["fa_deg"] = f"{source_prefix}.FlipAngle"
 
-    relaxivity_val, relaxivity_key = _payload_lookup(
+    def _payload_field(name: str, keys: Tuple[str, ...], cast: Callable[[Any], Any] = float) -> Any:
+        # Resolving the value and recording its provenance together is what keeps
+        # `metadata_sources` from drifting out of step with the values it describes.
+        value, key = _payload_lookup(keys)
+        if value is None:
+            return None
+        metadata_sources[name] = f"{source_prefix}.{key}"
+        return cast(value)
+
+    relaxivity = _payload_field(
+        "relaxivity",
         (
             "relaxivity",
             "Relaxivity_per_mM_per_s",
@@ -755,36 +779,28 @@ def _resolve_dynamic_metadata(
             "ContrastRelaxivity_per_mM_per_s",
             "SyntheticPhantom.relaxivity",
             "SyntheticPhantom.Relaxivity_per_mM_per_s",
-        )
+        ),
     )
-    relaxivity = None
-    if relaxivity_val is not None:
-        relaxivity = float(relaxivity_val)
-        metadata_sources["relaxivity"] = f"{source_prefix}.{relaxivity_key}"
 
-    hematocrit_val, hematocrit_key = _payload_lookup(
+    hematocrit = _payload_field(
+        "hematocrit",
         (
             "hematocrit",
             "Hematocrit",
             "SyntheticPhantom.hematocrit",
             "SyntheticPhantom.Hematocrit",
             "SyntheticPhantom.RecommendedROCKETSHIPHematocrit",
-        )
+        ),
     )
-    hematocrit = None
-    if hematocrit_val is not None:
-        hematocrit = float(hematocrit_val)
-        metadata_sources["hematocrit"] = f"{source_prefix}.{hematocrit_key}"
 
-    aif_kind_val, aif_kind_key = _payload_lookup(
+    aif_concentration_kind = _payload_field(
+        "aif_concentration_kind",
         (
             "AIFConcentrationKind",
             "SyntheticPhantom.AIFConcentrationKind",
-        )
+        ),
+        cast=lambda value: str(value).strip().lower(),
     )
-    aif_concentration_kind = str(aif_kind_val).strip().lower() if aif_kind_val is not None else None
-    if aif_kind_val is not None and aif_kind_key is not None:
-        metadata_sources["aif_concentration_kind"] = f"{source_prefix}.{aif_kind_key}"
 
     if tr_ms is None:
         raise ValueError("Unable to determine TR; set stage_overrides.tr_ms or provide DCE metadata JSON")
@@ -833,23 +849,18 @@ def _resolve_timepoint_window(
     start_is_set = _override_value_is_set(start_raw)
     end_is_set = _override_value_is_set(end_raw)
 
-    start_1b = 1
-    if start_is_set:
+    def _frame_override(raw: Any, is_set: bool, key: str, fallback: int) -> int:
+        """Parse a 1-based frame override, falling back for non-positive values."""
+        if not is_set:
+            return fallback
         try:
-            start_1b = int(float(start_raw))
+            value = int(float(raw))
         except (TypeError, ValueError) as exc:
-            raise ValueError(f"stage_overrides.start_t must be numeric, got {start_raw!r}") from exc
-        if start_1b <= 0:
-            start_1b = 1
+            raise ValueError(f"stage_overrides.{key} must be numeric, got {raw!r}") from exc
+        return fallback if value <= 0 else value
 
-    end_1b = n_timepoints
-    if end_is_set:
-        try:
-            end_1b = int(float(end_raw))
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"stage_overrides.end_t must be numeric, got {end_raw!r}") from exc
-        if end_1b <= 0:
-            end_1b = n_timepoints
+    start_1b = _frame_override(start_raw, start_is_set, "start_t", 1)
+    end_1b = _frame_override(end_raw, end_is_set, "end_t", n_timepoints)
 
     start_1b = max(1, min(start_1b, n_timepoints))
     end_1b = max(1, min(end_1b, n_timepoints))
@@ -924,13 +935,9 @@ def _normalize_zero_one(values: np.ndarray) -> np.ndarray:
     arr = np.asarray(values, dtype=np.float64)
     if arr.size == 0:
         return arr.copy()
-    finite = np.isfinite(arr)
-    if not np.any(finite):
-        return np.zeros_like(arr, dtype=np.float64)
-    filled = arr.copy()
-    if not np.all(finite):
-        idx = np.arange(arr.size, dtype=np.float64)
-        filled[~finite] = np.interp(idx[~finite], idx[finite], filled[finite])
+    # An all-nonfinite input fills to zeros, which the vmax <= vmin guard below
+    # then turns into the same all-zero result the old inline branch returned.
+    filled = _fill_nonfinite_1d(arr)
     vmin = float(np.min(filled))
     vmax = float(np.max(filled))
     if not math.isfinite(vmin) or not math.isfinite(vmax) or vmax <= vmin:
@@ -1268,13 +1275,10 @@ def _piecewise_constant_baseline_end(stlv: np.ndarray) -> Dict[str, Any]:
     best_mse = math.inf
 
     # MATLAB branch brute-force split: two piecewise constants with transition at t.
+    # n >= 3 and 2 <= t_1b <= n-1 hold by construction, so both slices are non-empty.
     for t_1b in range(2, n):
-        if t_1b >= n:
-            continue
         before = x[: t_1b - 1]
         after = x[t_1b:]
-        if before.size == 0 or after.size == 0:
-            continue
         before_mean = float(np.mean(before))
         after_mean = float(np.mean(after))
         pred = np.empty_like(x)
@@ -1434,13 +1438,8 @@ def _resolve_aif_sidecar_steady_state_end(config: DcePipelineConfig) -> Tuple[Op
     """
     if not config.aif_files:
         return None, None
-    aif_path = Path(config.aif_files[0])
-    aif_text = str(aif_path)
-    if aif_text.endswith(".nii.gz"):
-        sidecar_path = Path(aif_text[: -len(".nii.gz")] + ".json")
-    elif aif_path.suffix.lower() == ".nii":
-        sidecar_path = aif_path.with_suffix(".json")
-    else:
+    sidecar_path = _json_sidecar_for(Path(config.aif_files[0]))
+    if sidecar_path is None:
         return None, None
 
     if not sidecar_path.exists():
@@ -1535,27 +1534,34 @@ def _clean_ab(
     keep[over_threshold] = False
 
     for col in np.where((bad_counts > 0) & ~over_threshold)[0]:
+        # A basic column slice is a view, so repairs below land in `cleaned` directly;
+        # there is no write-back step. Columns abandoned mid-repair are dropped by `keep`.
         vec = cleaned[:, col]
         col_bad = bad_mask[:, col]
         bad = np.where(col_bad)[0]
-        for idx in bad:
-            start = max(0, int(idx) - 5)
-            end = min(n_time, int(idx) + 6)
+        for raw_idx in bad:
+            idx = int(raw_idx)
+            start = max(0, idx - 5)
+            end = min(n_time, idx + 6)
             neighbors = np.arange(start, end, dtype=np.int64)
-            neighbors = neighbors[neighbors != int(idx)]
+            neighbors = neighbors[neighbors != idx]
             # `bad` is exactly where(col_bad), so indexing the mask selects the
             # same neighbours in the same order as np.isin, without the scan.
             neighbors = neighbors[~col_bad[neighbors]]
             if neighbors.size < 2:
                 keep[col] = False
                 break
-            rel = neighbors - int(idx)
+            rel = neighbors - idx
             if not np.any(rel > 0) or not np.any(rel < 0):
                 keep[col] = False
                 break
-            vec[int(idx)] = float(np.interp(float(idx), neighbors.astype(np.float64), vec[neighbors].astype(np.float64)))
-        if keep[col]:
-            cleaned[:, col] = vec
+            vec[idx] = float(
+                np.interp(
+                    float(idx),
+                    np.asarray(neighbors, dtype=np.float64),
+                    np.asarray(vec[neighbors], dtype=np.float64),
+                )
+            )
 
     return cleaned[:, keep], t1_values[keep], roi_indices[keep]
 
@@ -1687,13 +1693,7 @@ def _save_stage_a_qc_figures(
     r1_toi: np.ndarray,
     r1_lv: np.ndarray,
 ) -> Dict[str, str]:
-    try:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt  # type: ignore
-    except Exception as exc:
-        raise RuntimeError("matplotlib is required for QC figure saving") from exc
+    plt = _require_pyplot("QC figure saving")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     figure_paths: Dict[str, str] = {}
@@ -1735,6 +1735,33 @@ def _save_stage_a_qc_figures(
     return figure_paths
 
 
+def _require_pyplot(purpose: str) -> Any:
+    """Import pyplot on the headless Agg backend, or raise naming what needed it."""
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt  # type: ignore
+    except Exception as exc:
+        raise RuntimeError(f"matplotlib is required for {purpose}") from exc
+    return plt
+
+
+def _as_spatial_volume(img: np.ndarray, spatial: Tuple[int, ...], label: str) -> np.ndarray:
+    """Conform a loaded map to the dynamic's 3-D spatial grid.
+
+    Drops a trailing singleton 4th dimension and promotes 2-D input when the dynamic
+    is single-slice, then enforces the shape match. `label` names the map in the error.
+    """
+    if img.ndim == 4:
+        img = img[..., 0]
+    if spatial[2] == 1 and img.ndim == 2:
+        img = img[..., np.newaxis]
+    if img.shape != spatial:
+        raise ValueError(f"{label} shape {img.shape} does not match dynamic spatial shape {spatial}")
+    return img
+
+
 def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     dynamic = _load_nifti_data(config.dynamic_files[0])
     if dynamic.ndim != 4:
@@ -1747,33 +1774,10 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
 
     if not config.roi_files:
         raise ValueError("Stage-A real mode requires at least one ROI mask file")
-    aif_mask_img = _load_nifti_data(config.aif_files[0])
-    roi_mask_img = _load_nifti_data(config.roi_files[0])
-    t1map_img = _load_nifti_data(config.t1map_files[0])
-
-    if aif_mask_img.ndim == 4:
-        aif_mask_img = aif_mask_img[..., 0]
-    if roi_mask_img.ndim == 4:
-        roi_mask_img = roi_mask_img[..., 0]
-    if t1map_img.ndim == 4:
-        t1map_img = t1map_img[..., 0]
-
-    # Accept 2D inputs for single-slice dynamics.
-    if dynamic.shape[2] == 1:
-        if aif_mask_img.ndim == 2:
-            aif_mask_img = aif_mask_img[..., np.newaxis]
-        if roi_mask_img.ndim == 2:
-            roi_mask_img = roi_mask_img[..., np.newaxis]
-        if t1map_img.ndim == 2:
-            t1map_img = t1map_img[..., np.newaxis]
-
     spatial = dynamic.shape[:3]
-    if aif_mask_img.shape != spatial:
-        raise ValueError(f"AIF mask shape {aif_mask_img.shape} does not match dynamic spatial shape {spatial}")
-    if roi_mask_img.shape != spatial:
-        raise ValueError(f"ROI mask shape {roi_mask_img.shape} does not match dynamic spatial shape {spatial}")
-    if t1map_img.shape != spatial:
-        raise ValueError(f"T1 map shape {t1map_img.shape} does not match dynamic spatial shape {spatial}")
+    aif_mask_img = _as_spatial_volume(_load_nifti_data(config.aif_files[0]), spatial, "AIF mask")
+    roi_mask_img = _as_spatial_volume(_load_nifti_data(config.roi_files[0]), spatial, "ROI mask")
+    t1map_img = _as_spatial_volume(_load_nifti_data(config.t1map_files[0]), spatial, "T1 map")
 
     # MATLAB A_make_R1maps_func converts T1 maps from ms->s when values are large.
     # Keep the same unit behavior to avoid 1000x concentration scaling errors.
@@ -1791,13 +1795,9 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
         raise ValueError("AIF mask must be a dedicated vascular ROI and cannot be identical to ROI mask")
 
     if config.noise_files:
-        noise_mask_img = _load_nifti_data(config.noise_files[0])
-        if noise_mask_img.ndim == 4:
-            noise_mask_img = noise_mask_img[..., 0]
-        if dynamic.shape[2] == 1 and noise_mask_img.ndim == 2:
-            noise_mask_img = noise_mask_img[..., np.newaxis]
-        if noise_mask_img.shape != spatial:
-            raise ValueError(f"Noise mask shape {noise_mask_img.shape} does not match dynamic spatial shape {spatial}")
+        noise_mask_img = _as_spatial_volume(
+            _load_nifti_data(config.noise_files[0]), spatial, "Noise mask"
+        )
         noise_mask = noise_mask_img > 0
     else:
         noise_mask = np.zeros(spatial, dtype=bool)
@@ -1862,12 +1862,12 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     relaxivity = float(
         relaxivity_override
         if relaxivity_override is not None
-        else (timing.get("relaxivity") if timing.get("relaxivity") is not None else 3.4)
+        else (timing.get("relaxivity") if timing.get("relaxivity") is not None else DEFAULT_RELAXIVITY)
     )
     hematocrit = float(
         hematocrit_override
         if hematocrit_override is not None
-        else (timing.get("hematocrit") if timing.get("hematocrit") is not None else 0.45)
+        else (timing.get("hematocrit") if timing.get("hematocrit") is not None else DEFAULT_HEMATOCRIT)
     )
     if relaxivity <= 0.0:
         raise ValueError(f"relaxivity must be positive, got {relaxivity}")
@@ -2558,13 +2558,11 @@ def _fit_aif_biexp(
 
     weighted = curve * step
     max_idx = int(np.argmax(weighted))
-    fit_step = step.copy()
-    fit_step[max_idx + 1 :] = 0.0
-    if np.count_nonzero(fit_step > 0) == 0:
-        fit_step = step.copy()
-
-    onset = np.flatnonzero(fit_step > 0)
-    baseline = float(np.mean(curve[: onset[0] + 1])) if onset.size > 0 else float(curve[0])
+    # The injection-window onset is `start_idx` by construction: truncating `step` at
+    # `max_idx` either leaves [start_idx, min(end_idx, max_idx)] non-empty, or empties it
+    # entirely (max_idx < start_idx, which happens when the windowed curve never exceeds
+    # zero) and restores the untruncated window. Either way the first set frame is start_idx.
+    baseline = float(np.mean(curve[: start_idx + 1]))
     maxer = float(curve[max_idx])
     if not math.isfinite(maxer) or maxer <= 0:
         maxer = float(np.max(curve))
@@ -2955,13 +2953,7 @@ def _save_stage_b_qc_figure(
     t_base_end: Optional[float] = None,
     t0_exp: Optional[float] = None,
 ) -> Dict[str, str]:
-    try:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt  # type: ignore
-    except Exception as exc:
-        raise RuntimeError("matplotlib is required for Stage-B QC figure saving") from exc
+    plt = _require_pyplot("Stage-B QC figure saving")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     fig = plt.figure(figsize=(10, 4))
@@ -3087,8 +3079,11 @@ def _run_stage_b_real(config: DcePipelineConfig, stage_a: Dict[str, Any]) -> Dic
         stlv_use = stlv_roi.copy()
         aif_name = "raw"
     else:
+        # `_resolve_stage_b_aif_mode` already rejects imported mode without a path, so
+        # this cannot be None; falling back to Path("") only buried that error message.
         imported_path = _resolve_imported_aif_path(config)
-        imported = _load_imported_aif(imported_path if imported_path else Path(""))
+        assert imported_path is not None
+        imported = _load_imported_aif(imported_path)
         cp_use = _resample_or_pad_curve(imported["Cp_use"], timer, imported["timer"])
         imported_stlv = imported["Stlv_use"] if imported["Stlv_use"] is not None else imported["Cp_use"]
         stlv_use = _resample_or_pad_curve(imported_stlv, timer, imported["timer"])
@@ -3515,13 +3510,14 @@ def _fit_fxr_curve(
     )
 
 
+# Each fitted parameter contributes a value column plus a CI low/high pair, and every
+# layout carries one SSE column, so n_params == (len(param_names) - 1) / 3. Deriving it
+# keeps this from drifting out of step with MODEL_LAYOUTS. The model set stays explicit:
+# `auc` has a layout but no forward model in `_predict_curves_batch`, and must keep
+# resolving to None there so its voxels return NaN rather than entering the fxr branch.
 _CFIT_MIN_PARAMS = {
-    "tofts": 2,
-    "patlak": 2,
-    "ex_tofts": 3,
-    "tissue_uptake": 3,
-    "fxr": 3,
-    "2cxm": 4,
+    name: (len(MODEL_LAYOUTS[name]["param_names"]) - 1) // 3
+    for name in ("tofts", "patlak", "ex_tofts", "tissue_uptake", "fxr", "2cxm")
 }
 
 
@@ -3698,24 +3694,14 @@ def _write_postfit_arrays(
     return str(out_path)
 
 
-@lru_cache(maxsize=1)
+# Both read the single cached probe in `accel_backend` rather than repeating its
+# imports; it reports `py*_imported` on every branch it can return.
 def _cpufit_import_available() -> bool:
-    try:
-        import pycpufit.cpufit as _  # type: ignore  # noqa: F401
-
-        return True
-    except Exception:
-        return False
+    return bool(probe_acceleration_backend().get("pycpufit_imported", False))
 
 
-@lru_cache(maxsize=1)
 def _gpufit_import_available() -> bool:
-    try:
-        import pygpufit.gpufit as _  # type: ignore  # noqa: F401
-
-        return True
-    except Exception:
-        return False
+    return bool(probe_acceleration_backend().get("pygpufit_imported", False))
 
 
 def _acceleration_backend_attempt_order(acceleration_backend: str) -> List[str]:
@@ -3737,14 +3723,11 @@ def _accelerated_output_has_usable_primary_params(model_name: str, output: np.nd
     if arr.shape[0] == 0:
         return True
 
-    param_cols = {
-        "tofts": (0, 1),
-        "ex_tofts": (0, 1, 2),
-        "patlak": (0, 1),
-        "tissue_uptake": (0, 1, 2),
-        "2cxm": (0, 1, 2, 3),
-    }
-    cols = param_cols.get(model_name, tuple(range(arr.shape[1])))
+    # Reachable only from `_fit_stage_d_model` under `fit_func is not None`, so
+    # `model_name` is always a `_stage_d_fit_funcs()` key. Index directly: a model added
+    # without a parameter count should fail loudly, not silently widen the criterion to
+    # every column (SSE and CI included).
+    cols = tuple(range(_CFIT_MIN_PARAMS[model_name]))
     max_col = max(cols) if cols else -1
     if max_col >= arr.shape[1]:
         return False
@@ -3997,7 +3980,7 @@ def _run_stage_d_real(
     if sttum is not None:
         sttum = _smooth_time_matrix(sttum, time_smoothing, time_smoothing_window)
 
-    relaxivity = float(stage_a.get("relaxivity", _stage_override(config, "relaxivity", 3.4)))
+    relaxivity = float(stage_a.get("relaxivity", _stage_override(config, "relaxivity", DEFAULT_RELAXIVITY)))
     prefs = _stage_d_fit_prefs(config)
     fw = float(prefs["fxr_fw"])
 
@@ -4021,6 +4004,18 @@ def _run_stage_d_real(
     start_injection_min = float(stage_b.get("start_injection_min", timer[0]))
     sss = np.asarray(arrays["Sss"], dtype=np.float64).reshape(-1) if "Sss" in arrays else None
     ssstum = np.asarray(arrays["Ssstum"], dtype=np.float64).reshape(-1) if "Ssstum" in arrays else None
+
+    # ROI aggregates of the Stage-B signal arrays do not depend on the model, so they are
+    # built once here rather than re-gathered per model inside the loop below.
+    roi_sttum_all: Optional[np.ndarray] = None
+    roi_ssstum_all: Optional[np.ndarray] = None
+    if roi_columns:
+        if sttum is not None:
+            roi_sttum_all = np.stack([np.mean(sttum[:, cols], axis=1) for cols in roi_columns], axis=1)
+        if ssstum is not None:
+            roi_ssstum_all = np.asarray(
+                [float(np.mean(ssstum[cols])) for cols in roi_columns], dtype=np.float64
+            )
 
     model_outputs: Dict[str, Any] = {}
     stage_arrays: Dict[str, np.ndarray] = {}
@@ -4051,23 +4046,34 @@ def _run_stage_d_real(
             r1o = 1.0 / t1tum
 
         n_params = len(param_names)
-        if fit_voxels:
-            voxel_results = _fit_stage_d_model(
+
+        def _fit(
+            ct: np.ndarray,
+            r1o_arg: Optional[np.ndarray],
+            sttum_arg: Optional[np.ndarray],
+            ssstum_arg: Optional[np.ndarray],
+        ) -> np.ndarray:
+            # The voxel and ROI fits differ only in these four arrays; binding the rest
+            # once keeps them from drifting apart when `_fit_stage_d_model` changes.
+            return _fit_stage_d_model(
                 model_name=model_name,
-                ct=ct_source,
+                ct=ct,
                 cp_use=cp_use,
                 timer=timer,
                 prefs=prefs,
-                r1o=r1o,
+                r1o=r1o_arg,
                 relaxivity=relaxivity,
                 fw=fw,
                 stlv_use=stlv_use,
-                sttum=sttum,
+                sttum=sttum_arg,
                 start_injection_min=start_injection_min,
                 sss=sss,
-                ssstum=ssstum,
+                ssstum=ssstum_arg,
                 acceleration_backend=acceleration_backend,
             )
+
+        if fit_voxels:
+            voxel_results = _fit(ct_source, r1o, sttum, ssstum)
         else:
             # Placeholder so shapes stay consistent; no maps are written in ROI-only mode.
             voxel_results = np.full((ct_source.shape[1], n_params), np.nan, dtype=np.float64)
@@ -4079,26 +4085,11 @@ def _run_stage_d_real(
             roi_curve = np.stack([np.mean(ct_source[:, cols], axis=1) for cols in roi_columns], axis=1)
             if model_name == "fxr" and r1o is not None:
                 roi_r1o = np.asarray([float(np.mean(r1o[cols])) for cols in roi_columns], dtype=np.float64)
-            roi_sttum = None
-            if sttum is not None:
-                roi_sttum = np.stack([np.mean(sttum[:, cols], axis=1) for cols in roi_columns], axis=1)
-            roi_results = _fit_stage_d_model(
-                model_name=model_name,
-                ct=roi_curve,
-                cp_use=cp_use,
-                timer=timer,
-                prefs=prefs,
-                r1o=roi_r1o,
-                relaxivity=relaxivity,
-                fw=fw,
-                stlv_use=stlv_use,
-                sttum=roi_sttum,
-                start_injection_min=start_injection_min,
-                sss=sss,
-                ssstum=np.asarray([float(np.mean(ssstum[cols])) for cols in roi_columns], dtype=np.float64)
-                if ssstum is not None and ssstum.size == ct_source.shape[1]
-                else None,
-                acceleration_backend=acceleration_backend,
+            roi_results = _fit(
+                roi_curve,
+                roi_r1o,
+                roi_sttum_all,
+                roi_ssstum_all if ssstum is not None and ssstum.size == ct_source.shape[1] else None,
             )
 
         map_paths = (
@@ -4240,8 +4231,8 @@ class HybridStageRunner:
         event_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> Dict[str, Any]:
         del event_callback
-        mode = str(_stage_override(config, "stage_b_mode", "auto")).strip().lower()
-        if mode == "scaffold":
+
+        def _scaffold(**extra: Any) -> Dict[str, Any]:
             return {
                 "stage": "B",
                 "status": "scaffold",
@@ -4249,19 +4240,16 @@ class HybridStageRunner:
                 "aif_mode": config.aif_mode.strip().lower(),
                 "imported_aif_path": str(config.imported_aif_path) if config.imported_aif_path else None,
                 "manual_click_aif_enabled": False,
+                **extra,
             }
+
+        mode = str(_stage_override(config, "stage_b_mode", "auto")).strip().lower()
+        if mode == "scaffold":
+            return _scaffold()
 
         if mode == "auto":
             if not isinstance(stage_a.get("arrays"), dict):
-                return {
-                    "stage": "B",
-                    "status": "scaffold",
-                    "impl": "scaffold",
-                    "aif_mode": config.aif_mode.strip().lower(),
-                    "imported_aif_path": str(config.imported_aif_path) if config.imported_aif_path else None,
-                    "manual_click_aif_enabled": False,
-                    "reason": "stage_a_arrays_missing",
-                }
+                return _scaffold(reason="stage_a_arrays_missing")
             return _run_stage_b_real(config, stage_a)
 
         if mode == "real":
@@ -4276,8 +4264,7 @@ class HybridStageRunner:
         stage_b: Dict[str, Any],
         event_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> Dict[str, Any]:
-        mode = str(_stage_override(config, "stage_d_mode", "auto")).strip().lower()
-        if mode == "scaffold":
+        def _scaffold(**extra: Any) -> Dict[str, Any]:
             backend_info = _resolve_stage_d_backend(config)
             return {
                 "stage": "D",
@@ -4288,22 +4275,16 @@ class HybridStageRunner:
                 "backend_reason": backend_info["reason"],
                 "write_xls": bool(config.write_xls),
                 "model_flags": dict(config.model_flags),
+                **extra,
             }
+
+        mode = str(_stage_override(config, "stage_d_mode", "auto")).strip().lower()
+        if mode == "scaffold":
+            return _scaffold()
 
         if mode == "auto":
             if not isinstance(stage_b.get("arrays"), dict):
-                backend_info = _resolve_stage_d_backend(config)
-                return {
-                    "stage": "D",
-                    "status": "scaffold",
-                    "impl": "scaffold",
-                    "selected_backend": backend_info["selected_backend"],
-                    "acceleration_backend": backend_info["acceleration_backend"],
-                    "backend_reason": backend_info["reason"],
-                    "write_xls": bool(config.write_xls),
-                    "model_flags": dict(config.model_flags),
-                    "reason": "stage_b_arrays_missing",
-                }
+                return _scaffold(reason="stage_b_arrays_missing")
             return _run_stage_d_real(config, stage_a, stage_b, event_callback=event_callback)
 
         if mode == "real":
@@ -4467,58 +4448,45 @@ def run_dce_pipeline(
         dce_preferences_path=str(prefs_path) if prefs_path else None,
     )
 
+    def _finish_stage(stage: str, data: Dict[str, Any], **extra: Any) -> None:
+        """Checkpoint a completed stage and emit its stage_done + artifact events."""
+        if config.checkpoint_dir:
+            checkpoint = _write_stage_checkpoint(config.checkpoint_dir, stage, data)
+            _emit_progress(event_callback, "checkpoint_written", stage=stage, path=str(checkpoint))
+        arrays = data.get("arrays")
+        _emit_progress(
+            event_callback,
+            "stage_done",
+            stage=stage,
+            status=str(data.get("status", "")),
+            impl=str(data.get("impl", "")),
+            array_shapes=_array_shapes(arrays) if isinstance(arrays, dict) else {},
+            **extra,
+        )
+        _emit_stage_artifacts(event_callback, stage, data)
+
     current_stage = "A"
     try:
         _emit_progress(event_callback, "stage_start", stage="A")
         stage_a = _call_stage(active_runner.run_a, config, event_callback=event_callback)
-        if config.checkpoint_dir:
-            checkpoint_a = _write_stage_checkpoint(config.checkpoint_dir, "A", stage_a)
-            _emit_progress(event_callback, "checkpoint_written", stage="A", path=str(checkpoint_a))
-        _emit_progress(
-            event_callback,
-            "stage_done",
-            stage="A",
-            status=str(stage_a.get("status", "")),
-            impl=str(stage_a.get("impl", "")),
-            array_shapes=_array_shapes(stage_a.get("arrays", {})) if isinstance(stage_a.get("arrays"), dict) else {},
-        )
-        _emit_stage_artifacts(event_callback, "A", stage_a)
+        _finish_stage("A", stage_a)
 
         current_stage = "B"
         _emit_progress(event_callback, "stage_start", stage="B")
         stage_b = _call_stage(active_runner.run_b, config, stage_a, event_callback=event_callback)
-        if config.checkpoint_dir:
-            checkpoint_b = _write_stage_checkpoint(config.checkpoint_dir, "B", stage_b)
-            _emit_progress(event_callback, "checkpoint_written", stage="B", path=str(checkpoint_b))
-        _emit_progress(
-            event_callback,
-            "stage_done",
-            stage="B",
-            status=str(stage_b.get("status", "")),
-            impl=str(stage_b.get("impl", "")),
-            array_shapes=_array_shapes(stage_b.get("arrays", {})) if isinstance(stage_b.get("arrays"), dict) else {},
-        )
-        _emit_stage_artifacts(event_callback, "B", stage_b)
+        _finish_stage("B", stage_b)
 
         current_stage = "D"
         _emit_progress(event_callback, "stage_start", stage="D")
         stage_d = _call_stage(
             active_runner.run_d, config, stage_a, stage_b, event_callback=event_callback
         )
-        if config.checkpoint_dir:
-            checkpoint_d = _write_stage_checkpoint(config.checkpoint_dir, "D", stage_d)
-            _emit_progress(event_callback, "checkpoint_written", stage="D", path=str(checkpoint_d))
-        _emit_progress(
-            event_callback,
-            "stage_done",
-            stage="D",
-            status=str(stage_d.get("status", "")),
-            impl=str(stage_d.get("impl", "")),
-            array_shapes=_array_shapes(stage_d.get("arrays", {})) if isinstance(stage_d.get("arrays"), dict) else {},
+        _finish_stage(
+            "D",
+            stage_d,
             models_run=list(stage_d.get("models_run", [])),
             models_skipped=list(stage_d.get("models_skipped", [])),
         )
-        _emit_stage_artifacts(event_callback, "D", stage_d)
     except Exception as exc:
         _emit_progress(
             event_callback,
