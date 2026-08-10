@@ -17,8 +17,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "python"))
 
 from rocketship import (  # noqa: E402
-    model_2cxm_cfit,
-    model_2cxm_cfit_batch,
+    cxm2_curve,
+    cxm2_curve_batch,
     model_2cxm_fit,
     model_extended_tofts_cfit,
     model_extended_tofts_cfit_batch,
@@ -48,6 +48,22 @@ def _within_tol(actual: float, expected: float, atol: float, rtol: float) -> boo
 
 def _mse(a: list[float], b: list[float]) -> float:
     return sum((float(x) - float(y)) ** 2 for x, y in zip(a, b)) / len(a)
+
+
+def _twocxm_samples(ktrans, ve, vp, fp, cp, timer) -> list[float]:
+    """One 2CXM curve at the acquired times, via the single forward model.
+
+    2CXM is evaluated on a dense 0.1 s grid rather than the acquired timebase
+    (see `dce_models.DenseResampleGrid`), so producing acquired-time samples
+    means building the grid and interpolating back. `cxm2_curve` is
+    parametrized on E = Ktrans / Fp.
+    """
+    from dce_models import build_dense_resample_grid
+
+    grid = build_dense_resample_grid(cp, list(timer))
+    assert grid is not None, "test timer cannot support a dense grid"
+    dense = cxm2_curve(vp, ve, fp, float(ktrans) / float(fp), grid)
+    return [float(v) for v in grid.to_samples(dense)]
 
 
 @pytest.mark.unit
@@ -174,29 +190,6 @@ def test_tissue_uptake_matches_matlab_baseline_profile() -> None:
     expected = baseline["dce"]["forward"]["tissue_uptake"]
 
     actual = model_tissue_uptake_cfit(ktrans, fp, tp, cp, timer)
-    assert len(actual) == len(expected)
-    for a, e in zip(actual, expected):
-        assert _within_tol(float(a), float(e), float(tol["atol"]), float(tol["rtol"])), (
-            f"Mismatch: actual={a} expected={e}"
-        )
-
-
-@pytest.mark.unit
-def test_twocxm_forward_matches_matlab_baseline_profile() -> None:
-    baseline = json.loads((REPO_ROOT / "tests/contracts/baselines/matlab_reference_v1.json").read_text())
-    tolerances = json.loads((REPO_ROOT / "tests/contracts/tolerance_profiles.json").read_text())
-    tol = tolerances["forward_exact"]
-
-    timer = baseline["dce"]["forward"]["timer"]
-    cp = baseline["dce"]["forward"]["Cp"]
-    params = baseline["dce"]["params"]
-    ktrans = float(params["ktrans"])
-    ve = float(params["ve"])
-    vp = float(params["vp"])
-    fp = float(params["fp"])
-    expected = baseline["dce"]["forward"]["twocxm"]
-
-    actual = model_2cxm_cfit(ktrans, ve, vp, fp, cp, timer)
     assert len(actual) == len(expected)
     for a, e in zip(actual, expected):
         assert _within_tol(float(a), float(e), float(tol["atol"]), float(tol["rtol"])), (
@@ -391,10 +384,6 @@ def test_cfit_batch_matches_scalar_on_pathological_grid() -> None:
         "tissue_uptake", model_tissue_uptake_cfit_batch(k3, x3, y3, cp, timer),
         model_tissue_uptake_cfit, three, (cp_l, t_l), n_time,
     )
-    _assert_batch_matches_scalar(
-        "2cxm", model_2cxm_cfit_batch(k4, x4, y4, z4, cp, timer),
-        model_2cxm_cfit, four, (cp_l, t_l), n_time,
-    )
     # fxr's fourth grid axis is r1o, which it also uses as r1i.
     _assert_batch_matches_scalar(
         "fxr",
@@ -405,18 +394,35 @@ def test_cfit_batch_matches_scalar_on_pathological_grid() -> None:
         four, (cp_l, t_l), n_time,
     )
 
-    # Drives 2cxm's discriminant negative, where the scalar `math.sqrt` raises and
-    # the voxel must come back NaN rather than as a number. The grid above does not
-    # reach it and random draws hit it only once in a few thousand voxels.
-    negative_root = [(-0.8803508696373115, 0.5495718236942608, -1.5881926099945167, 1.8132161026709008)]
-    cols = [np.array([c[j] for c in negative_root]) for j in range(4)]
-    assert np.all(np.isnan(model_2cxm_cfit_batch(*cols, cp, timer))), (
-        "2cxm must reject a negative discriminant, matching math.sqrt raising"
-    )
-    _assert_batch_matches_scalar(
-        "2cxm-negative-root", model_2cxm_cfit_batch(*cols, cp, timer),
-        model_2cxm_cfit, negative_root, (cp_l, t_l), n_time,
-    )
+
+@pytest.mark.unit
+def test_cxm2_batch_matches_single_voxel() -> None:
+    """`cxm2_curve_batch` must agree column-for-column with the single-voxel model.
+
+    2CXM sits outside `_assert_batch_matches_scalar` because it has no
+    acquired-grid scalar counterpart -- the batch evaluates on the dense grid
+    and interpolates back, exactly as `_twocxm_samples` does.
+    """
+    rng = np.random.default_rng(20260802)
+    timer = np.linspace(0.0, 5.0, 40)
+    cp = 6.0 * np.exp(-1.6 * timer) + 1.4 * np.exp(-0.13 * timer)
+    cp[0] = 0.0
+
+    n_vox = 12
+    fp = rng.uniform(0.3, 1.6, n_vox)
+    ktrans = fp * rng.uniform(0.02, 0.9, n_vox)  # keeps E in range
+    ve = rng.uniform(0.05, 0.6, n_vox)
+    vp = rng.uniform(0.005, 0.1, n_vox)
+    # Degenerate voxels must come back NaN rather than as numbers.
+    ktrans[0], fp[1], ve[2], vp[3] = np.nan, 0.0, 0.0, 0.0
+
+    batch = cxm2_curve_batch(ktrans, ve, vp, fp, cp, timer)
+    assert batch.shape == (timer.size, n_vox)
+    assert np.all(np.isnan(batch[:, :4])), "degenerate parameters must yield NaN columns"
+
+    for i in range(4, n_vox):
+        expected = _twocxm_samples(ktrans[i], ve[i], vp[i], fp[i], cp, timer)
+        np.testing.assert_allclose(batch[:, i], expected, rtol=1e-12, atol=0.0)
 
 
 @pytest.mark.unit
@@ -455,10 +461,6 @@ def test_cfit_batch_matches_scalar_on_random_params() -> None:
         _assert_batch_matches_scalar(
             "tissue_uptake", model_tissue_uptake_cfit_batch(k, fp, tp, cp, timer),
             model_tissue_uptake_cfit, list(zip(k, fp, tp)), (cp_l, t_l), n_time,
-        )
-        _assert_batch_matches_scalar(
-            "2cxm", model_2cxm_cfit_batch(k, ve, vp, fp, cp, timer),
-            model_2cxm_cfit, list(zip(k, ve, vp, fp)), (cp_l, t_l), n_time,
         )
         _assert_batch_matches_scalar(
             "fxr",
@@ -667,7 +669,7 @@ def test_twocxm_fit_is_unit_consistent_for_timer_and_prefs() -> None:
     timer_min = [0.0, 0.05, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0, 1.4, 1.8, 2.2]
     timer_sec = [t * 60.0 for t in timer_min]
     cp = [0.0, 0.4, 0.9, 1.2, 1.0, 0.82, 0.63, 0.49, 0.35, 0.25, 0.18]
-    ct = model_2cxm_cfit(0.03, 0.24, 0.045, 0.31, cp, timer_min)
+    ct = _twocxm_samples(0.03, 0.24, 0.045, 0.31, cp, timer_min)
 
     prefs_min = {
         "time_unit": "minutes",

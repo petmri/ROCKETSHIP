@@ -2,8 +2,8 @@
 
 from dce_models import model_patlak_cfit, model_tofts_cfit
 from dce_models import model_extended_tofts_cfit, model_extended_tofts_fit, model_patlak_fit, model_patlak_linear, model_patlak_linear_batch, model_tofts_fit
-from dce_models import model_2cxm_cfit, model_fxr_cfit, model_tissue_uptake_cfit, model_vp_cfit
-from dce_models import model_2cxm_cfit_batch, model_extended_tofts_cfit_batch, model_fxr_cfit_batch
+from dce_models import model_fxr_cfit, model_tissue_uptake_cfit, model_vp_cfit
+from dce_models import cxm2_curve, cxm2_curve_batch, model_extended_tofts_cfit_batch, model_fxr_cfit_batch
 from dce_models import model_patlak_cfit_batch, model_tissue_uptake_cfit_batch, model_tofts_cfit_batch
 from dce_models import model_2cxm_fit, model_fxr_fit, model_tissue_uptake_fit, model_vp_fit
 from dce_pipeline import DcePipelineConfig, run_dce_pipeline
@@ -22,7 +22,6 @@ __all__ = [
     "model_patlak_linear_batch",
     "model_patlak_fit",
     "model_tofts_fit",
-    "model_2cxm_cfit",
     "model_fxr_cfit",
     "model_vp_cfit",
     "model_tissue_uptake_cfit",
@@ -30,7 +29,8 @@ __all__ = [
     "model_patlak_cfit_batch",
     "model_extended_tofts_cfit_batch",
     "model_tissue_uptake_cfit_batch",
-    "model_2cxm_cfit_batch",
+    "cxm2_curve",
+    "cxm2_curve_batch",
     "model_fxr_cfit_batch",
     "model_vp_fit",
     "model_tissue_uptake_fit",
