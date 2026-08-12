@@ -320,7 +320,7 @@ which is how the literal survived; `TestResolveStageBTimer` now covers all nine 
 The guard is scoped to shipped code, not `tests/python` (clean today, checked). A literal in a
 test only affects that test, whereas one in `python/` silently changes user results.
 
-### Phase 5 — MATLAB values + docs
+### Phase 5 — MATLAB values + docs — DONE (one follow-up needs MATLAB)
 Apply the D2/D3-agreed values to `dce/dce_preferences.txt` (`gpu_tolerance` 1e-12 → 1e-6,
 `voxel_MaxFunEvals` 50 → 200) and `script_preferences.txt` (`relaxivity` 2.8 and
 `hematocrit` 0.45 — reconcile or document as MATLAB-side study values). Regenerate the
@@ -328,6 +328,36 @@ MATLAB contract baseline if any contract-relevant number moved. Rewrite `docs/dc
 as the reference for the single file, and update `AGENTS.md`'s "Config resolution" section,
 which documents a three-tier chain and a `dce_preferences.txt` bridge that both cease to
 exist.
+
+**Outcome.** `dce/dce_preferences.txt` now carries `gpu_tolerance = 1e-6` (was 1e-12) and
+`voxel_MaxFunEvals = 200` (was 50), each with the measurement that justifies it inline, so
+the number is not left looking arbitrary to the next reader. `voxel_MaxIter`, the `aif_*`
+budgets and the `voxel_TolFun`/`TolX` pair already matched `dce_defaults.json` and were left
+alone. D9 is documented at the point of divergence — a comment on `script_preferences.txt`'s
+`relaxivity` explaining why MATLAB keeps a fallback the Python port refuses to have — and in
+`docs/dce_options.md`, whose precedence section was rewritten around the defaults file, the
+inverted sidecar-first rule for the two per-scan keys, and the difference between
+`dce_defaults.json` (the defaults) and `dce_default.json` (an example run config), which are
+one character apart and easy to confuse.
+
+Found while checking for stale references: **`tests/python/dce_cli_config.example.json` still
+carried `dce_preferences_path`**, so the CLI invocation AGENTS.md tells users to run failed
+immediately with an unknown-key error. The root cause was the guard itself — the old
+`test_deleted_keys_are_gone` hand-listed three filenames and this was a fourth. Replaced with
+`test_shipped_configs_only_use_known_keys`, which discovers configs by shape (any committed
+JSON with a `stage_overrides` object) and validates every key against the defaults file, so a
+new config cannot be added outside the guard's view. That example also turned out to be
+broken independently: it pointed `aif_files` and `roi_files` at the same brain mask, which
+`validate()` has rejected since 5308a8c (2026-02-21), five months before the file's last
+edit. Fixed to a `label-AIF` mask; the command now gets all the way to the placeholder paths
+the user is meant to substitute.
+
+**Follow-up requiring MATLAB (not done here).** The committed MATLAB reference tree
+(`tests/data/BIDS_test/derivatives/matlabref/`) and `tests/contracts/baselines/matlab_reference_v1.json`
+were generated with the *old* MATLAB settings. Nothing breaks today — no test re-runs MATLAB,
+and all 18 contracts still pass — but the next regeneration of either will legitimately move,
+because MATLAB now fits with a 200-evaluation budget. Regenerate deliberately and in its own
+commit, so the diff reads as "MATLAB settings changed" and not as a silent parity drift.
 
 ---
 

@@ -2,7 +2,12 @@
 %%%%%%%%%%%%%%%%%%%%%%
 % Requires NVIDIA GPU, and GPUFit library
 force_cpu = 0
-gpu_tolerance = 1e-12
+% 1e-6, not the former 1e-12: gpufit reports non-convergence below about 1e-10 and those
+% voxels are discarded, so a tighter tolerance loses data without improving the fits that
+% survive. Measured on 2000 frozen real voxels: 1e-6 is the only setting with 100% voxel
+% yield on every model, while 1e-10 drops to 93.5% (tofts) / 95.9% (2CXM). Kept in step
+% with python/dce_defaults.json.
+gpu_tolerance = 1e-6
 gpu_max_n_iterations = 200
 gpu_initial_value_ktrans = 0.0002
 gpu_initial_value_ve = 0.2
@@ -75,7 +80,9 @@ voxel_value_ve_RR = 0.08
 voxel_TolFun = 10^(-12)
 voxel_TolX = 10^(-6)
 voxel_MaxIter = 50
-voxel_MaxFunEvals = 50
+% 200, not the former 50: 50 evaluations truncates the harder models before they settle.
+% Kept in step with python/dce_defaults.json.
+voxel_MaxFunEvals = 200
 %robust options no quotes: "off" "LAR" "Bisquare"
 voxel_Robust = off
 

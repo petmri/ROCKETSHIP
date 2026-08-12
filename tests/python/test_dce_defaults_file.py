@@ -200,19 +200,39 @@ def test_the_literal_default_guard_actually_catches_one() -> None:
     assert hits == ["1.0", "2.0", "'3.0'"]
 
 
-def test_deleted_keys_are_gone() -> None:
-    """Keys removed by the migration must not reappear in any shipped config."""
-    removed = {"use_dce_preferences", "injection_duration", "dce_preferences_path"}
-    for name in ("dce_defaults.json", "dce_default.json", "dceprep_default.json"):
-        path = PYTHON_DIR / name
-        if not path.exists():
+def _shipped_configs() -> list[Path]:
+    """Every committed run config, found by shape rather than by a hand-kept filename list."""
+    candidates = sorted(PYTHON_DIR.glob("*.json")) + sorted((REPO_ROOT / "tests" / "python").glob("*.json"))
+    out = []
+    for path in candidates:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
             continue
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        present = {k.lower() for k in payload.get("stage_overrides", {})}
-        present |= {k.lower() for k in payload.get("defaults", {})}
-        present |= {k.lower() for k in payload.get("optional", {})}
-        clash = present & removed
-        assert not clash, f"{name} still declares removed key(s): {sorted(clash)}"
+        if isinstance(payload, dict) and isinstance(payload.get("stage_overrides"), dict):
+            out.append(path)
+    return out
+
+
+@pytest.mark.parametrize("path", _shipped_configs(), ids=lambda p: p.name)
+def test_shipped_configs_only_use_known_keys(path: Path) -> None:
+    """A shipped config with a stale key is a documented command that errors on contact.
+
+    Discovered by shape, not by a filename list: an earlier version of this test named three
+    files and so missed `dce_cli_config.example.json`, which AGENTS.md tells users to run and
+    which carried a `dce_preferences_path` the migration had already removed.
+    """
+    overrides = json.loads(path.read_text(encoding="utf-8"))["stage_overrides"]
+    dce_config.validate_override_keys(overrides)
+
+
+def test_deleted_keys_are_gone() -> None:
+    """Keys removed by the migration must not reappear in the defaults file itself."""
+    removed = {"use_dce_preferences", "injection_duration", "dce_preferences_path"}
+    payload = _defaults_payload()
+    declared = {k.lower() for section in ("defaults", "required", "optional") for k in payload.get(section, {})}
+    clash = declared & removed
+    assert not clash, f"{DEFAULTS_FILE.name} still declares removed key(s): {sorted(clash)}"
 
 
 class TestResolution:

@@ -166,6 +166,16 @@ from the original list were dropped as won't-do. Full rationale:
       flaky external download cannot fail the main Python job — and it is now the only
       end-to-end exercise of the installer.
 
+- [ ] **Regenerate the MATLAB references after the defaults single-source settings change.**
+      `dce/dce_preferences.txt` now sets `gpu_tolerance = 1e-6` (was 1e-12) and
+      `voxel_MaxFunEvals = 200` (was 50), matching `python/dce_defaults.json`. Nothing is
+      broken today — no test re-runs MATLAB, and all 18 contracts pass — but the committed
+      MATLAB reference tree (`tests/data/BIDS_test/derivatives/matlabref/`) and
+      `tests/contracts/baselines/matlab_reference_v1.json` were produced under the old
+      settings, so the next regeneration will legitimately move. Needs a MATLAB host. Do it
+      deliberately and in its own commit, so the diff reads as "MATLAB settings changed"
+      rather than as unexplained parity drift.
+
 ## External Accelerator Handoff (Open Items Only)
 
 ### GPUfit / CPUfit Backend
