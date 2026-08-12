@@ -295,11 +295,30 @@ calls; the settings dict becomes a required, complete input. Update `model_*_fit
 `dce_defaults.json` and pass it — so the MATLAB contract tests run on the shipped defaults,
 which is the §1.1 fix.
 
-### Phase 4 — Point the tests at the file
+### Phase 4 — Point the tests at the file — DONE
 `osipi_fast_backend_helpers.py`, `test_backend_equivalence.py`, `phantom_gt_helpers.py`,
 `run_dce_benchmark.py`, the two BIDS batch runners, and `dce_gui.py`/`dce_cli.py` all
 resolve through the same loader. Add a test that no `python/*.py` file contains a literal
 default in a config-resolution call (AST check, so it stays true).
+
+**Outcome.** The file-pointing half was already done by phases 2-3: the OSIPI and
+equivalence helpers reach settings through `_stage_d_fit_prefs`/`_apply_model_specific_prefs`,
+which are now thin delegates to `dce_config`. The remaining harnesses set only run-specific
+choices (`stage_a_mode`, `aif_curve_mode`, `write_param_maps`) — that is what a run config is
+for — and none of them pin fit settings or relaxivity, so they resolve from the file and the
+image sidecars like any other run.
+
+The AST guard (`test_no_literal_defaults_in_resolution_calls`, parametrised over
+`python/*.py` + `run_*.py`) found exactly one real literal: a `1.0` min/frame fallback in
+`_resolve_stage_b_timer`'s short-timer extension, present in two copies. It was latent rather
+than live — `_as_1d_float` squeezes, so a <2-sample timer raises before reaching that branch —
+but the surrounding ladder existed in three near-identical copies, two with indentation
+mangled by the phase-2 cutover script. Collapsed into `_configured_time_step_min`, which
+returns `None` rather than guessing; the callers raise. That path had no test coverage at all,
+which is how the literal survived; `TestResolveStageBTimer` now covers all nine branches.
+
+The guard is scoped to shipped code, not `tests/python` (clean today, checked). A literal in a
+test only affects that test, whereas one in `python/` silently changes user results.
 
 ### Phase 5 — MATLAB values + docs
 Apply the D2/D3-agreed values to `dce/dce_preferences.txt` (`gpu_tolerance` 1e-12 → 1e-6,

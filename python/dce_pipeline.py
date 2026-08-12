@@ -2067,6 +2067,23 @@ def _load_vector_from_path(path: Path, key: str = "timer") -> np.ndarray:
     raise ValueError(f"Unsupported vector file format for {path}")
 
 
+def _configured_time_step_min(config: DcePipelineConfig, stage_a: Dict[str, Any]) -> Optional[float]:
+    """Frame spacing in minutes from the run config or stage A, or None if unspecified.
+
+    Deliberately without a fallback: a guessed spacing silently rescales every time axis
+    downstream, so callers raise instead of proceeding on a made-up number.
+    """
+    step = _stage_override_optional(config, "time_resolution_min", stage_a.get("time_resolution_min", None))
+    if step is None:
+        seconds = _stage_override_optional(
+            config, "time_resolution_sec", _stage_override_optional(config, "time_resolution")
+        )
+        if seconds is None:
+            return None
+        step = float(seconds) / 60.0
+    return float(step)
+
+
 def _resolve_stage_b_timer(config: DcePipelineConfig, stage_a: Dict[str, Any], n_time: int) -> np.ndarray:
     time_vector_path = _stage_override_optional(config, "time_vector_path")
     timer_path = _stage_override_optional(config, "timer_path")
@@ -2087,13 +2104,7 @@ def _resolve_stage_b_timer(config: DcePipelineConfig, stage_a: Dict[str, Any], n
         timer = _as_1d_float(stage_a["arrays"]["timer"], "timer")
 
     if timer is None:
-        time_resolution = _stage_override_optional(config, "time_resolution_min", stage_a.get("time_resolution_min", None))
-        if time_resolution is None:
-            time_resolution_sec = _stage_override_optional(
-                    config, "time_resolution_sec", _stage_override_optional(config, "time_resolution")
-                )
-            if time_resolution_sec is not None:
-                time_resolution = float(time_resolution_sec) / 60.0
+        time_resolution = _configured_time_step_min(config, stage_a)
         if time_resolution is None:
             raise ValueError("Stage-B requires timer data; set stage_overrides.time_resolution_min")
         timer = np.arange(n_time, dtype=np.float64) * float(time_resolution)
@@ -2101,26 +2112,19 @@ def _resolve_stage_b_timer(config: DcePipelineConfig, stage_a: Dict[str, Any], n
     if timer.size > n_time:
         timer = timer[:n_time]
     elif timer.size < n_time:
-        if timer.size == 0:
-            raise ValueError("Resolved timer vector is empty")
-        if timer.size == 1:
-            step = float(_stage_override_optional(config, "time_resolution_min", stage_a.get("time_resolution_min", 1.0)))
-            if not math.isfinite(step) or step <= 0:
-                time_resolution_sec = _stage_override_optional(
-                    config, "time_resolution_sec", _stage_override_optional(config, "time_resolution")
+        # Extend at the timer's own spacing; the configured one is only a fallback for a
+        # degenerate tail. `_as_1d_float` squeezes, so it has already rejected <2 samples.
+        if timer.size < 2:
+            raise ValueError(f"Resolved timer vector has {timer.size} sample(s); cannot extend it")
+        step = float(timer[-1] - timer[-2])
+        if not math.isfinite(step) or step <= 0:
+            configured = _configured_time_step_min(config, stage_a)
+            if configured is None or not math.isfinite(configured) or configured <= 0:
+                raise ValueError(
+                    f"Timer vector has {timer.size} sample(s) for {n_time} frames and the frame "
+                    "spacing cannot be determined; set stage_overrides.time_resolution_min"
                 )
-                if time_resolution_sec is not None:
-                    step = float(time_resolution_sec) / 60.0
-        else:
-            step = float(timer[-1] - timer[-2])
-            if not math.isfinite(step) or step <= 0:
-                step = float(_stage_override_optional(config, "time_resolution_min", stage_a.get("time_resolution_min", 1.0)))
-                if not math.isfinite(step) or step <= 0:
-                    time_resolution_sec = _stage_override_optional(
-                    config, "time_resolution_sec", _stage_override_optional(config, "time_resolution")
-                )
-                    if time_resolution_sec is not None:
-                        step = float(time_resolution_sec) / 60.0
+            step = configured
         extension = timer[-1] + step * np.arange(1, n_time - timer.size + 1, dtype=np.float64)
         timer = np.concatenate([timer, extension])
 

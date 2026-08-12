@@ -28,6 +28,19 @@ PREFERENCE_MODULES = ("dce_pipeline.py", "dce_fit_backends.py", "dce_models.py")
 # Reader functions whose second positional argument is a preference key.
 KEY_READERS = ("_stage_override", "resolve", "resolve_optional", "resolve_scan_value")
 
+# Resolution calls -> index of the first argument acting as a fallback. A literal there is
+# a default living in source, which is what this migration exists to remove.
+FALLBACK_ARG = {
+    "resolve": 2,
+    "resolve_with_source": 2,
+    "resolve_optional": 2,
+    "resolve_scan_value": 3,  # (config, key, sidecar)
+    "_stage_override": 2,
+    "_stage_override_optional": 2,
+    "_scan_override": 3,
+    "default_for": 1,
+}
+
 
 def _defaults_payload() -> dict:
     return json.loads(DEFAULTS_FILE.read_text(encoding="utf-8"))
@@ -101,6 +114,90 @@ def test_every_preference_key_read_is_declared(module: str) -> None:
         + ", ".join(f"{k} (line {line})" for k, line in sorted(undeclared.items()))
         + ". Add them to that file, or fix the spelling."
     )
+
+
+def _call_name(node: ast.Call) -> str | None:
+    func = node.func
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    if isinstance(func, ast.Name):
+        return func.id
+    return None
+
+
+def _literal_fallback(node: ast.AST) -> str | None:
+    """The literal a fallback expression bottoms out in, or None if it has no literal."""
+    if isinstance(node, ast.Constant):
+        # None is not a default -- it is the "unset" sentinel optional keys resolve to.
+        return None if node.value is None else repr(node.value)
+    if isinstance(node, ast.Call):
+        name = _call_name(node)
+        # A nested `d.get(key, literal)` hides a default just as effectively.
+        if name == "get" and len(node.args) == 2:
+            return _literal_fallback(node.args[1])
+        if name in {"float", "int", "str", "bool"} and len(node.args) == 1:
+            return _literal_fallback(node.args[0])
+    return None
+
+
+def _literal_defaults(path: Path) -> list[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    hits: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        index = FALLBACK_ARG.get(_call_name(node) or "")
+        if index is None:
+            continue
+        candidates = list(node.args[index:])
+        candidates += [kw.value for kw in node.keywords if kw.arg in {"default", "fallback"}]
+        for candidate in candidates:
+            literal = _literal_fallback(candidate)
+            if literal is not None:
+                hits.append(f"line {node.lineno}: {_call_name(node)}(..., {literal})")
+    return hits
+
+
+def _shipped_sources() -> list[Path]:
+    return sorted(PYTHON_DIR.glob("*.py")) + sorted(REPO_ROOT.glob("run_*.py"))
+
+
+@pytest.mark.parametrize("path", _shipped_sources(), ids=lambda p: p.name)
+def test_no_literal_defaults_in_resolution_calls(path: Path) -> None:
+    """A default passed at a call site is a default living in source. There are none.
+
+    Without this the next feature adds `_stage_override(config, "new_key", 0.5)` and the
+    single source of truth quietly stops being single.
+    """
+    hits = _literal_defaults(path)
+    assert not hits, (
+        f"{path.name} passes a literal default to a config-resolution call: "
+        + "; ".join(hits)
+        + f". Put the value in {DEFAULTS_FILE.name} instead."
+    )
+
+
+def test_the_literal_default_guard_actually_catches_one() -> None:
+    """Guard the guard: an AST scan that silently matches nothing is worse than none."""
+    source = (
+        "_stage_override(config, 'a', 1.0)\n"
+        "_stage_override_optional(config, 'b', stage_a.get('b', 2.0))\n"
+        "_scan_override(config, 'c', sidecar, float('3.0'))\n"
+        "resolve_optional(config, 'd', None)\n"  # None is the unset sentinel, not a default
+        "_stage_override(config, 'e')\n"
+        "_scan_override(config, 'f', sidecar)\n"
+        "some_other_call(config, 'g', 4.0)\n"
+    )
+    tree = ast.parse(source)
+    hits = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and _call_name(node) in FALLBACK_ARG:
+            index = FALLBACK_ARG[_call_name(node)]
+            for candidate in node.args[index:]:
+                literal = _literal_fallback(candidate)
+                if literal is not None:
+                    hits.append(literal)
+    assert hits == ["1.0", "2.0", "'3.0'"]
 
 
 def test_deleted_keys_are_gone() -> None:

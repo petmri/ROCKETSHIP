@@ -25,6 +25,7 @@ from dce_pipeline import (  # noqa: E402
     _legacy_sobel_baseline_end,
     _piecewise_constant_baseline_end,
     _resolve_baseline_window,
+    _resolve_stage_b_timer,
     _resolve_timepoint_window,
     _resolve_dynamic_metadata,
     _tv_baseline_end,
@@ -1688,3 +1689,66 @@ class TestDcePipeline:
             assert result["stages"]["D"]["impl"] == "real"
             assert "tofts" in result["stages"]["D"]["models_run"]
             assert "patlak" in result["stages"]["D"]["models_run"]
+
+
+class TestResolveStageBTimer:
+    """The frame-spacing ladder: timer data, then the run config, then a hard stop.
+
+    No branch here may invent a spacing -- a guessed one silently rescales every time
+    axis downstream, which shows up as wrong Ktrans rather than as an error.
+    """
+
+    def _config(self, **overrides) -> DcePipelineConfig:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)
+            return DcePipelineConfig(
+                subject_source_path=path,
+                subject_tp_path=path,
+                output_dir=path,
+                stage_overrides=dict(overrides),
+            )
+
+    def test_builds_a_timer_from_time_resolution_min(self) -> None:
+        timer = _resolve_stage_b_timer(self._config(time_resolution_min=0.25), {}, 4)
+        assert timer == pytest.approx([0.0, 0.25, 0.5, 0.75])
+
+    def test_builds_a_timer_from_time_resolution_sec(self) -> None:
+        timer = _resolve_stage_b_timer(self._config(time_resolution_sec=30.0), {}, 3)
+        assert timer == pytest.approx([0.0, 0.5, 1.0])
+
+    def test_stage_a_supplies_the_spacing_when_the_run_config_does_not(self) -> None:
+        timer = _resolve_stage_b_timer(self._config(), {"time_resolution_min": 0.2}, 3)
+        assert timer == pytest.approx([0.0, 0.2, 0.4])
+
+    def test_no_timer_and_no_spacing_is_a_hard_stop(self) -> None:
+        with pytest.raises(ValueError, match="time_resolution_min"):
+            _resolve_stage_b_timer(self._config(), {}, 4)
+
+    def test_long_timer_is_truncated(self) -> None:
+        stage_a = {"arrays": {"timer": np.array([0.0, 0.1, 0.2, 0.3, 0.4])}}
+        timer = _resolve_stage_b_timer(self._config(), stage_a, 3)
+        assert timer == pytest.approx([0.0, 0.1, 0.2])
+
+    def test_short_timer_is_extended_at_its_own_spacing(self) -> None:
+        """The timer's own spacing wins -- the config is only consulted if it has none."""
+        stage_a = {"arrays": {"timer": np.array([0.0, 0.1, 0.2])}}
+        timer = _resolve_stage_b_timer(self._config(time_resolution_min=99.0), stage_a, 5)
+        assert timer == pytest.approx([0.0, 0.1, 0.2, 0.3, 0.4])
+
+    def test_degenerate_tail_spacing_falls_back_to_the_configured_spacing(self) -> None:
+        """A repeated final timestamp gives step 0, so the config has to supply one."""
+        stage_a = {"arrays": {"timer": np.array([0.0, 0.1, 0.1])}}
+        timer = _resolve_stage_b_timer(self._config(time_resolution_min=0.5), stage_a, 5)
+        assert timer == pytest.approx([0.0, 0.1, 0.1, 0.6, 1.1])
+
+    def test_degenerate_tail_spacing_with_nothing_configured_is_a_hard_stop(self) -> None:
+        """Previously this silently extended at 1.0 min/frame."""
+        stage_a = {"arrays": {"timer": np.array([0.0, 0.1, 0.1])}}
+        with pytest.raises(ValueError, match="spacing cannot be determined"):
+            _resolve_stage_b_timer(self._config(), stage_a, 5)
+
+    def test_degenerate_timer_is_rejected_before_it_reaches_stage_b(self) -> None:
+        """`_as_1d_float` squeezes, so single-sample and empty timers never get this far."""
+        for bad in (np.array([0.0]), np.array([])):
+            with pytest.raises(ValueError, match="timer must be"):
+                _resolve_stage_b_timer(self._config(), {"arrays": {"timer": bad}}, 3)
