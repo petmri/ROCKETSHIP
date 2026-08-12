@@ -117,11 +117,20 @@ config resolution, metadata/sidecar discovery, and backend dispatch lives there.
 
 ### Config resolution
 
-Python config precedence (highest to lowest): CLI `--set` overrides → `stage_overrides` in
-the JSON config → `dce_default.json`/`dceprep_default.json` base values → built-in
-fallback defaults. Scan parameters (TR/FA/time-resolution) are resolved strictly from a
-DCE metadata JSON sidecar when present; partial manual override alongside a sidecar is
-rejected (all three or none — no silent per-field fallback).
+Every DCE default, limit and preference lives in **`python/dce_defaults.json`**. Source
+code carries no fallback values: precedence is CLI `--set` → `stage_overrides` in the run
+config → `dce_defaults.json` → **error**. A key missing everywhere raises `DceConfigError`
+naming the key and the file; a key in the run config that the defaults file does not
+declare is rejected as a typo. `python/dce_config.py` is the resolver.
+
+`relaxivity` and `hematocrit` are per-scan values, so for those two the DCE image's JSON
+sidecar wins over the run config: sidecar → run config → defaults file → error.
+`relaxivity` deliberately has **no default** — the right value depends on the contrast
+agent, so a run without one stops rather than guessing. (MATLAB keeps its
+`script_preferences.txt` fallback; that divergence is intentional and documented in
+`docs/dce_options.md`.) Scan parameters (TR/FA/time-resolution) are resolved strictly from
+the metadata sidecar when present; partial manual override alongside a sidecar is rejected
+(all three or none — no silent per-field fallback).
 
 The steady-state/baseline window follows its own precedence in `_resolve_baseline_window`
 (`python/dce_pipeline.py`): explicit `stage_overrides.steady_state_end` → a

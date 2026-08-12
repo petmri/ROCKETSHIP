@@ -124,11 +124,23 @@ def _override(stage_overrides: Mapping[str, Any], key: str) -> Any:
 
 def resolve(config: Any, key: str, *, defaults: Optional[DceDefaults] = None) -> Any:
     """Resolve one preference: run config, then the defaults file, then raise."""
+    return resolve_with_source(config, key, defaults=defaults)[0]
+
+
+def resolve_with_source(
+    config: Any, key: str, *, defaults: Optional[DceDefaults] = None
+) -> tuple[Any, str]:
+    """Resolve a preference and report where it came from.
+
+    The source is `"run_config"` or `"defaults_file"`. Callers that record provenance need
+    this: once every value has a defaults-file entry, "was this asked for or defaulted?"
+    can no longer be inferred from the value alone.
+    """
     table = defaults if defaults is not None else load_defaults()
     found = _override(getattr(config, "stage_overrides", {}) or {}, key)
     if found is not _UNSET:
-        return found
-    return table.default_for(key)
+        return found, "run_config"
+    return table.default_for(key), "defaults_file"
 
 
 def resolve_optional(

@@ -9,12 +9,18 @@ from __future__ import annotations
 import ast
 import json
 from pathlib import Path
+import sys
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PYTHON_DIR = REPO_ROOT / "python"
 DEFAULTS_FILE = PYTHON_DIR / "dce_defaults.json"
+
+sys.path.insert(0, str(PYTHON_DIR))
+
+import dce_config  # noqa: E402
+from dce_pipeline import DcePipelineConfig  # noqa: E402
 
 # Modules that resolve DCE preferences.
 PREFERENCE_MODULES = ("dce_pipeline.py", "dce_fit_backends.py", "dce_models.py")
@@ -110,3 +116,61 @@ def test_deleted_keys_are_gone() -> None:
         present |= {k.lower() for k in payload.get("optional", {})}
         clash = present & removed
         assert not clash, f"{name} still declares removed key(s): {sorted(clash)}"
+
+
+class TestResolution:
+    """The behaviours the single-source migration exists to produce."""
+
+    def _config(self, tmp_path, **overrides):
+        return DcePipelineConfig(
+            subject_source_path=tmp_path,
+            subject_tp_path=tmp_path,
+            output_dir=tmp_path,
+            stage_overrides=dict(overrides),
+        )
+
+    def test_missing_relaxivity_is_a_hard_stop(self, tmp_path) -> None:
+
+        with pytest.raises(dce_config.DceConfigError) as excinfo:
+            dce_config.resolve(self._config(tmp_path), "relaxivity")
+        message = str(excinfo.value)
+        assert "relaxivity" in message
+        # The error has to say what to do, not just that something is missing.
+        assert "sidecar" in message.lower()
+        assert "dce_defaults.json" in message
+
+    def test_unknown_key_is_rejected_rather_than_ignored(self, tmp_path) -> None:
+
+        with pytest.raises(dce_config.DceConfigError, match="Unknown DCE preference"):
+            dce_config.resolve(self._config(tmp_path), "voxel_uper_limit_ktrans")
+
+    def test_typo_in_run_config_is_caught_by_validate(self, tmp_path) -> None:
+
+        config = self._config(tmp_path, voxel_upper_limit_ktrnas=2.0)
+        with pytest.raises(dce_config.DceConfigError, match="voxel_upper_limit_ktrnas"):
+            dce_config.validate_override_keys(config.stage_overrides)
+
+    def test_run_config_beats_the_defaults_file(self, tmp_path) -> None:
+
+        config = self._config(tmp_path, voxel_upper_limit_ktrans=0.5)
+        value, source = dce_config.resolve_with_source(config, "voxel_upper_limit_ktrans")
+        assert value == 0.5
+        assert source == "run_config"
+
+        plain = dce_config.resolve_with_source(self._config(tmp_path), "voxel_upper_limit_ktrans")
+        assert plain[1] == "defaults_file"
+
+    def test_sidecar_beats_the_run_config_for_per_scan_values(self, tmp_path) -> None:
+        """Inverted relative to every other key: the sidecar is the per-scan record."""
+
+        config = self._config(tmp_path, relaxivity=3.6, hematocrit=0.40)
+        sidecar = {"relaxivity": 4.5, "hematocrit": 0.38}
+        assert dce_config.resolve_scan_value(config, "relaxivity", sidecar) == 4.5
+        assert dce_config.resolve_scan_value(config, "hematocrit", sidecar) == 0.38
+        # With no sidecar value the run config still wins over the defaults file.
+        assert dce_config.resolve_scan_value(config, "relaxivity", {}) == 3.6
+        assert dce_config.resolve_scan_value(config, "hematocrit", None) == 0.40
+
+    def test_hematocrit_falls_through_to_the_defaults_file(self, tmp_path) -> None:
+
+        assert dce_config.resolve_scan_value(self._config(tmp_path), "hematocrit", {}) == pytest.approx(0.45)

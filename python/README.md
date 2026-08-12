@@ -358,7 +358,6 @@ Each DCE run generates `dce_pipeline_run.json` in the output directory with the 
     "status": "ok",
     "single_process": true,
     "duration_sec": 42.3,
-    "dce_preferences_path": null,
     "summary_path": "/path/to/dce_pipeline_run.json"
   },
   "provenance": {

@@ -16,6 +16,9 @@ import warnings
 
 import numpy as np
 
+import dce_config
+from dce_config import DceConfigError
+
 from dce_fit_backends import (
     fit_2cxm_stage_d,
     fit_ex_tofts_stage_d,
@@ -46,11 +49,17 @@ ALLOWED_STAGE_A_MODES = {"real", "scaffold"}
 ALLOWED_STAGE_B_MODES = {"real", "scaffold", "auto"}
 ALLOWED_STAGE_D_MODES = {"real", "scaffold", "auto"}
 ALLOWED_STEADY_STATE_AUTO_METHODS = {"none", "legacy_sobel", "piecewise_constant", "glr", "tv", "biexp_fit"}
-DEFAULT_STEADY_STATE_AUTO_METHOD = "tv"
-PIECEWISE_CONSTANT_BASELINE_FORWARD_DELTA_FRACTION = 0.01
-# How many robust sigmas above the median a jump must clear to count as the contrast onset.
-# Mirrored in dce/find_end_ss_tv.m -- keep the two in step.
-TV_JUMP_THRESHOLD_SIGMA = 5.0
+# Baseline-detector tunables. Bound at import from `dce_defaults.json` rather than written
+# here, so the file stays the only place a value lives. They are read at module scope
+# because the detectors take only a curve -- there is no `config` at their call sites --
+# and they are not per-run knobs. `TV_JUMP_THRESHOLD_SIGMA` is mirrored in
+# `dce/find_end_ss_tv.m`; keep the two in step.
+_DEFAULTS = dce_config.load_defaults()
+DEFAULT_STEADY_STATE_AUTO_METHOD = str(_DEFAULTS.default_for("steady_state_auto_method"))
+PIECEWISE_CONSTANT_BASELINE_FORWARD_DELTA_FRACTION = float(
+    _DEFAULTS.default_for("piecewise_constant_baseline_forward_delta_fraction")
+)
+TV_JUMP_THRESHOLD_SIGMA = float(_DEFAULTS.default_for("tv_jump_threshold_sigma"))
 
 MODEL_SELECTION_ORDER = [
     ("tofts", "tofts"),
@@ -63,12 +72,6 @@ MODEL_SELECTION_ORDER = [
     ("auc", "auc"),
     ("FXL_rr", "FXL_rr"),
 ]
-
-# Fallbacks used when neither the metadata JSON nor a stage override supplies these.
-# Stage D re-resolves relaxivity for hand-built `stage_a` dicts, so both readers must
-# agree on the same number.
-DEFAULT_RELAXIVITY = 3.4
-DEFAULT_HEMATOCRIT = 0.45
 
 MODEL_LAYOUTS: Dict[str, Dict[str, Any]] = {
     "tofts": {
@@ -302,49 +305,24 @@ def _parse_numeric_token(value: Any) -> Optional[float]:
         return None
 
 
-@lru_cache(maxsize=32)
-def _parse_preference_file(path_str: str, mtime_ns: int) -> Dict[str, str]:
-    del mtime_ns  # cache key only
-    path = Path(path_str)
-    if not path.exists():
-        return {}
+def _json_sidecar_payload(config: "DcePipelineConfig") -> Dict[str, Any]:
+    """The DCE image's JSON sidecar, or {} when there isn't one.
 
-    prefs: Dict[str, str] = {}
-    for raw_line in path.read_text().splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("%"):
-            continue
-        if "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip().lower()
-        if not key:
-            continue
-        value = value.split("%", 1)[0].strip()
-        prefs[key] = value
-    return prefs
-
-
-def _resolve_dce_preferences_path(config: "DcePipelineConfig") -> Optional[Path]:
-    explicit = config.stage_overrides.get("dce_preferences_path")
-    if explicit:
-        path = Path(str(explicit)).expanduser().resolve()
-        if not path.exists():
-            raise FileNotFoundError(f"dce_preferences file not found: {path}")
-        return path
-
-    use_prefs = _to_bool(config.stage_overrides.get("use_dce_preferences", False), False)
-    if not use_prefs:
-        return None
-    return None
-
-
-def _load_dce_preferences(config: "DcePipelineConfig") -> Dict[str, str]:
-    path = _resolve_dce_preferences_path(config)
-    if path is None:
-        return {}
-    stat = path.stat()
-    return _parse_preference_file(str(path), int(stat.st_mtime_ns))
+    Only `relaxivity` and `hematocrit` are read from here: they legitimately vary per
+    scan, so the sidecar outranks the run config for those two (see `dce_config`).
+    """
+    metadata_path, _ = _explicit_stage_override(config, ("dce_metadata_path",))
+    candidates: List[Path] = []
+    if metadata_path is not None:
+        candidates.append(Path(str(metadata_path)).expanduser().resolve())
+    for dynamic in config.dynamic_files:
+        sidecar = _json_sidecar_for(dynamic)
+        if sidecar is not None:
+            candidates.append(sidecar)
+    for candidate in candidates:
+        if candidate.exists():
+            return _load_json(candidate)
+    return {}
 
 
 def _to_path_list(values: Optional[List[str]]) -> List[Path]:
@@ -397,7 +375,7 @@ def resolve_backend(requested_backend: str) -> str:
 
 def _resolve_stage_d_backend(config: "DcePipelineConfig") -> Dict[str, str]:
     requested_backend = str(config.backend).strip().lower()
-    force_cpu = _to_bool(_stage_override(config, "force_cpu", 0), False)
+    force_cpu = _to_bool(_stage_override(config, "force_cpu"), False)
     if requested_backend == "auto" and force_cpu:
         return {
             "requested_backend": "auto",
@@ -458,6 +436,11 @@ class DcePipelineConfig:
         backend = self.backend.strip().lower()
         if backend not in ALLOWED_BACKENDS:
             raise ValueError(f"Unsupported backend '{self.backend}'. Allowed: {sorted(ALLOWED_BACKENDS)}")
+
+        # Reject unrecognised preference keys up front. Before every default lived in one
+        # file there was nothing to check a key against, so a typo silently did nothing and
+        # the run completed with different numbers.
+        dce_config.validate_override_keys(self.stage_overrides)
 
         override_import_path = None
         for override_key, override_val in self.stage_overrides.items():
@@ -550,19 +533,23 @@ class DceStageRunner(Protocol):
         ...
 
 
-def _stage_override(config: DcePipelineConfig, key: str, default: Any) -> Any:
-    if key in config.stage_overrides:
-        return config.stage_overrides[key]
+def _stage_override(config: DcePipelineConfig, key: str) -> Any:
+    """Resolve a preference: run config, then `dce_defaults.json`, then raise.
 
-    key_lc = key.lower()
-    for override_key, override_val in config.stage_overrides.items():
-        if str(override_key).lower() == key_lc:
-            return override_val
+    There is deliberately no `default` argument -- every default lives in the defaults
+    file, so a key missing from both sources is a `DceConfigError`, not a guess.
+    """
+    return dce_config.resolve(config, key)
 
-    prefs = _load_dce_preferences(config)
-    if key_lc in prefs:
-        return prefs[key_lc]
-    return default
+
+def _stage_override_optional(config: DcePipelineConfig, key: str, fallback: Any = None) -> Any:
+    """Resolve a preference whose absence is meaningful (auto-detection takes over)."""
+    return dce_config.resolve_optional(config, key, fallback)
+
+
+def _scan_override(config: DcePipelineConfig, key: str, sidecar: Optional[Dict[str, Any]]) -> Any:
+    """Resolve a per-scan value: image JSON sidecar first, then run config, then defaults."""
+    return dce_config.resolve_scan_value(config, key, sidecar)
 
 
 def _override_value_is_set(value: Any) -> bool:
@@ -738,9 +725,9 @@ def _resolve_dynamic_metadata(
             metadata_sources["time_resolution_sec"] = f"{source_prefix}.TriggerDelayTime/{n_reps}/1000"
 
     if time_resolution_sec is None:
-        pref_time = _stage_override(config, "time_resolution_sec", None)
+        pref_time = _stage_override_optional(config, "time_resolution_sec")
         if not _override_value_is_set(pref_time):
-            pref_time = _stage_override(config, "time_resolution", None)
+            pref_time = _stage_override_optional(config, "time_resolution")
         if _override_value_is_set(pref_time):
             time_resolution_sec = float(pref_time)
             metadata_sources["time_resolution_sec"] = "preferences_or_stage_overrides.time_resolution[_sec]"
@@ -844,8 +831,8 @@ def _resolve_timepoint_window(
     if n_timepoints < 1:
         raise ValueError("Stage-A requires at least one dynamic timepoint")
 
-    start_raw = _stage_override(config, "start_t", None)
-    end_raw = _stage_override(config, "end_t", None)
+    start_raw = _stage_override_optional(config, "start_t")
+    end_raw = _stage_override_optional(config, "end_t")
     start_is_set = _override_value_is_set(start_raw)
     end_is_set = _override_value_is_set(end_raw)
 
@@ -1457,9 +1444,11 @@ def _resolve_baseline_window(
     stlv: Optional[np.ndarray] = None,
 ) -> Tuple[int, int, Dict[str, Any]]:
     sentinel = object()
-    start_raw = _stage_override(config, "steady_state_start", sentinel)
-    end_raw = _stage_override(config, "steady_state_end", sentinel)
-    auto_method_raw = _stage_override(config, "steady_state_auto_method", None)
+    start_raw = _stage_override(config, "steady_state_start")
+    end_raw = _stage_override_optional(config, "steady_state_end", sentinel)
+    auto_method_raw, auto_method_source = dce_config.resolve_with_source(
+        config, "steady_state_auto_method"
+    )
     auto_method_requested = _normalize_steady_state_auto_method(auto_method_raw)
 
     start_is_set = start_raw is not sentinel and _override_value_is_set(start_raw)
@@ -1495,8 +1484,11 @@ def _resolve_baseline_window(
         auto_details = detector(stlv)
         end_1b = int(auto_details["end_ss_1b"])
         used_method = auto_method
-        if auto_method_requested == "none":
-            end_source = f"default_auto_method:{DEFAULT_STEADY_STATE_AUTO_METHOD}"
+        # "did the user ask for this method, or did it default?" used to be inferred from a
+        # "none" sentinel, which only existed because the code had a built-in fallback. Now
+        # every value has a defaults-file entry, so ask the resolver where it came from.
+        if auto_method_requested == "none" or auto_method_source == "defaults_file":
+            end_source = f"default_auto_method:{auto_method}"
         else:
             end_source = f"steady_state_auto_method:{auto_method}"
 
@@ -1801,7 +1793,7 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
         noise_mask = noise_mask_img > 0
     else:
         noise_mask = np.zeros(spatial, dtype=bool)
-        noise_size = int(_stage_override(config, "noise_pixsize", 5))
+        noise_size = int(_stage_override(config, "noise_pixsize"))
         noise_mask[:noise_size, :noise_size, :] = True
 
     # Match MATLAB linear indexing (column-major) for voxel ordering.
@@ -1821,7 +1813,7 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     if noise_mean < 0:
         raise ValueError("Noise estimate is negative (internal error)")
 
-    snr_filter = float(_stage_override(config, "snr_filter", 0.0))
+    snr_filter = float(_stage_override(config, "snr_filter"))
     
     # Skip SNR filtering if noise is effectively zero (e.g., synthetic/perfect data)
     if noise_mean > 1e-12 and snr_filter > 0:
@@ -1833,11 +1825,11 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
         stlv = stlv[:, keep_snr]
     
     t1_lv = t1_flat[lvind].astype(np.float64)
-    blood_t1_override = _stage_override(config, "blood_t1_ms", None)
+    blood_t1_override = _stage_override_optional(config, "blood_t1_ms")
     if blood_t1_override is None:
-        blood_t1_override = _stage_override(config, "blood_t1_sec", None)
+        blood_t1_override = _stage_override_optional(config, "blood_t1_sec")
     if blood_t1_override is None:
-        blood_t1_override = _stage_override(config, "blood_t1", None)
+        blood_t1_override = _stage_override_optional(config, "blood_t1")
     blood_t1_override_sec: Optional[float] = None
     if blood_t1_override is not None:
         blood_t1_override_sec = float(blood_t1_override)
@@ -1857,18 +1849,12 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     fa_deg = float(timing["fa_deg"])
     time_resolution_min = float(timing["time_resolution_min"])
 
-    relaxivity_override, _ = _explicit_stage_override(config, ("relaxivity",))
-    hematocrit_override, _ = _explicit_stage_override(config, ("hematocrit",))
-    relaxivity = float(
-        relaxivity_override
-        if relaxivity_override is not None
-        else (timing.get("relaxivity") if timing.get("relaxivity") is not None else DEFAULT_RELAXIVITY)
-    )
-    hematocrit = float(
-        hematocrit_override
-        if hematocrit_override is not None
-        else (timing.get("hematocrit") if timing.get("hematocrit") is not None else DEFAULT_HEMATOCRIT)
-    )
+    # Per-scan values: the image JSON sidecar outranks the run config for these two, unlike
+    # every other key. They legitimately differ between scans and the sidecar is the per-scan
+    # record -- `dce2bids` writes them there. `timing` already carries what the sidecar said.
+    # `relaxivity` has no default anywhere, so a run with none configured stops here.
+    relaxivity = float(_scan_override(config, "relaxivity", timing))
+    hematocrit = float(_scan_override(config, "hematocrit", timing))
     if relaxivity <= 0.0:
         raise ValueError(f"relaxivity must be positive, got {relaxivity}")
     if not (0.0 <= hematocrit < 1.0):
@@ -1956,7 +1942,7 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
         "stage": "A",
         "status": "ok",
         "impl": "real",
-        "rootname": str(_stage_override(config, "rootname", "python_dce")),
+        "rootname": str(_stage_override(config, "rootname")),
         "image_shape": [int(v) for v in spatial],
         "quant": True,
         "tr_ms": tr_ms,
@@ -2082,11 +2068,11 @@ def _load_vector_from_path(path: Path, key: str = "timer") -> np.ndarray:
 
 
 def _resolve_stage_b_timer(config: DcePipelineConfig, stage_a: Dict[str, Any], n_time: int) -> np.ndarray:
-    time_vector_path = _stage_override(config, "time_vector_path", None)
-    timer_path = _stage_override(config, "timer_path", None)
-    legacy_timevectpath = _stage_override(config, "timevectpath", None)
+    time_vector_path = _stage_override_optional(config, "time_vector_path")
+    timer_path = _stage_override_optional(config, "timer_path")
+    legacy_timevectpath = _stage_override_optional(config, "timevectpath")
     use_legacy_timevect = True
-    timevectyn = _stage_override(config, "timevectyn", None)
+    timevectyn = _stage_override_optional(config, "timevectyn")
     if timevectyn is not None:
         use_legacy_timevect = _to_bool(timevectyn, False)
 
@@ -2101,13 +2087,11 @@ def _resolve_stage_b_timer(config: DcePipelineConfig, stage_a: Dict[str, Any], n
         timer = _as_1d_float(stage_a["arrays"]["timer"], "timer")
 
     if timer is None:
-        time_resolution = _stage_override(config, "time_resolution_min", stage_a.get("time_resolution_min", None))
+        time_resolution = _stage_override_optional(config, "time_resolution_min", stage_a.get("time_resolution_min", None))
         if time_resolution is None:
-            time_resolution_sec = _stage_override(
-                config,
-                "time_resolution_sec",
-                _stage_override(config, "time_resolution", None),
-            )
+            time_resolution_sec = _stage_override_optional(
+                    config, "time_resolution_sec", _stage_override_optional(config, "time_resolution")
+                )
             if time_resolution_sec is not None:
                 time_resolution = float(time_resolution_sec) / 60.0
         if time_resolution is None:
@@ -2120,25 +2104,21 @@ def _resolve_stage_b_timer(config: DcePipelineConfig, stage_a: Dict[str, Any], n
         if timer.size == 0:
             raise ValueError("Resolved timer vector is empty")
         if timer.size == 1:
-            step = float(_stage_override(config, "time_resolution_min", stage_a.get("time_resolution_min", 1.0)))
+            step = float(_stage_override_optional(config, "time_resolution_min", stage_a.get("time_resolution_min", 1.0)))
             if not math.isfinite(step) or step <= 0:
-                time_resolution_sec = _stage_override(
-                    config,
-                    "time_resolution_sec",
-                    _stage_override(config, "time_resolution", None),
+                time_resolution_sec = _stage_override_optional(
+                    config, "time_resolution_sec", _stage_override_optional(config, "time_resolution")
                 )
                 if time_resolution_sec is not None:
                     step = float(time_resolution_sec) / 60.0
         else:
             step = float(timer[-1] - timer[-2])
             if not math.isfinite(step) or step <= 0:
-                step = float(_stage_override(config, "time_resolution_min", stage_a.get("time_resolution_min", 1.0)))
+                step = float(_stage_override_optional(config, "time_resolution_min", stage_a.get("time_resolution_min", 1.0)))
                 if not math.isfinite(step) or step <= 0:
-                    time_resolution_sec = _stage_override(
-                        config,
-                        "time_resolution_sec",
-                        _stage_override(config, "time_resolution", None),
-                    )
+                    time_resolution_sec = _stage_override_optional(
+                    config, "time_resolution_sec", _stage_override_optional(config, "time_resolution")
+                )
                     if time_resolution_sec is not None:
                         step = float(time_resolution_sec) / 60.0
         extension = timer[-1] + step * np.arange(1, n_time - timer.size + 1, dtype=np.float64)
@@ -2150,8 +2130,16 @@ def _resolve_stage_b_timer(config: DcePipelineConfig, stage_a: Dict[str, Any], n
 
 
 def _resolve_stage_b_limits(config: DcePipelineConfig) -> Tuple[float, float]:
-    start_time = float(_stage_override(config, "start_time_min", _stage_override(config, "start_time", 0.0)))
-    end_time = float(_stage_override(config, "end_time_min", _stage_override(config, "end_time", 0.0)))
+    # `start_time`/`end_time` are the MATLAB script aliases of the `_min` keys. Both spellings
+    # carry a defaults-file value, so an explicitly set alias has to be consulted before the
+    # file is, or setting `start_time` alone would silently resolve to the file's
+    # `start_time_min` instead.
+    start_raw, _ = _explicit_stage_override(config, ("start_time_min", "start_time"))
+    end_raw, _ = _explicit_stage_override(config, ("end_time_min", "end_time"))
+    start_time = float(
+        start_raw if start_raw is not None else _stage_override(config, "start_time_min")
+    )
+    end_time = float(end_raw if end_raw is not None else _stage_override(config, "end_time_min"))
     return start_time, end_time
 
 
@@ -2167,11 +2155,15 @@ def _restrict_timer_window(timer: np.ndarray, start_time: float, end_time: float
 
 
 def _resolve_stage_b_aif_mode(config: DcePipelineConfig) -> str:
-    mode_raw = _stage_override(config, "aif_curve_mode", None)
-    if mode_raw is None or str(mode_raw).strip() == "":
-        mode_raw = _stage_override(config, "aif_type", None)
+    # `aif_curve_mode`, the MATLAB script alias `aif_type`, and `config.aif_mode` are three
+    # spellings of one setting. Every explicit source is consulted before the defaults file:
+    # `aif_curve_mode` always has a defaults-file value now, so reading it first would mask
+    # an `aif_type` or `config.aif_mode` the caller actually set.
+    mode_raw, _ = _explicit_stage_override(config, ("aif_curve_mode", "aif_type"))
     if mode_raw is None or str(mode_raw).strip() == "":
         mode_raw = config.aif_mode
+    if mode_raw is None or str(mode_raw).strip() == "":
+        mode_raw = _stage_override(config, "aif_curve_mode")
     mode = str(mode_raw).strip().lower()
     if mode in {"1", "fitted", "fit"}:
         mode = "fitted"
@@ -2191,7 +2183,9 @@ def _resolve_stage_b_aif_mode(config: DcePipelineConfig) -> str:
 def _resolve_imported_aif_path(config: DcePipelineConfig) -> Optional[Path]:
     if config.imported_aif_path is not None:
         return config.imported_aif_path.expanduser().resolve()
-    path_val = _stage_override(config, "import_aif_path", _stage_override(config, "imported_aif_path", None))
+    path_val = _stage_override_optional(
+        config, "import_aif_path", _stage_override_optional(config, "imported_aif_path")
+    )
     if path_val is None:
         return None
     path_text = str(path_val).strip()
@@ -2205,7 +2199,7 @@ def _resolve_stage_b_injection_window(
     stage_a: Dict[str, Any],
     timer_full: np.ndarray,
 ) -> Tuple[float, float]:
-    auto_find_raw = _stage_override(config, "auto_find_injection", None)
+    auto_find_raw = _stage_override_optional(config, "auto_find_injection")
     auto_find_set = _override_value_is_set(auto_find_raw)
     auto_find_enabled = _to_bool(auto_find_raw, False) if auto_find_set else False
 
@@ -2216,14 +2210,20 @@ def _resolve_stage_b_injection_window(
     # steady-state precedence (`steady_state_end`, the AIF sidecar, or
     # `steady_state_auto_method`) to move it.
     for legacy_key in ("start_injection_min", "start_injection"):
-        if _override_value_is_set(_stage_override(config, legacy_key, None)):
+        # Reads the run config only: these keys are removed, so they are absent from
+        # `dce_defaults.json` and resolving them would raise "unknown key" instead of this
+        # message, which explains what to use instead.
+        legacy_value, _ = _explicit_stage_override(config, (legacy_key,))
+        if _override_value_is_set(legacy_value):
             raise ValueError(
                 f"stage_overrides.{legacy_key} was removed. The injection start is always the "
                 "resolved baseline end; set stage_overrides.steady_state_end (or the AIF "
                 "sidecar's SteadyStateEndTimeIndex, or steady_state_auto_method) instead."
             )
 
-    end_override = _stage_override(config, "end_injection_min", _stage_override(config, "end_injection", None))
+    end_override = _stage_override_optional(
+        config, "end_injection_min", _stage_override_optional(config, "end_injection")
+    )
     end_override_is_set = _override_value_is_set(end_override)
 
     # MATLAB CLI parity: auto_find_injection=1 enforces Stage-A auto timing.
@@ -2299,8 +2299,8 @@ def _aif_biexp_con(
     return out
 
 
-AIF_PEAK_WEIGHT_FLOOR = 1e-3
-AIF_PEAK_WEIGHT_EXPONENT = 2.0
+# Bound from `dce_defaults.json` at import; see the note on the baseline tunables above.
+AIF_PEAK_WEIGHT_FLOOR = float(_DEFAULTS.default_for("aif_peak_weight_floor"))
 
 
 def _aif_peak_weight(curve: np.ndarray, max_idx: int, exponent: float) -> float:
@@ -2473,8 +2473,8 @@ def _timer_step(timer: np.ndarray) -> float:
     return float(np.median(positive))
 
 
-def _parse_4float_override(config: DcePipelineConfig, key: str, default: List[float]) -> np.ndarray:
-    value = _stage_override(config, key, default)
+def _parse_4float_override(config: DcePipelineConfig, key: str) -> np.ndarray:
+    value = _stage_override(config, key)
     if isinstance(value, str):
         parts = value.replace(",", " ").split()
         parsed: List[float] = []
@@ -2568,9 +2568,9 @@ def _fit_aif_biexp(
         maxer = float(np.max(curve))
         max_idx = int(np.argmax(curve))
 
-    lower = _parse_4float_override(config, "aif_lower_limits", [0.0, 0.0, 0.0, 0.0])
-    upper = _parse_4float_override(config, "aif_upper_limits", [5.0, 5.0, 50.0, 50.0])
-    initial = _parse_4float_override(config, "aif_initial_values", [1.0, 1.0, 1.0, 0.01])
+    lower = _parse_4float_override(config, "aif_lower_limits")
+    upper = _parse_4float_override(config, "aif_upper_limits")
+    initial = _parse_4float_override(config, "aif_initial_values")
 
     upper[0] = max(1e-12, maxer * 2.0)
     upper[1] = max(1e-12, maxer * 2.0)
@@ -2605,24 +2605,24 @@ def _fit_aif_biexp(
     # (the fitted `t0_exp` of the timing pass); snapping it to `timer[end_idx]` would discard it.
     delta_init = float(np.clip(end_injection_min - start_injection_min, delta_lower, delta_upper))
 
-    aif_maxiter = int(_safe_float(_stage_override(config, "aif_MaxIter", 1000), 1000))
-    max_nfev = int(_safe_float(_stage_override(config, "aif_MaxFunEvals", aif_maxiter), aif_maxiter))
-    aif_tol_fun = max(_safe_float(_stage_override(config, "aif_TolFun", 1e-20), 1e-20), np.finfo(np.float64).eps)
-    aif_tol_x = max(_safe_float(_stage_override(config, "aif_TolX", 1e-23), 1e-23), np.finfo(np.float64).eps)
+    aif_maxiter = int(_safe_float(_stage_override(config, "aif_MaxIter"), 1000))
+    max_nfev = int(_safe_float(_stage_override(config, "aif_MaxFunEvals"), aif_maxiter))
+    aif_tol_fun = max(_safe_float(_stage_override(config, "aif_TolFun"), 1e-20), np.finfo(np.float64).eps)
+    aif_tol_x = max(_safe_float(_stage_override(config, "aif_TolX"), 1e-23), np.finfo(np.float64).eps)
     # Default matches dce_preferences.txt / dce_default.json. `Bisquare` was the default while
     # the peak prior was the only guard against a noise-inflated peak; measured across 265
     # sessions it made the production fit worse, not better -- adjusted R² mean 0.882 against
     # 0.944 with it off, 106 sessions below 0.90 against 30, and a worst case of -1.46 (a fit
     # worse than a horizontal line) against +0.57. It is still selectable. See S11 in
     # docs/project-management/projects/archived/batch-parity/aif_fitting_parity.md.
-    aif_robust_raw = _stage_override(config, "aif_Robust", "off")
+    aif_robust_raw = _stage_override(config, "aif_Robust")
     if fit_pass == "timing":
         # The timing pass can opt out separately, and had to while `aif_Robust` defaulted to
         # Bisquare: what is unreliable about the peak is its *height*, and rejecting it costs
         # the timing pass its primary evidence for the peak's *position*, pulling both
         # transition times early (S10). Now that both default to off this only matters when
         # someone re-enables `aif_Robust` and wants the timing pass left alone.
-        aif_robust_raw = _stage_override(config, "aif_Robust_timing", aif_robust_raw)
+        aif_robust_raw = _stage_override_optional(config, "aif_Robust_timing", aif_robust_raw)
     aif_robust_mode = str(aif_robust_raw).strip().lower()
 
     # Every sample carries equal weight except the peak, which the production pass de-weights by a
@@ -2636,8 +2636,8 @@ def _fit_aif_biexp(
             curve,
             max_idx,
             _safe_float(
-                _stage_override(config, "aif_peak_weight_exponent", AIF_PEAK_WEIGHT_EXPONENT),
-                AIF_PEAK_WEIGHT_EXPONENT,
+                _stage_override(config, "aif_peak_weight_exponent"),
+                float(_DEFAULTS.default_for("aif_peak_weight_exponent")),
             ),
         )
     weights = np.ones(curve.size, dtype=np.float64)
@@ -3105,7 +3105,7 @@ def _run_stage_b_real(config: DcePipelineConfig, stage_a: Dict[str, Any]) -> Dic
 
     # Only the fitted mode has transition times to mark; raw/imported curves have none.
     figure_paths: Dict[str, str] = {}
-    if _to_bool(_stage_override(config, "save_aif_figure", True), True):
+    if _to_bool(_stage_override(config, "save_aif_figure"), True):
         figure_paths = _save_stage_b_qc_figure(
             output_dir=config.output_dir,
             timer=timer,
@@ -3172,79 +3172,79 @@ def _safe_float(value: Any, default: float) -> float:
 
 
 def _stage_d_fit_prefs(config: DcePipelineConfig) -> Dict[str, Any]:
-    voxel_max_iter = int(_safe_float(_stage_override(config, "voxel_MaxIter", 50), 50))
-    voxel_max_nfev = int(_safe_float(_stage_override(config, "voxel_MaxFunEvals", voxel_max_iter), voxel_max_iter))
+    voxel_max_iter = int(_safe_float(_stage_override(config, "voxel_MaxIter"), 50))
+    voxel_max_nfev = int(_safe_float(_stage_override(config, "voxel_MaxFunEvals"), voxel_max_iter))
     return {
-        "lower_limit_ktrans": _safe_float(_stage_override(config, "voxel_lower_limit_ktrans", 1e-7), 1e-7),
-        "upper_limit_ktrans": _safe_float(_stage_override(config, "voxel_upper_limit_ktrans", 2.0), 2.0),
-        "initial_value_ktrans": _safe_float(_stage_override(config, "voxel_initial_value_ktrans", 2e-4), 2e-4),
-        "lower_limit_ve": _safe_float(_stage_override(config, "voxel_lower_limit_ve", 0.02), 0.02),
-        "upper_limit_ve": _safe_float(_stage_override(config, "voxel_upper_limit_ve", 1.0), 1.0),
-        "initial_value_ve": _safe_float(_stage_override(config, "voxel_initial_value_ve", 0.2), 0.2),
-        "lower_limit_vp": _safe_float(_stage_override(config, "voxel_lower_limit_vp", 1e-3), 1e-3),
-        "upper_limit_vp": _safe_float(_stage_override(config, "voxel_upper_limit_vp", 1.0), 1.0),
-        "initial_value_vp": _safe_float(_stage_override(config, "voxel_initial_value_vp", 0.02), 0.02),
+        "lower_limit_ktrans": _safe_float(_stage_override(config, "voxel_lower_limit_ktrans"), 1e-7),
+        "upper_limit_ktrans": _safe_float(_stage_override(config, "voxel_upper_limit_ktrans"), 2.0),
+        "initial_value_ktrans": _safe_float(_stage_override(config, "voxel_initial_value_ktrans"), 2e-4),
+        "lower_limit_ve": _safe_float(_stage_override(config, "voxel_lower_limit_ve"), 0.02),
+        "upper_limit_ve": _safe_float(_stage_override(config, "voxel_upper_limit_ve"), 1.0),
+        "initial_value_ve": _safe_float(_stage_override(config, "voxel_initial_value_ve"), 0.2),
+        "lower_limit_vp": _safe_float(_stage_override(config, "voxel_lower_limit_vp"), 1e-3),
+        "upper_limit_vp": _safe_float(_stage_override(config, "voxel_upper_limit_vp"), 1.0),
+        "initial_value_vp": _safe_float(_stage_override(config, "voxel_initial_value_vp"), 0.02),
         # 1e-4/s (~0.6 mL/100mL/min) so low-flow tissue (OSIPI DRO fp=5 mL/100mL/min ~= 8.3e-4/s)
         # is representable; the prior 1e-3/s (~6 mL/100mL/min) excluded it.
-        "lower_limit_fp": _safe_float(_stage_override(config, "voxel_lower_limit_fp", 1e-4), 1e-4),
-        "upper_limit_fp": _safe_float(_stage_override(config, "voxel_upper_limit_fp", 100.0), 100.0),
-        "initial_value_fp": _safe_float(_stage_override(config, "voxel_initial_value_fp", 0.2), 0.2),
-        "lower_limit_tp": _safe_float(_stage_override(config, "voxel_lower_limit_tp", 0.0), 0.0),
-        "upper_limit_tp": _safe_float(_stage_override(config, "voxel_upper_limit_tp", 1e6), 1e6),
-        "initial_value_tp": _safe_float(_stage_override(config, "voxel_initial_value_tp", 0.05), 0.05),
-        "lower_limit_tau": _safe_float(_stage_override(config, "voxel_lower_limit_tau", 0.0), 0.0),
-        "upper_limit_tau": _safe_float(_stage_override(config, "voxel_upper_limit_tau", 100.0), 100.0),
-        "initial_value_tau": _safe_float(_stage_override(config, "voxel_initial_value_tau", 0.01), 0.01),
-        "lower_limit_ktrans_rr": _safe_float(_stage_override(config, "voxel_lower_limit_ktrans_RR", 1e-7), 1e-7),
-        "upper_limit_ktrans_rr": _safe_float(_stage_override(config, "voxel_upper_limit_ktrans_RR", 2.0), 2.0),
-        "initial_value_ktrans_rr": _safe_float(_stage_override(config, "voxel_initial_value_ktrans_RR", 0.1), 0.1),
-        "value_ve_rr": _safe_float(_stage_override(config, "voxel_value_ve_RR", 0.08), 0.08),
-        "tol_fun": _safe_float(_stage_override(config, "voxel_TolFun", 1e-12), 1e-12),
-        "tol_x": _safe_float(_stage_override(config, "voxel_TolX", 1e-6), 1e-6),
+        "lower_limit_fp": _safe_float(_stage_override(config, "voxel_lower_limit_fp"), 1e-4),
+        "upper_limit_fp": _safe_float(_stage_override(config, "voxel_upper_limit_fp"), 100.0),
+        "initial_value_fp": _safe_float(_stage_override(config, "voxel_initial_value_fp"), 0.2),
+        "lower_limit_tp": _safe_float(_stage_override(config, "voxel_lower_limit_tp"), 0.0),
+        "upper_limit_tp": _safe_float(_stage_override(config, "voxel_upper_limit_tp"), 1e6),
+        "initial_value_tp": _safe_float(_stage_override(config, "voxel_initial_value_tp"), 0.05),
+        "lower_limit_tau": _safe_float(_stage_override(config, "voxel_lower_limit_tau"), 0.0),
+        "upper_limit_tau": _safe_float(_stage_override(config, "voxel_upper_limit_tau"), 100.0),
+        "initial_value_tau": _safe_float(_stage_override(config, "voxel_initial_value_tau"), 0.01),
+        "lower_limit_ktrans_rr": _safe_float(_stage_override(config, "voxel_lower_limit_ktrans_RR"), 1e-7),
+        "upper_limit_ktrans_rr": _safe_float(_stage_override(config, "voxel_upper_limit_ktrans_RR"), 2.0),
+        "initial_value_ktrans_rr": _safe_float(_stage_override(config, "voxel_initial_value_ktrans_RR"), 0.1),
+        "value_ve_rr": _safe_float(_stage_override(config, "voxel_value_ve_RR"), 0.08),
+        "tol_fun": _safe_float(_stage_override(config, "voxel_TolFun"), 1e-12),
+        "tol_x": _safe_float(_stage_override(config, "voxel_TolX"), 1e-6),
         "max_iter": int(voxel_max_iter),
         "max_nfev": int(voxel_max_nfev),
-        "robust": str(_stage_override(config, "voxel_Robust", "off")).strip(),
-        "gpu_tolerance": _safe_float(_stage_override(config, "gpu_tolerance", 1e-6), 1e-6),
-        "gpu_max_n_iterations": int(_safe_float(_stage_override(config, "gpu_max_n_iterations", 200), 200)),
-        "gpu_initial_value_ktrans": _safe_float(_stage_override(config, "gpu_initial_value_ktrans", 2e-4), 2e-4),
-        "gpu_initial_value_ve": _safe_float(_stage_override(config, "gpu_initial_value_ve", 0.2), 0.2),
-        "gpu_initial_value_vp": _safe_float(_stage_override(config, "gpu_initial_value_vp", 0.02), 0.02),
-        "gpu_initial_value_fp": _safe_float(_stage_override(config, "gpu_initial_value_fp", 0.2), 0.2),
-        "fxr_fw": _safe_float(_stage_override(config, "fxr_fw", 0.8), 0.8),
+        "robust": str(_stage_override(config, "voxel_Robust")).strip(),
+        "gpu_tolerance": _safe_float(_stage_override(config, "gpu_tolerance"), 1e-6),
+        "gpu_max_n_iterations": int(_safe_float(_stage_override(config, "gpu_max_n_iterations"), 200)),
+        "gpu_initial_value_ktrans": _safe_float(_stage_override(config, "gpu_initial_value_ktrans"), 2e-4),
+        "gpu_initial_value_ve": _safe_float(_stage_override(config, "gpu_initial_value_ve"), 0.2),
+        "gpu_initial_value_vp": _safe_float(_stage_override(config, "gpu_initial_value_vp"), 0.02),
+        "gpu_initial_value_fp": _safe_float(_stage_override(config, "gpu_initial_value_fp"), 0.2),
+        "fxr_fw": _safe_float(_stage_override(config, "fxr_fw"), 0.8),
         # Optional model-specific overrides to tune unstable models without impacting others.
-        "2cxm_lower_limit_ktrans": _stage_override(config, "voxel_lower_limit_ktrans_2cxm", 1e-7),
-        "2cxm_upper_limit_ktrans": _stage_override(config, "voxel_upper_limit_ktrans_2cxm", 2.0),
-        "2cxm_initial_value_ktrans": _stage_override(config, "voxel_initial_value_ktrans_2cxm", 2e-4),
-        "2cxm_lower_limit_ve": _stage_override(config, "voxel_lower_limit_ve_2cxm", 0.05),
-        "2cxm_upper_limit_ve": _stage_override(config, "voxel_upper_limit_ve_2cxm", 1.0),
-        "2cxm_initial_value_ve": _stage_override(config, "voxel_initial_value_ve_2cxm", 0.15),
-        "2cxm_lower_limit_vp": _stage_override(config, "voxel_lower_limit_vp_2cxm", 1e-3),
-        "2cxm_upper_limit_vp": _stage_override(config, "voxel_upper_limit_vp_2cxm", 1.0),
-        "2cxm_initial_value_vp": _stage_override(config, "voxel_initial_value_vp_2cxm", 0.02),
+        "2cxm_lower_limit_ktrans": _stage_override(config, "voxel_lower_limit_ktrans_2cxm"),
+        "2cxm_upper_limit_ktrans": _stage_override(config, "voxel_upper_limit_ktrans_2cxm"),
+        "2cxm_initial_value_ktrans": _stage_override(config, "voxel_initial_value_ktrans_2cxm"),
+        "2cxm_lower_limit_ve": _stage_override(config, "voxel_lower_limit_ve_2cxm"),
+        "2cxm_upper_limit_ve": _stage_override(config, "voxel_upper_limit_ve_2cxm"),
+        "2cxm_initial_value_ve": _stage_override(config, "voxel_initial_value_ve_2cxm"),
+        "2cxm_lower_limit_vp": _stage_override(config, "voxel_lower_limit_vp_2cxm"),
+        "2cxm_upper_limit_vp": _stage_override(config, "voxel_upper_limit_vp_2cxm"),
+        "2cxm_initial_value_vp": _stage_override(config, "voxel_initial_value_vp_2cxm"),
         # Matches the shared "lower_limit_fp" default (see above); kept as its own override
         # key so 2cxm can still be tuned independently of other models if needed.
-        "2cxm_lower_limit_fp": _stage_override(config, "voxel_lower_limit_fp_2cxm", 1e-4),
-        "2cxm_upper_limit_fp": _stage_override(config, "voxel_upper_limit_fp_2cxm", 20.0),
-        "2cxm_initial_value_fp": _stage_override(config, "voxel_initial_value_fp_2cxm", 0.35),
-        "2cxm_max_nfev": _stage_override(config, "voxel_MaxFunEvals_2cxm", 140),
-        "2cxm_max_iter": _stage_override(config, "voxel_MaxIter_2cxm", 140),
-        "2cxm_robust": _stage_override(config, "voxel_Robust_2cxm", None),
-        "tissue_uptake_lower_limit_ktrans": _stage_override(config, "voxel_lower_limit_ktrans_tissue_uptake", 1e-7),
-        "tissue_uptake_upper_limit_ktrans": _stage_override(config, "voxel_upper_limit_ktrans_tissue_uptake", 2.0),
-        "tissue_uptake_initial_value_ktrans": _stage_override(config, "voxel_initial_value_ktrans_tissue_uptake", 2e-4),
-        "tissue_uptake_lower_limit_vp": _stage_override(config, "voxel_lower_limit_vp_tissue_uptake", 1e-3),
-        "tissue_uptake_upper_limit_vp": _stage_override(config, "voxel_upper_limit_vp_tissue_uptake", 1.0),
-        "tissue_uptake_initial_value_vp": _stage_override(config, "voxel_initial_value_vp_tissue_uptake", 0.02),
+        "2cxm_lower_limit_fp": _stage_override(config, "voxel_lower_limit_fp_2cxm"),
+        "2cxm_upper_limit_fp": _stage_override(config, "voxel_upper_limit_fp_2cxm"),
+        "2cxm_initial_value_fp": _stage_override(config, "voxel_initial_value_fp_2cxm"),
+        "2cxm_max_nfev": _stage_override(config, "voxel_MaxFunEvals_2cxm"),
+        "2cxm_max_iter": _stage_override(config, "voxel_MaxIter_2cxm"),
+        "2cxm_robust": _stage_override_optional(config, "voxel_Robust_2cxm"),
+        "tissue_uptake_lower_limit_ktrans": _stage_override(config, "voxel_lower_limit_ktrans_tissue_uptake"),
+        "tissue_uptake_upper_limit_ktrans": _stage_override(config, "voxel_upper_limit_ktrans_tissue_uptake"),
+        "tissue_uptake_initial_value_ktrans": _stage_override(config, "voxel_initial_value_ktrans_tissue_uptake"),
+        "tissue_uptake_lower_limit_vp": _stage_override(config, "voxel_lower_limit_vp_tissue_uptake"),
+        "tissue_uptake_upper_limit_vp": _stage_override(config, "voxel_upper_limit_vp_tissue_uptake"),
+        "tissue_uptake_initial_value_vp": _stage_override(config, "voxel_initial_value_vp_tissue_uptake"),
         # Matches the shared "lower_limit_fp" default; see 2cxm_lower_limit_fp above.
-        "tissue_uptake_lower_limit_fp": _stage_override(config, "voxel_lower_limit_fp_tissue_uptake", 1e-4),
-        "tissue_uptake_upper_limit_fp": _stage_override(config, "voxel_upper_limit_fp_tissue_uptake", 20.0),
-        "tissue_uptake_initial_value_fp": _stage_override(config, "voxel_initial_value_fp_tissue_uptake", 0.35),
-        "tissue_uptake_lower_limit_tp": _stage_override(config, "voxel_lower_limit_tp_tissue_uptake", 0.0),
-        "tissue_uptake_upper_limit_tp": _stage_override(config, "voxel_upper_limit_tp_tissue_uptake", 1.5),
-        "tissue_uptake_initial_value_tp": _stage_override(config, "voxel_initial_value_tp_tissue_uptake", 0.12),
-        "tissue_uptake_max_nfev": _stage_override(config, "voxel_MaxFunEvals_tissue_uptake", 120),
-        "tissue_uptake_max_iter": _stage_override(config, "voxel_MaxIter_tissue_uptake", 120),
-        "tissue_uptake_robust": _stage_override(config, "voxel_Robust_tissue_uptake", None),
+        "tissue_uptake_lower_limit_fp": _stage_override(config, "voxel_lower_limit_fp_tissue_uptake"),
+        "tissue_uptake_upper_limit_fp": _stage_override(config, "voxel_upper_limit_fp_tissue_uptake"),
+        "tissue_uptake_initial_value_fp": _stage_override(config, "voxel_initial_value_fp_tissue_uptake"),
+        "tissue_uptake_lower_limit_tp": _stage_override(config, "voxel_lower_limit_tp_tissue_uptake"),
+        "tissue_uptake_upper_limit_tp": _stage_override(config, "voxel_upper_limit_tp_tissue_uptake"),
+        "tissue_uptake_initial_value_tp": _stage_override(config, "voxel_initial_value_tp_tissue_uptake"),
+        "tissue_uptake_max_nfev": _stage_override(config, "voxel_MaxFunEvals_tissue_uptake"),
+        "tissue_uptake_max_iter": _stage_override(config, "voxel_MaxIter_tissue_uptake"),
+        "tissue_uptake_robust": _stage_override_optional(config, "voxel_Robust_tissue_uptake"),
     }
 
 
@@ -3389,7 +3389,7 @@ def _write_param_maps(
     spatial_shape: Optional[Tuple[int, int, int]],
     reference: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, str]:
-    write_maps = bool(_stage_override(config, "write_param_maps", True))
+    write_maps = bool(_stage_override(config, "write_param_maps"))
     if not write_maps or spatial_shape is None:
         return {}
 
@@ -3428,7 +3428,7 @@ def _write_qof_maps(
     moderation (`dce_qof`); ``reliable ⟺ χ²_ν ≤ qof_chi2_max`` (default 6.0). No-op when disabled,
     the model is unsupported, or there is no spatial reference — never fails the pipeline.
     """
-    if not _to_bool(_stage_override(config, "write_qof_maps", False), False):
+    if not _to_bool(_stage_override(config, "write_qof_maps"), False):
         return {}
     if spatial_shape is None:
         return {}
@@ -3443,7 +3443,7 @@ def _write_qof_maps(
             start_injection_min, end_injection_min, dt, n_obs, t0
         )
 
-        chi2_max = _safe_float(_stage_override(config, "qof_chi2_max", 6.0), 6.0)
+        chi2_max = _safe_float(_stage_override(config, "qof_chi2_max"), 6.0)
         res = dce_qof.compute_qof_arrays(
             model_name, ct_arr, np.asarray(voxel_results, dtype=np.float64),
             window=window, n_obs=n_obs, shrink_sigma=True, chi2_reliable_max=chi2_max,
@@ -3640,7 +3640,7 @@ def _write_postfit_arrays(
     relaxivity: float,
     fw: float,
 ) -> Optional[str]:
-    write_arrays = _to_bool(_stage_override(config, "write_postfit_arrays", False), False)
+    write_arrays = _to_bool(_stage_override(config, "write_postfit_arrays"), False)
     if not write_arrays:
         return None
 
@@ -3971,8 +3971,8 @@ def _run_stage_d_real(
     if cp_use.size != timer.size or ct_main.shape[0] != timer.size:
         raise ValueError("Stage-D expects Cp_use, Ct, timer to share time length")
 
-    time_smoothing = str(_stage_override(config, "time_smoothing", "none")).strip().lower()
-    time_smoothing_window = int(_safe_float(_stage_override(config, "time_smoothing_window", 0), 0))
+    time_smoothing = str(_stage_override(config, "time_smoothing")).strip().lower()
+    time_smoothing_window = int(_safe_float(_stage_override(config, "time_smoothing_window"), 0))
     ct_main = _smooth_time_matrix(ct_main, time_smoothing, time_smoothing_window)
 
     sttum = _as_time_by_voxel(arrays["Sttum"], "Sttum") if "Sttum" in arrays else None
@@ -3980,7 +3980,7 @@ def _run_stage_d_real(
     if sttum is not None:
         sttum = _smooth_time_matrix(sttum, time_smoothing, time_smoothing_window)
 
-    relaxivity = float(stage_a.get("relaxivity", _stage_override(config, "relaxivity", DEFAULT_RELAXIVITY)))
+    relaxivity = float(stage_a.get("relaxivity", _stage_override(config, "relaxivity")))
     prefs = _stage_d_fit_prefs(config)
     fw = float(prefs["fxr_fw"])
 
@@ -3998,9 +3998,9 @@ def _run_stage_d_real(
     # ROI-only mode (`fit_voxels=0`): skip the per-voxel Stage-D fit and only fit each ROI's
     # averaged concentration curve (average-then-fit, matching MATLAB). Much faster, and for
     # nonlinear models the pre-fit averaging reduces noise. Parameter maps are not written.
-    fit_voxels = _to_bool(_stage_override(config, "fit_voxels", True), True)
+    fit_voxels = _to_bool(_stage_override(config, "fit_voxels"), True)
 
-    rootname = str(stage_a.get("rootname", _stage_override(config, "rootname", "python_dce")))
+    rootname = str(stage_a.get("rootname", _stage_override(config, "rootname")))
     start_injection_min = float(stage_b.get("start_injection_min", timer[0]))
     sss = np.asarray(arrays["Sss"], dtype=np.float64).reshape(-1) if "Sss" in arrays else None
     ssstum = np.asarray(arrays["Ssstum"], dtype=np.float64).reshape(-1) if "Ssstum" in arrays else None
@@ -4208,7 +4208,7 @@ class HybridStageRunner:
         self, config: DcePipelineConfig, event_callback: Optional[Callable[[Dict[str, Any]], None]] = None
     ) -> Dict[str, Any]:
         del event_callback
-        mode = str(_stage_override(config, "stage_a_mode", "real")).strip().lower()
+        mode = str(_stage_override(config, "stage_a_mode")).strip().lower()
         if mode == "scaffold":
             return {
                 "stage": "A",
@@ -4243,7 +4243,7 @@ class HybridStageRunner:
                 **extra,
             }
 
-        mode = str(_stage_override(config, "stage_b_mode", "auto")).strip().lower()
+        mode = str(_stage_override(config, "stage_b_mode")).strip().lower()
         if mode == "scaffold":
             return _scaffold()
 
@@ -4278,7 +4278,7 @@ class HybridStageRunner:
                 **extra,
             }
 
-        mode = str(_stage_override(config, "stage_d_mode", "auto")).strip().lower()
+        mode = str(_stage_override(config, "stage_d_mode")).strip().lower()
         if mode == "scaffold":
             return _scaffold()
 
@@ -4438,14 +4438,14 @@ def run_dce_pipeline(
         config.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     active_runner = runner or HybridStageRunner()
-    prefs_path = _resolve_dce_preferences_path(config)
+    defaults_path = dce_config.load_defaults().path
     _emit_progress(
         event_callback,
         "run_start",
         output_dir=str(config.output_dir),
         checkpoint_dir=str(config.checkpoint_dir) if config.checkpoint_dir else None,
         backend=str(config.backend),
-        dce_preferences_path=str(prefs_path) if prefs_path else None,
+        dce_defaults_path=str(defaults_path),
     )
 
     def _finish_stage(stage: str, data: Dict[str, Any], **extra: Any) -> None:
@@ -4524,7 +4524,7 @@ def run_dce_pipeline(
             "pipeline": "dce_cli_in_memory",
             "status": "ok",
             "single_process": True,
-            "dce_preferences_path": str(prefs_path) if prefs_path else None,
+            "dce_defaults_path": str(defaults_path),
             "duration_sec": duration_sec,
         },
         "provenance": provenance,
