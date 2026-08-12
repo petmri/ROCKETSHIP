@@ -352,12 +352,38 @@ broken independently: it pointed `aif_files` and `roi_files` at the same brain m
 edit. Fixed to a `label-AIF` mask; the command now gets all the way to the placeholder paths
 the user is meant to substitute.
 
-**Follow-up requiring MATLAB (not done here).** The committed MATLAB reference tree
-(`tests/data/BIDS_test/derivatives/matlabref/`) and `tests/contracts/baselines/matlab_reference_v1.json`
-were generated with the *old* MATLAB settings. Nothing breaks today — no test re-runs MATLAB,
-and all 18 contracts still pass — but the next regeneration of either will legitimately move,
-because MATLAB now fits with a 200-evaluation budget. Regenerate deliberately and in its own
-commit, so the diff reads as "MATLAB settings changed" and not as a silent parity drift.
+**Measured afterwards in MATLAB R2024a — and it corrected this plan.** This section
+originally predicted that both the contract baseline and the `matlabref` tree would move.
+Only the second is true.
+
+`tests/contracts/baselines/matlab_reference_v1.json` is unaffected: it is generated from
+`default_dce_fit_prefs()`, a test-only table at `MaxFunEvals` 2000, and never reads
+`dce_preferences.txt`. Regenerated and checked with `check_baseline_drift.py` — passes. Its
+bounds and initial values match `dce_defaults.json` exactly; only the budget is deliberately
+more generous, which is the right design for a contract (the reference should be the
+*converged* answer, not a production-budget one).
+
+The `matlabref` pipeline tree does read `dce_preferences.txt` through `FXLfit_generic`, so it
+will move. `tests/matlab/compare_voxel_maxfunevals.m` measures by how much: on the parity
+fixture with production voxel prefs and 30 noisy realizations per model per noise level,
+50 -> 200 changes 0/30 tofts fits at every noise level but 7/30 ex_tofts, 20/30
+tissue_uptake and 28/30 2cxm at sigma 0.10, with relative differences up to 35%, 96% and 180%
+respectively. Repeating at 200 vs 2000 gives 0/30 everywhere except one 2cxm realization, so
+**200 is a convergence plateau and 50 was truncating** — a correctness fix rather than a
+cosmetic sync. Noise-free curves converge at either budget, which is exactly why the
+contracts could not have caught this.
+
+**Still open: the per-model tuning was never propagated to MATLAB.** `dce_defaults.json`
+carries 28 per-model keys for 2cxm and tissue_uptake; `dce_preferences.txt` has no per-model
+mechanism at all, so 12 values differ (2cxm `upper_limit_fp` 100 vs 20, `initial_value_ve`
+0.2 vs 0.15, `lower_limit_ve` 0.02 vs 0.05, `initial_value_fp` 0.2 vs 0.35; tissue_uptake
+`upper_limit_tp` 1e6 vs 1.5, `upper_limit_fp` 100 vs 20, `initial_value_tp` 0.05 vs 0.12,
+`initial_value_fp` 0.2 vs 0.35; plus per-model iteration budgets). These came from `abf9ace`
+(2026-02-17), which ported the *multistart structure* to `model_2cxm.m` and
+`model_tissue_uptake.m` but left MATLAB feeding it the global values — so this divergence
+predates the defaults project, which surfaced rather than caused it. Closing it means
+teaching MATLAB's preference parser and `FXLfit_generic` about per-model overrides, which is
+a feature, not a value edit. Deferred deliberately.
 
 ---
 
