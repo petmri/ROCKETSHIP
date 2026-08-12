@@ -174,6 +174,152 @@ def resolve_scan_value(
     return resolve(config, key, defaults=defaults)
 
 
+# --- Stage-D fit settings -------------------------------------------------------------
+#
+# The fit backends take short, unprefixed setting names (`lower_limit_ktrans`); the
+# user-facing file spells them `voxel_lower_limit_ktrans`. This table is the single
+# definition of that mapping, so the pipeline, the backends and the tests cannot resolve
+# different numbers -- which is exactly what they did before this file existed.
+
+_STAGE_D_SHARED: tuple[tuple[str, str, str], ...] = (
+    ("lower_limit_ktrans", "voxel_lower_limit_ktrans", "float"),
+    ("upper_limit_ktrans", "voxel_upper_limit_ktrans", "float"),
+    ("initial_value_ktrans", "voxel_initial_value_ktrans", "float"),
+    ("lower_limit_ve", "voxel_lower_limit_ve", "float"),
+    ("upper_limit_ve", "voxel_upper_limit_ve", "float"),
+    ("initial_value_ve", "voxel_initial_value_ve", "float"),
+    ("lower_limit_vp", "voxel_lower_limit_vp", "float"),
+    ("upper_limit_vp", "voxel_upper_limit_vp", "float"),
+    ("initial_value_vp", "voxel_initial_value_vp", "float"),
+    ("lower_limit_fp", "voxel_lower_limit_fp", "float"),
+    ("upper_limit_fp", "voxel_upper_limit_fp", "float"),
+    ("initial_value_fp", "voxel_initial_value_fp", "float"),
+    ("lower_limit_tp", "voxel_lower_limit_tp", "float"),
+    ("upper_limit_tp", "voxel_upper_limit_tp", "float"),
+    ("initial_value_tp", "voxel_initial_value_tp", "float"),
+    ("lower_limit_tau", "voxel_lower_limit_tau", "float"),
+    ("upper_limit_tau", "voxel_upper_limit_tau", "float"),
+    ("initial_value_tau", "voxel_initial_value_tau", "float"),
+    ("lower_limit_ktrans_rr", "voxel_lower_limit_ktrans_RR", "float"),
+    ("upper_limit_ktrans_rr", "voxel_upper_limit_ktrans_RR", "float"),
+    ("initial_value_ktrans_rr", "voxel_initial_value_ktrans_RR", "float"),
+    ("value_ve_rr", "voxel_value_ve_RR", "float"),
+    ("tol_fun", "voxel_TolFun", "float"),
+    ("tol_x", "voxel_TolX", "float"),
+    ("max_iter", "voxel_MaxIter", "int"),
+    ("max_nfev", "voxel_MaxFunEvals", "int"),
+    ("robust", "voxel_Robust", "str"),
+    ("gpu_tolerance", "gpu_tolerance", "float"),
+    ("gpu_max_n_iterations", "gpu_max_n_iterations", "int"),
+    ("gpu_initial_value_ktrans", "gpu_initial_value_ktrans", "float"),
+    ("gpu_initial_value_ve", "gpu_initial_value_ve", "float"),
+    ("gpu_initial_value_vp", "gpu_initial_value_vp", "float"),
+    ("gpu_initial_value_fp", "gpu_initial_value_fp", "float"),
+    ("fxr_fw", "fxr_fw", "float"),
+)
+
+# Per-model overrides, emitted under a `<model>_` prefix that the pipeline promotes for the
+# model being fitted. They exist so an unstable model can be tuned without moving the others.
+_STAGE_D_PER_MODEL: Dict[str, tuple[tuple[str, str, str], ...]] = {
+    "2cxm": (
+        ("lower_limit_ktrans", "voxel_lower_limit_ktrans_2cxm", "raw"),
+        ("upper_limit_ktrans", "voxel_upper_limit_ktrans_2cxm", "raw"),
+        ("initial_value_ktrans", "voxel_initial_value_ktrans_2cxm", "raw"),
+        ("lower_limit_ve", "voxel_lower_limit_ve_2cxm", "raw"),
+        ("upper_limit_ve", "voxel_upper_limit_ve_2cxm", "raw"),
+        ("initial_value_ve", "voxel_initial_value_ve_2cxm", "raw"),
+        ("lower_limit_vp", "voxel_lower_limit_vp_2cxm", "raw"),
+        ("upper_limit_vp", "voxel_upper_limit_vp_2cxm", "raw"),
+        ("initial_value_vp", "voxel_initial_value_vp_2cxm", "raw"),
+        ("lower_limit_fp", "voxel_lower_limit_fp_2cxm", "raw"),
+        ("upper_limit_fp", "voxel_upper_limit_fp_2cxm", "raw"),
+        ("initial_value_fp", "voxel_initial_value_fp_2cxm", "raw"),
+        ("max_nfev", "voxel_MaxFunEvals_2cxm", "raw"),
+        ("max_iter", "voxel_MaxIter_2cxm", "raw"),
+        ("robust", "voxel_Robust_2cxm", "optional"),
+    ),
+    "tissue_uptake": (
+        ("lower_limit_ktrans", "voxel_lower_limit_ktrans_tissue_uptake", "raw"),
+        ("upper_limit_ktrans", "voxel_upper_limit_ktrans_tissue_uptake", "raw"),
+        ("initial_value_ktrans", "voxel_initial_value_ktrans_tissue_uptake", "raw"),
+        ("lower_limit_vp", "voxel_lower_limit_vp_tissue_uptake", "raw"),
+        ("upper_limit_vp", "voxel_upper_limit_vp_tissue_uptake", "raw"),
+        ("initial_value_vp", "voxel_initial_value_vp_tissue_uptake", "raw"),
+        ("lower_limit_fp", "voxel_lower_limit_fp_tissue_uptake", "raw"),
+        ("upper_limit_fp", "voxel_upper_limit_fp_tissue_uptake", "raw"),
+        ("initial_value_fp", "voxel_initial_value_fp_tissue_uptake", "raw"),
+        ("lower_limit_tp", "voxel_lower_limit_tp_tissue_uptake", "raw"),
+        ("upper_limit_tp", "voxel_upper_limit_tp_tissue_uptake", "raw"),
+        ("initial_value_tp", "voxel_initial_value_tp_tissue_uptake", "raw"),
+        ("max_nfev", "voxel_MaxFunEvals_tissue_uptake", "raw"),
+        ("max_iter", "voxel_MaxIter_tissue_uptake", "raw"),
+        ("robust", "voxel_Robust_tissue_uptake", "optional"),
+    ),
+}
+
+
+def _coerce(value: Any, kind: str, key: str) -> Any:
+    if kind == "raw":
+        return value
+    if kind == "str":
+        return str(value).strip()
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise DceConfigError(
+            f"DCE preference '{key}' must be numeric, got {value!r}. Fix it in the run "
+            f"config or in {DEFAULTS_PATH}."
+        ) from exc
+    return int(number) if kind == "int" else number
+
+
+def stage_d_prefs(config: Any = None, *, defaults: Optional[DceDefaults] = None) -> Dict[str, Any]:
+    """The complete Stage-D fit settings dict.
+
+    Pass a run config to layer its `stage_overrides` on top; pass none to get exactly what
+    `dce_defaults.json` specifies, which is what the contract and reliability tests want --
+    they should measure the shipped configuration, not a separate one.
+    """
+    table = defaults if defaults is not None else load_defaults()
+    out: Dict[str, Any] = {}
+    for setting_key, file_key, kind in _STAGE_D_SHARED:
+        out[setting_key] = _coerce(resolve(config, file_key, defaults=table), kind, file_key)
+    for model, entries in _STAGE_D_PER_MODEL.items():
+        for setting_key, file_key, kind in entries:
+            if kind == "optional":
+                # Unset means "use the shared value"; `_apply_model_specific_prefs` skips
+                # None entries, so it must stay None rather than being coerced.
+                out[f"{model}_{setting_key}"] = resolve_optional(
+                    config, file_key, None, defaults=table
+                )
+                continue
+            value = resolve(config, file_key, defaults=table)
+            out[f"{model}_{setting_key}"] = _coerce(value, kind, file_key)
+    return out
+
+
+def model_settings(
+    model_name: str, config: Any = None, *, defaults: Optional[DceDefaults] = None
+) -> Dict[str, Any]:
+    """Stage-D settings for one model, with its `<model>_*` overrides already promoted.
+
+    Values are in canonical per-minute units, matching `_units` in the defaults file.
+    """
+    prefs = stage_d_prefs(config, defaults=defaults)
+    prefix = f"{model_name}_"
+    resolved = {
+        k: v
+        for k, v in prefs.items()
+        if not any(k.startswith(f"{m}_") for m in _STAGE_D_PER_MODEL)
+    }
+    for key, value in prefs.items():
+        if not key.startswith(prefix) or value is None:
+            continue
+        base = key[len(prefix):]
+        resolved[base] = int(float(value)) if base in {"max_iter", "max_nfev"} else value
+    return resolved
+
+
 def validate_override_keys(stage_overrides: Mapping[str, Any], *, defaults: Optional[DceDefaults] = None) -> None:
     """Raise if a run config sets a key the defaults file does not recognise (typo guard)."""
     table = defaults if defaults is not None else load_defaults()

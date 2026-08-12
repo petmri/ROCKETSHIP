@@ -18,6 +18,8 @@ from typing import Any, Dict, Optional, Tuple
 import numpy as np
 from scipy.optimize import least_squares
 
+import dce_config
+
 from dce_models import (
     ForwardInputs,
     _canonical_time_context,
@@ -57,22 +59,31 @@ class FitInputs:
         return int(self.ct.shape[1])
 
 
-def _patlak_settings(prefs: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    settings: Dict[str, Any] = {
-        "lower_limit_ktrans": 1e-7,
-        "upper_limit_ktrans": 2.0,
-        "initial_value_ktrans": 2e-4,
-        "lower_limit_vp": 1e-3,
-        "upper_limit_vp": 1.0,
-        "initial_value_vp": 0.02,
-        "max_nfev": 2000,
-        "tol_fun": 1e-12,
-        "tol_x": 1e-6,
-        "robust": "off",
-    }
+# Multistart is an algorithm detail of these two fits, not a user preference: the counts
+# are chosen against the models' failure modes, and a fixed seed is what makes a fit
+# reproducible. Deliberately not in dce_defaults.json.
+TISSUE_UPTAKE_MULTISTART_STARTS = 4
+TWOCXM_MULTISTART_STARTS = 5
+MULTISTART_SEED = 0
+
+
+def _settings_for(model_name: str, prefs: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Model settings from the defaults file, overlaid with caller-supplied prefs."""
+    settings = dce_config.model_settings(model_name)
     if prefs:
         settings.update(prefs)
     return settings
+
+
+def _patlak_settings(prefs: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Complete patlak fit settings: `dce_defaults.json`, with `prefs` layered on top.
+
+    There is no hardcoded table here any more. Passing `prefs=None` yields exactly
+    the shipped defaults, which is what a caller with no run config of its own --
+    the MATLAB contract tests, say -- should measure.
+    """
+    return _settings_for("patlak", prefs)
+
 
 
 def _patlak_bounds_row(settings: Dict[str, Any]) -> np.ndarray:
@@ -119,21 +130,14 @@ def assemble_patlak_candidates(inputs: FitInputs) -> np.ndarray:
 
 
 def _tofts_settings(prefs: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    settings: Dict[str, Any] = {
-        "lower_limit_ktrans": 1e-7,
-        "upper_limit_ktrans": 2.0,
-        "initial_value_ktrans": 2e-4,
-        "lower_limit_ve": 0.02,
-        "upper_limit_ve": 1.0,
-        "initial_value_ve": 0.2,
-        "max_nfev": 2000,
-        "tol_fun": 1e-12,
-        "tol_x": 1e-6,
-        "robust": "off",
-    }
-    if prefs:
-        settings.update(prefs)
-    return settings
+    """Complete tofts fit settings: `dce_defaults.json`, with `prefs` layered on top.
+
+    There is no hardcoded table here any more. Passing `prefs=None` yields exactly
+    the shipped defaults, which is what a caller with no run config of its own --
+    the MATLAB contract tests, say -- should measure.
+    """
+    return _settings_for("tofts", prefs)
+
 
 
 def _tofts_bounds_row(settings: Dict[str, Any]) -> np.ndarray:
@@ -162,24 +166,14 @@ def assemble_tofts_candidates(inputs: FitInputs) -> np.ndarray:
 
 
 def _ex_tofts_settings(prefs: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    settings: Dict[str, Any] = {
-        "lower_limit_ktrans": 1e-7,
-        "upper_limit_ktrans": 2.0,
-        "initial_value_ktrans": 2e-4,
-        "lower_limit_ve": 0.02,
-        "upper_limit_ve": 1.0,
-        "initial_value_ve": 0.2,
-        "lower_limit_vp": 1e-3,
-        "upper_limit_vp": 1.0,
-        "initial_value_vp": 0.02,
-        "max_nfev": 2000,
-        "tol_fun": 1e-12,
-        "tol_x": 1e-6,
-        "robust": "off",
-    }
-    if prefs:
-        settings.update(prefs)
-    return settings
+    """Complete ex_tofts fit settings: `dce_defaults.json`, with `prefs` layered on top.
+
+    There is no hardcoded table here any more. Passing `prefs=None` yields exactly
+    the shipped defaults, which is what a caller with no run config of its own --
+    the MATLAB contract tests, say -- should measure.
+    """
+    return _settings_for("ex_tofts", prefs)
+
 
 
 def _ex_tofts_bounds_row(settings: Dict[str, Any]) -> np.ndarray:
@@ -258,38 +252,26 @@ def _clamp_to_bounds(candidates: np.ndarray, bounds_row: np.ndarray) -> np.ndarr
     return np.clip(candidates, lo, hi)
 
 
-# Hardcoded canonical (per-minute) defaults -- already in the internal fit
-# units, unlike caller-supplied prefs which follow the input timer's unit.
-# Kept as a standalone constant so `_run_tissue_uptake_python` can merge the
-# caller's *raw* overrides into these canonical values with correct
-# unit scaling, instead of re-scaling the already-canonical defaults too.
-_TISSUE_UPTAKE_DEFAULTS: Dict[str, Any] = {
-    "lower_limit_ktrans": 1e-7,
-    "upper_limit_ktrans": 2.0,
-    "initial_value_ktrans": 2e-4,
-    "lower_limit_fp": 1e-4,
-    "upper_limit_fp": 100.0,
-    "initial_value_fp": 0.2,
-    "lower_limit_vp": 0.0,
-    "upper_limit_vp": 1.0,
-    "initial_value_vp": 0.02,
-    "lower_limit_tp": 0.0,
-    "upper_limit_tp": 1e6,
-    "initial_value_tp": 0.05,
-    "max_nfev": 2000,
-    "tol_fun": 1e-12,
-    "tol_x": 1e-6,
-    "robust": "off",
-    "multistart_starts": 4,
-    "multistart_seed": 0,
-}
+def _canonical_defaults_tissue_uptake() -> Dict[str, Any]:
+    """tissue_uptake settings in canonical (per-minute) units, from dce_defaults.json.
+
+    Kept separate from the merged prefs so `_run_tissue_uptake_python` can fold the
+    caller's *raw* overrides in with the right unit scaling, without re-scaling
+    these already-canonical values.
+    """
+    return dce_config.model_settings("tissue_uptake")
+
 
 
 def _tissue_uptake_settings(prefs: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    settings: Dict[str, Any] = dict(_TISSUE_UPTAKE_DEFAULTS)
-    if prefs:
-        settings.update(prefs)
-    return settings
+    """Complete tissue_uptake fit settings: `dce_defaults.json`, with `prefs` layered on top.
+
+    There is no hardcoded table here any more. Passing `prefs=None` yields exactly
+    the shipped defaults, which is what a caller with no run config of its own --
+    the MATLAB contract tests, say -- should measure.
+    """
+    return _settings_for("tissue_uptake", prefs)
+
 
 
 def _tissue_uptake_bounds_row(settings: Dict[str, Any]) -> np.ndarray:
@@ -351,8 +333,8 @@ def assemble_tissue_uptake_candidates(inputs: FitInputs) -> np.ndarray:
     )
     patlak = np.stack([patlak_k, patlak_fp, np.full(n_voxels, vp0, dtype=np.float64)], axis=-1)[None, :, :]
 
-    n_random = int(settings.get("multistart_starts", 4))
-    seed = int(settings.get("multistart_seed", 0))
+    n_random = TISSUE_UPTAKE_MULTISTART_STARTS
+    seed = MULTISTART_SEED
     lower = np.array([k_lo, fp_lo, vp_lo], dtype=np.float64)
     upper = np.array([k_hi, fp_hi, vp_hi], dtype=np.float64)
     random_candidates = _log_uniform_candidates(n_random, n_voxels, lower, upper, seed)
@@ -360,33 +342,26 @@ def assemble_tissue_uptake_candidates(inputs: FitInputs) -> np.ndarray:
     return np.concatenate([fixed, patlak, random_candidates], axis=0)
 
 
-# See _TISSUE_UPTAKE_DEFAULTS: hardcoded canonical (per-minute) defaults, kept
-# standalone so _run_2cxm_python can merge raw overrides in without
-# re-scaling the already-canonical defaults.
-_2CXM_DEFAULTS: Dict[str, Any] = {
-    "lower_limit_ktrans": 1e-7,
-    "upper_limit_ktrans": 2.0,
-    "initial_value_ktrans": 2e-4,
-    "lower_limit_ve": 0.02,
-    "upper_limit_ve": 1.0,
-    "initial_value_ve": 0.2,
-    "lower_limit_vp": 1e-3,
-    "upper_limit_vp": 1.0,
-    "initial_value_vp": 0.02,
-    "lower_limit_fp": 1e-4,
-    "upper_limit_fp": 2.0,
-    "initial_value_fp": 20.0 / 100.0,
-    "max_nfev": 4000,
-    "multistart_starts": 5,
-    "multistart_seed": 0,
-}
+def _canonical_defaults_twocxm() -> Dict[str, Any]:
+    """2cxm settings in canonical (per-minute) units, from dce_defaults.json.
+
+    Kept separate from the merged prefs so `_run_2cxm_python` can fold the
+    caller's *raw* overrides in with the right unit scaling, without re-scaling
+    these already-canonical values.
+    """
+    return dce_config.model_settings("2cxm")
+
 
 
 def _2cxm_settings(prefs: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    settings: Dict[str, Any] = dict(_2CXM_DEFAULTS)
-    if prefs:
-        settings.update(prefs)
-    return settings
+    """Complete 2cxm fit settings: `dce_defaults.json`, with `prefs` layered on top.
+
+    There is no hardcoded table here any more. Passing `prefs=None` yields exactly
+    the shipped defaults, which is what a caller with no run config of its own --
+    the MATLAB contract tests, say -- should measure.
+    """
+    return _settings_for("2cxm", prefs)
+
 
 
 def _2cxm_bounds_row(settings: Dict[str, Any]) -> np.ndarray:
@@ -453,8 +428,8 @@ def assemble_2cxm_candidates(inputs: FitInputs) -> np.ndarray:
     )
     fixed = np.tile(fixed_row[None, None, :], (1, n_voxels, 1))
 
-    n_random = int(settings.get("multistart_starts", 5))
-    seed = int(settings.get("multistart_seed", 0))
+    n_random = TWOCXM_MULTISTART_STARTS
+    seed = MULTISTART_SEED
     random_candidates = _log_uniform_candidates(n_random, n_voxels, lower, upper, seed)
     return np.concatenate([fixed, random_candidates], axis=0)
 
@@ -578,7 +553,7 @@ def _run_tissue_uptake_python(
     cp_vec = inputs.cp.tolist()
     timer_min, _, rate_in_to_min, rate_min_to_output = _canonical_time_context(t_vec, settings)
     canonical = _merge_prefs_in_canonical_units(
-        _TISSUE_UPTAKE_DEFAULTS,
+        _canonical_defaults_tissue_uptake(),
         inputs.raw_prefs,
         rate_keys=_KTRANS_FP_RATE_KEYS,
         time_constant_keys=_TISSUE_UPTAKE_TIME_CONSTANT_KEYS,
@@ -668,7 +643,7 @@ def _run_2cxm_python(
     cp_vec = inputs.cp.tolist()
     timer_min, _, rate_in_to_min, rate_min_to_output = _canonical_time_context(t_vec, settings)
     canonical = _merge_prefs_in_canonical_units(
-        _2CXM_DEFAULTS, inputs.raw_prefs, rate_keys=_KTRANS_FP_RATE_KEYS, rate_in_to_min=rate_in_to_min
+        _canonical_defaults_twocxm(), inputs.raw_prefs, rate_keys=_KTRANS_FP_RATE_KEYS, rate_in_to_min=rate_in_to_min
     )
 
     n_voxels = inputs.n_voxels
@@ -747,8 +722,8 @@ def _run_accelerated(
     constraints = np.ascontiguousarray(
         np.tile(np.asarray(inputs.bounds_row, dtype=np.float32)[None, :], (n_fits, 1))
     )
-    tolerance = float(inputs.prefs.get("gpu_tolerance", 1e-6))
-    max_iterations = int(inputs.prefs.get("gpu_max_n_iterations", 200))
+    tolerance = float(inputs.prefs["gpu_tolerance"])
+    max_iterations = int(inputs.prefs["gpu_max_n_iterations"])
 
     parameters, states, chi_squares, _, _ = fit_module.fit_constrained(
         data=data,
@@ -847,7 +822,7 @@ def _run_2cxm_accelerated(
         inputs.timer.tolist(), settings
     )
     canonical = _merge_prefs_in_canonical_units(
-        _2CXM_DEFAULTS, inputs.raw_prefs, rate_keys=_KTRANS_FP_RATE_KEYS, rate_in_to_min=rate_in_to_min
+        _canonical_defaults_twocxm(), inputs.raw_prefs, rate_keys=_KTRANS_FP_RATE_KEYS, rate_in_to_min=rate_in_to_min
     )
 
     n_voxels = inputs.n_voxels

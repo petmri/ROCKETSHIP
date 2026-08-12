@@ -7,6 +7,8 @@ import math
 from typing import Dict, Iterable, List, Optional
 
 import numpy as np
+
+import dce_config
 from scipy.interpolate import interp1d
 from scipy.optimize import curve_fit, least_squares
 from scipy.signal import lfilter
@@ -141,16 +143,18 @@ def _loss_from_robust(value: object) -> str:
 
 def _least_squares_kwargs(settings: Dict[str, object], default_max_nfev: int) -> Dict[str, object]:
     max_nfev = int(_safe_float_setting(settings, "max_nfev", float(default_max_nfev)))
+    # `tol_floor` is a numerical guard, not a preference: below it scipy cannot make
+    # progress in double precision. The tolerances themselves come from the settings.
     tol_floor = 1e-15
-    ftol = max(_safe_float_setting(settings, "tol_fun", 1e-12), tol_floor)
-    xtol = max(_safe_float_setting(settings, "tol_x", 1e-6), tol_floor)
+    ftol = max(float(settings["tol_fun"]), tol_floor)
+    xtol = max(float(settings["tol_x"]), tol_floor)
     kwargs: Dict[str, object] = {
         "method": "trf",
         "max_nfev": max_nfev,
         "ftol": ftol,
         "xtol": xtol,
     }
-    loss = _loss_from_robust(settings.get("robust", "off"))
+    loss = _loss_from_robust(settings["robust"])
     if loss != "linear":
         kwargs["loss"] = loss
     return kwargs
@@ -496,27 +500,28 @@ def fit_2cxm_canonical(
     """
     t_interp = grid.t_interp
 
-    settings = settings or {}
-    vp0 = float(settings.get("initial_value_vp", 0.01))
-    ve0 = float(settings.get("initial_value_ve", 0.2))
-    fp0 = float(settings.get("initial_value_fp", 20.0 / 100.0))
-    fp0 = max(fp0, 1e-12)
-    ktrans0 = float(settings.get("initial_value_ktrans", 0.03))
+    # No literal fallbacks: an absent setting means the caller did not resolve one, and
+    # `dce_defaults.json` is where the value belongs. `model_settings` reads that file.
+    settings = dict(dce_config.model_settings("2cxm"), **(settings or {}))
+    vp0 = float(settings["initial_value_vp"])
+    ve0 = float(settings["initial_value_ve"])
+    fp0 = max(float(settings["initial_value_fp"]), 1e-12)
+    ktrans0 = float(settings["initial_value_ktrans"])
 
-    fp_lo = max(float(settings.get("lower_limit_fp", 0.0)), 0.0)
-    fp_hi = max(float(settings.get("upper_limit_fp", 200.0 / 100.0)), fp_lo + 1e-12)
-    vp_lo = max(float(settings.get("lower_limit_vp", 0.0)), 0.0)
-    vp_hi = max(float(settings.get("upper_limit_vp", 1.0)), vp_lo + 1e-12)
-    ve_lo = max(float(settings.get("lower_limit_ve", 0.0)), 0.0)
-    ve_hi = max(float(settings.get("upper_limit_ve", 1.0)), ve_lo + 1e-12)
-    ktrans_lo = max(float(settings.get("lower_limit_ktrans", 0.0)), 0.0)
-    ktrans_hi = max(float(settings.get("upper_limit_ktrans", 2.0)), ktrans_lo + 1e-12)
+    fp_lo = max(float(settings["lower_limit_fp"]), 0.0)
+    fp_hi = max(float(settings["upper_limit_fp"]), fp_lo + 1e-12)
+    vp_lo = max(float(settings["lower_limit_vp"]), 0.0)
+    vp_hi = max(float(settings["upper_limit_vp"]), vp_lo + 1e-12)
+    ve_lo = max(float(settings["lower_limit_ve"]), 0.0)
+    ve_hi = max(float(settings["upper_limit_ve"]), ve_lo + 1e-12)
+    ktrans_lo = max(float(settings["lower_limit_ktrans"]), 0.0)
+    ktrans_hi = max(float(settings["upper_limit_ktrans"]), ktrans_lo + 1e-12)
 
     e0 = ktrans0 / max(fp0, 1e-12)
     e0 = min(max(e0, 1e-8), 1.0 - 1e-8)
     e_lo, e_hi = _e_space_bounds(ktrans_lo, ktrans_hi, fp_lo, fp_hi)
     e0 = min(max(e0, e_lo + 1e-10), e_hi - 1e-10)
-    maxfev = int(_safe_float_setting(settings, "max_nfev", 4000.0))
+    maxfev = int(float(settings["max_nfev"]))
 
     try:
         fit, pcov = curve_fit(

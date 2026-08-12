@@ -3172,80 +3172,12 @@ def _safe_float(value: Any, default: float) -> float:
 
 
 def _stage_d_fit_prefs(config: DcePipelineConfig) -> Dict[str, Any]:
-    voxel_max_iter = int(_safe_float(_stage_override(config, "voxel_MaxIter"), 50))
-    voxel_max_nfev = int(_safe_float(_stage_override(config, "voxel_MaxFunEvals"), voxel_max_iter))
-    return {
-        "lower_limit_ktrans": _safe_float(_stage_override(config, "voxel_lower_limit_ktrans"), 1e-7),
-        "upper_limit_ktrans": _safe_float(_stage_override(config, "voxel_upper_limit_ktrans"), 2.0),
-        "initial_value_ktrans": _safe_float(_stage_override(config, "voxel_initial_value_ktrans"), 2e-4),
-        "lower_limit_ve": _safe_float(_stage_override(config, "voxel_lower_limit_ve"), 0.02),
-        "upper_limit_ve": _safe_float(_stage_override(config, "voxel_upper_limit_ve"), 1.0),
-        "initial_value_ve": _safe_float(_stage_override(config, "voxel_initial_value_ve"), 0.2),
-        "lower_limit_vp": _safe_float(_stage_override(config, "voxel_lower_limit_vp"), 1e-3),
-        "upper_limit_vp": _safe_float(_stage_override(config, "voxel_upper_limit_vp"), 1.0),
-        "initial_value_vp": _safe_float(_stage_override(config, "voxel_initial_value_vp"), 0.02),
-        # 1e-4/s (~0.6 mL/100mL/min) so low-flow tissue (OSIPI DRO fp=5 mL/100mL/min ~= 8.3e-4/s)
-        # is representable; the prior 1e-3/s (~6 mL/100mL/min) excluded it.
-        "lower_limit_fp": _safe_float(_stage_override(config, "voxel_lower_limit_fp"), 1e-4),
-        "upper_limit_fp": _safe_float(_stage_override(config, "voxel_upper_limit_fp"), 100.0),
-        "initial_value_fp": _safe_float(_stage_override(config, "voxel_initial_value_fp"), 0.2),
-        "lower_limit_tp": _safe_float(_stage_override(config, "voxel_lower_limit_tp"), 0.0),
-        "upper_limit_tp": _safe_float(_stage_override(config, "voxel_upper_limit_tp"), 1e6),
-        "initial_value_tp": _safe_float(_stage_override(config, "voxel_initial_value_tp"), 0.05),
-        "lower_limit_tau": _safe_float(_stage_override(config, "voxel_lower_limit_tau"), 0.0),
-        "upper_limit_tau": _safe_float(_stage_override(config, "voxel_upper_limit_tau"), 100.0),
-        "initial_value_tau": _safe_float(_stage_override(config, "voxel_initial_value_tau"), 0.01),
-        "lower_limit_ktrans_rr": _safe_float(_stage_override(config, "voxel_lower_limit_ktrans_RR"), 1e-7),
-        "upper_limit_ktrans_rr": _safe_float(_stage_override(config, "voxel_upper_limit_ktrans_RR"), 2.0),
-        "initial_value_ktrans_rr": _safe_float(_stage_override(config, "voxel_initial_value_ktrans_RR"), 0.1),
-        "value_ve_rr": _safe_float(_stage_override(config, "voxel_value_ve_RR"), 0.08),
-        "tol_fun": _safe_float(_stage_override(config, "voxel_TolFun"), 1e-12),
-        "tol_x": _safe_float(_stage_override(config, "voxel_TolX"), 1e-6),
-        "max_iter": int(voxel_max_iter),
-        "max_nfev": int(voxel_max_nfev),
-        "robust": str(_stage_override(config, "voxel_Robust")).strip(),
-        "gpu_tolerance": _safe_float(_stage_override(config, "gpu_tolerance"), 1e-6),
-        "gpu_max_n_iterations": int(_safe_float(_stage_override(config, "gpu_max_n_iterations"), 200)),
-        "gpu_initial_value_ktrans": _safe_float(_stage_override(config, "gpu_initial_value_ktrans"), 2e-4),
-        "gpu_initial_value_ve": _safe_float(_stage_override(config, "gpu_initial_value_ve"), 0.2),
-        "gpu_initial_value_vp": _safe_float(_stage_override(config, "gpu_initial_value_vp"), 0.02),
-        "gpu_initial_value_fp": _safe_float(_stage_override(config, "gpu_initial_value_fp"), 0.2),
-        "fxr_fw": _safe_float(_stage_override(config, "fxr_fw"), 0.8),
-        # Optional model-specific overrides to tune unstable models without impacting others.
-        "2cxm_lower_limit_ktrans": _stage_override(config, "voxel_lower_limit_ktrans_2cxm"),
-        "2cxm_upper_limit_ktrans": _stage_override(config, "voxel_upper_limit_ktrans_2cxm"),
-        "2cxm_initial_value_ktrans": _stage_override(config, "voxel_initial_value_ktrans_2cxm"),
-        "2cxm_lower_limit_ve": _stage_override(config, "voxel_lower_limit_ve_2cxm"),
-        "2cxm_upper_limit_ve": _stage_override(config, "voxel_upper_limit_ve_2cxm"),
-        "2cxm_initial_value_ve": _stage_override(config, "voxel_initial_value_ve_2cxm"),
-        "2cxm_lower_limit_vp": _stage_override(config, "voxel_lower_limit_vp_2cxm"),
-        "2cxm_upper_limit_vp": _stage_override(config, "voxel_upper_limit_vp_2cxm"),
-        "2cxm_initial_value_vp": _stage_override(config, "voxel_initial_value_vp_2cxm"),
-        # Matches the shared "lower_limit_fp" default (see above); kept as its own override
-        # key so 2cxm can still be tuned independently of other models if needed.
-        "2cxm_lower_limit_fp": _stage_override(config, "voxel_lower_limit_fp_2cxm"),
-        "2cxm_upper_limit_fp": _stage_override(config, "voxel_upper_limit_fp_2cxm"),
-        "2cxm_initial_value_fp": _stage_override(config, "voxel_initial_value_fp_2cxm"),
-        "2cxm_max_nfev": _stage_override(config, "voxel_MaxFunEvals_2cxm"),
-        "2cxm_max_iter": _stage_override(config, "voxel_MaxIter_2cxm"),
-        "2cxm_robust": _stage_override_optional(config, "voxel_Robust_2cxm"),
-        "tissue_uptake_lower_limit_ktrans": _stage_override(config, "voxel_lower_limit_ktrans_tissue_uptake"),
-        "tissue_uptake_upper_limit_ktrans": _stage_override(config, "voxel_upper_limit_ktrans_tissue_uptake"),
-        "tissue_uptake_initial_value_ktrans": _stage_override(config, "voxel_initial_value_ktrans_tissue_uptake"),
-        "tissue_uptake_lower_limit_vp": _stage_override(config, "voxel_lower_limit_vp_tissue_uptake"),
-        "tissue_uptake_upper_limit_vp": _stage_override(config, "voxel_upper_limit_vp_tissue_uptake"),
-        "tissue_uptake_initial_value_vp": _stage_override(config, "voxel_initial_value_vp_tissue_uptake"),
-        # Matches the shared "lower_limit_fp" default; see 2cxm_lower_limit_fp above.
-        "tissue_uptake_lower_limit_fp": _stage_override(config, "voxel_lower_limit_fp_tissue_uptake"),
-        "tissue_uptake_upper_limit_fp": _stage_override(config, "voxel_upper_limit_fp_tissue_uptake"),
-        "tissue_uptake_initial_value_fp": _stage_override(config, "voxel_initial_value_fp_tissue_uptake"),
-        "tissue_uptake_lower_limit_tp": _stage_override(config, "voxel_lower_limit_tp_tissue_uptake"),
-        "tissue_uptake_upper_limit_tp": _stage_override(config, "voxel_upper_limit_tp_tissue_uptake"),
-        "tissue_uptake_initial_value_tp": _stage_override(config, "voxel_initial_value_tp_tissue_uptake"),
-        "tissue_uptake_max_nfev": _stage_override(config, "voxel_MaxFunEvals_tissue_uptake"),
-        "tissue_uptake_max_iter": _stage_override(config, "voxel_MaxIter_tissue_uptake"),
-        "tissue_uptake_robust": _stage_override_optional(config, "voxel_Robust_tissue_uptake"),
-    }
+    """Stage-D fit settings for this run: the defaults file, with run-config overrides.
+
+    The `voxel_*` -> backend-setting-name mapping lives in `dce_config` so the pipeline,
+    the fit backends and the tests all resolve one set of numbers.
+    """
+    return dce_config.stage_d_prefs(config)
 
 
 def _apply_model_specific_prefs(prefs: Dict[str, Any], model_name: str) -> Dict[str, Any]:
