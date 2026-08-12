@@ -20,6 +20,13 @@ Larger feature requests should be logged in `docs/project-management/projects/fe
       `docs/project-management/projects/large-data-distribution/large_data_distribution.md`.
 
 ### 3. Modeling and Workflow Follow-Ups
+- [ ] **Apply the single-source-defaults pattern to parametric T1.** Deferred follow-up to
+      `docs/project-management/projects/defaults-single-source/PLAN.md`, which covers DCE
+      only. `python/parametric_default.json` + `python/parametric_pipeline.py` have the same
+      disease the DCE side is being cured of: hardcoded fallbacks in source, a defaults file
+      that is also a fixture run config, and tests that resolve from source rather than from
+      the shipped file. Do it after the DCE work lands so the resolver (`dce_config.py`, or
+      whatever it is named by then) can be reused rather than reinvented.
 - [ ] Decide whether accelerated 2CXM is still worth having. Moving every backend onto the 0.1 s
       dense grid (2026-08-02) made cpufit/gpufit fit ~50x more points, and on CPU that erased the
       advantage entirely: cpufit 2cxm went 0.01 s -> 1.72 s on a 24-voxel batch, against 1.70 s

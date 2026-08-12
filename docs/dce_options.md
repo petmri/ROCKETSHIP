@@ -48,9 +48,7 @@ For options in `stage_overrides`:
 - `write_param_maps`: bool for map writing
 - `write_postfit_arrays`: bool for optional Part E array export (`*_postfit_arrays.npz`)
 
-### Preferences bridging
-- `use_dce_preferences`: bool to enable `dce_preferences.txt` defaults (default: `false` — Python workflows use JSON defaults/config only; enable this to opt into the legacy MATLAB-style preference bridge). There is no CLI flag for the preference file; set `use_dce_preferences`/`dce_preferences_path` via `stage_overrides` (or `--set`).
-- `dce_preferences_path`: explicit path override
+### Backend
 - `force_cpu`: when backend is `auto`, force CPU path if non-zero
 
 ### Acquisition / timing
@@ -96,7 +94,6 @@ For options in `stage_overrides`:
   `start_injection_min`: the injection start is *defined* as the resolved baseline end, so
   move it with `steady_state_end` / the AIF sidecar / `steady_state_auto_method`. Passing
   `start_injection_min` or `start_injection` is rejected with an error pointing at those.
-- `injection_duration`
 - `aif_Robust`: robust estimator for the Stage-B AIF fit. `off` (default) is plain least
   squares; `Bisquare` runs a Tukey biweight IRLS with a per-iteration MAD scale and leverage
   correction, matched between Python and MATLAB; `LAR` maps to scipy `soft_l1`. `Bisquare` was
