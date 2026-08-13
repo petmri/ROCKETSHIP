@@ -7,6 +7,112 @@ Do not track open items in this file; active work belongs in `docs/project-manag
 
 Completed items moved from `TODO.md` on 2026-03-05 to keep the active backlog short.
 
+## Completed Recent Updates (2026-08-12)
+
+### Archived from TODO on 2026-08-12 (completed earlier, never moved across)
+- [x] Improve `2cxm` and `tissue_uptake` stability/accuracy on real data.
+- [x] End steady-state Short term: AIF sidecar 
+- [x] End steady-state medium term: evaluate the 4 algorithms, port the winner to MATLAB. Done and archived (`docs/project-management/projects/archived/steady-state-tv-default/`);
+      the `tv`-default rollout is committed (`a9d78b6`) and `pytest -m parity` passes
+      (all gated checks, no hand-curated exceptions -- 12/12 at the time, 42/42 after the
+      2026-07-29 gate-scope review archived under 2026-08-12 in this file; see
+      `docs/project-management/projects/archived/batch-parity/batch_parity.md`).
+
+### Parity Testing Gaps (closed 2026-08-12; carried over from the archived batch-parity project)
+DCE parity itself is done -- **42/42** gated voxelwise checks and 4/4 ROI-xls checks pass with no
+hand-curated exceptions. These two gaps are about what the suite *cannot currently catch*; C and D
+from the original list were dropped as won't-do. Full rationale:
+`docs/project-management/projects/archived/batch-parity/batch_parity.md` -> "Testing gaps".
+- [x] **Gate-scope review (2026-07-29).** The gated set went from 12 checks (tofts+patlak, Ktrans
+      only) to 42 (tofts/patlak/ex_tofts, *every* parameter, all three regions, cpu and auto),
+      under one rule with no per-model/parameter/region carve-outs. Two hand-rolled masks
+      (`ktrans_upper_exclude`, `ve_ktrans_min`) collapsed into the single bound-pinning
+      identifiability filter that `test_backend_equivalence.py` already used -- which is what
+      made ex_tofts gateable (worst check 0.807 -> 0.9998). Scatter is now gated on RMSE
+      normalized by the reference RMS: the previous absolute bound would have passed a 1737%
+      error on patlak Ktrans. `tissue_uptake` and `2cxm` remain reported-only, each with the
+      measurement (taken *with* the filter applied) recorded in `UNGATED_MODEL_REASONS`.
+      Verified by injecting four regressions and confirming each fails.
+- [x] **A. Stage-B AIF contract gate.** Built 2026-07-29: `tests/python/test_stage_b_aif_parity.py`
+      gates `Cp_use`/`CpROI`/`Stlv_use`/`timer`, the `step` window, `start_time`/`end_time`/
+      `max_index` and the AIF fit coefficients `[A B c d t_base_end t0_exp]` against a committed
+      MATLAB payload (`Dyn-1_stage_b_aif.json`, written by
+      `tests/matlab/helpers/write_stage_b_aif_contract.m`; regenerate with `'stageBOnly', true`).
+      Python matches MATLAB to ~1e-8 relative; gates at `rel_mae ≤ 1e-5` / `rel_max_abs ≤ 1e-4` /
+      `corr ≥ 0.99999`, timing to 1e-6 min, exact on indices. Verified to fail on a one-frame
+      injection shift, a 0.1% `Cp_use` rescale (corr stays 1.0 — the point) and a moved peak.
+      MATLAB-side drift folded into `check_matlabref_map_drift.py`; CI step added.
+- [x] **B. Backend-equivalence gate.** Built 2026-07-29:
+      `tests/python/test_backend_equivalence.py`, on 2000 voxels of Stage-B arrays frozen from
+      `RUNNER_DATA/sub-1101743/ses-01` (332 KB; `freeze_stage_b_backend_fixture.py`). Gates
+      `cpu` vs `cpufit_cpu` and vs `gpufit_cuda` on `patlak`/`tofts`/`ex_tofts`; skips with
+      reason when a backend is absent. Enforced in CI by the `backend_equivalence` job, which
+      installs the backends via `install_python_acceleration.py`; runners have no CUDA, so the
+      `cpufit` half gates and the `gpufit` half skips itself.
+      **This corrected the premise.** The "cpufit/gpufit diverges from MATLAB" reading was
+      measuring bound-pinned voxels: on this fixture ex_tofts Ktrans reads corr 0.23 over all
+      voxels but **0.9998** once voxels with a parameter pinned at a bound are excluded, and
+      the backends' SSE agree to ~1e-6 relative. So the gate is three-part — equivalence on the
+      identifiable subset, objective (SSE) agreement over all voxels, and bound-hit symmetry —
+      rather than a naive whole-sample correlation, which would have had to be set so loose it
+      gated nothing. Verified to fail on a 20% Ktrans bias, inflated SSE, and skewed bound-hit
+      rates.
+- [x] **Install `pycpufit` in CI** so gap B's gate is enforced there. Done via a dedicated
+      `backend_equivalence` job running `install_python_acceleration.py --no-matlab --no-gui`,
+      which pulls the prebuilt pyCpufit/pyGpufit from the `ironictoo/Gpufit` release
+      (`py3-none-any`, ctypes-loaded `.so`, no hard CUDA link). Kept out of `python_checks` so a
+      flaky external download cannot fail the main Python job — and it is now the only
+      end-to-end exercise of the installer.
+
+- [x] **Regenerate the `matlabref` tree after the `voxel_MaxFunEvals` 50 -> 200 change.**
+      `tests/contracts/baselines/matlab_reference_v1.json` is **not** affected and needs no
+      action — verified by regenerating it in MATLAB R2024a and running
+      `check_baseline_drift.py`, which passed. It is generated from `default_dce_fit_prefs()`
+      (`MaxFunEvals` 2000), not from `dce_preferences.txt`, so production settings never
+      reach it. The `matlabref` pipeline tree
+      (`tests/data/BIDS_test/derivatives/matlabref/`) *does* read `dce_preferences.txt` via
+      `FXLfit_generic`, so it will move. Needs a MATLAB host; do it in its own commit.
+
+      Measured on the parity fixture with production voxel prefs (TolFun 1e-12, TolX 1e-6,
+      MaxIter 50), 30 noisy realizations per model per noise level, same noise draws for both
+      budgets. Realizations whose fit changed, out of 30:
+
+      | model | sigma 0.02 | 0.05 | 0.10 | worst rel diff |
+      |---|---|---|---|---|
+      | tofts | 0 | 0 | 0 | — |
+      | ex_tofts | 0 | 1 | 7 | 35% |
+      | tissue_uptake | 3 | 14 | 20 | 96% |
+      | 2cxm | 11 | 20 | 28 | 180% |
+
+      Repeating the comparison at 200 vs 2000 gives 0/30 everywhere except 2cxm at sigma 0.10
+      (1/30), so **200 is a convergence plateau and 50 was truncating** — this is a
+      correctness fix, not a cosmetic sync. Noise-free data converges at either budget, which
+      is why the contracts never detected it. `tofts` and `patlak` are unaffected at every
+      noise level. Method, to redo it: build a prefs struct from `dce/dce_preferences.txt`'s
+      `voxel_*` values (not `default_dce_fit_prefs()`, which runs at MaxFunEvals 2000 and so
+      never sees a truncated fit), fit `make_synthetic_dce_fixture()` curves plus fixed-seed
+      noisy realizations at each budget, and diff the returned parameters.
+
+### GPUfit / CPUfit Backend (closed 2026-08-12)
+The `E=Ktrans/Fp` reparam + O(N) convolution + analytic-Jacobian fix is **done and verified on
+both cpufit and CUDA gpufit** (all 5 OSIPI sweeps pass on each, incl. all 24 2CXM; ~3000× faster
+on 2cxm) — see `COMPLETED.md` and
+`docs/project-management/projects/osipi-verification/STATUS.md`. Remaining:
+- [x] **Verify the reparam kernels on CUDA hardware.** Done in `1f96a68`; re-confirmed 2026-07-29 on this CUDA box (`cuda_available=True`, runtime 12.5 / driver 13.0): `test_osipi_pygpufit.py` is 5/5 green and the `2cxm` `xfail` is gone.
+- [x] **Review the `Fp` floor default change** (`2cxm`/`tissue_uptake` `lower_limit_fp` 1e-3→1e-4 in `dce_pipeline._stage_d_fit_prefs`) before dev-merge — it affects all backends (only relaxes the feasible region; physically ~0.6 mL/100mL/min).
+- [x] Verify bound handling and initialization consistency across GPUfit/CPUfit implementations. Closed by the archived Stage-D consolidation: bounds and per-voxel seeds for all five accelerated-eligible models now come from one shared `python/dce_fit_backends.py` (`_*_bounds_row` / `assemble_*_candidates`), candidates are clamped into bounds before dispatch (`cb0cc68`), and `tests/python/test_osipi_backend_consistency.py` gates cpu-vs-cpufit-vs-gpufit agreement to 1e-4 relative.
+- **Won't do: backend diagnostics surfaced in Python test failure messages.**
+      Concretely: `dce_fit_backends._run_accelerated` collapses gpufit/cpufit's per-voxel `states`
+      to `states == 0` and drops the codes (`python/dce_fit_backends.py:783`), and fills `extra`
+      with `None`. Keeping a state histogram (e.g. `MAX_ITERATION` counts) would have named the
+      `TOFTS {0: 6329, 1: 952}` non-convergence concentration directly instead of it having to be
+      found by hand.
+      Closed unbuilt on 2026-08-12. The `TOFTS {0: 6329, 1: 952}` investigation this was
+      meant to shortcut is finished, and `test_osipi_backend_consistency.py` plus the
+      `backend_equivalence` CI job now gate the behaviour the histogram would only have
+      described. Revisit only if a future non-convergence hunt actually stalls for want of
+      the state codes.
+
 ## Completed Recent Updates (2026-08-02)
 - [x] **One 2CXM implementation, evaluated on the dense grid, on every backend.** Python carried
   two 2CXM forward models and the accelerated kernel a third, and they were used at different

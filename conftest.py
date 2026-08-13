@@ -46,9 +46,15 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     # The DCE parity gate has exactly two thresholds, applied to every gated model/parameter/
     # region alike (see tests/python/test_dce_pipeline_parity_metrics.py "Gate policy").
     # Scatter is normalized by the reference RMS so one bound is honest across parameters whose
-    # scales differ 50x. Measured worst case on sub-10bbbdownsample: corr 0.9616, nrmse 0.1423.
+    # scales differ 50x.
+    #
+    # nrmse tightened 0.25 -> 0.10 on 2026-08-12, after regenerating the MATLAB reference under the
+    # shipped `voxel_MaxFunEvals = 200` took the measured worst case from 0.1423 to 0.0255. At 0.25
+    # the gate could not see a uniform sub-25% bias: an injected 20% ex_tofts Ktrans error passed
+    # (nrmse ~0.20) while injected 100% Ktrans, 5% ve and halved-SSE errors all failed. 0.10 keeps
+    # ~4x margin on the worst observed check and catches that 20% case.
     group.addoption("--parity-gate-corr-min", action="store", type=float, default=0.95)
-    group.addoption("--parity-gate-nrmse-max", action="store", type=float, default=0.25)
+    group.addoption("--parity-gate-nrmse-max", action="store", type=float, default=0.10)
     group.addoption("--parity-required-models", "--req-models", action="store", default="tofts,ex_tofts,patlak")
     group.addoption("--parity-cpu-optional-models", "--cpu-opt-models", action="store", default="patlak")
     group.addoption("--parity-require-all-models", "--all-models", action="store_true", default=False)

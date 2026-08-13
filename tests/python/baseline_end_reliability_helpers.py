@@ -45,13 +45,12 @@ def load_biexp_config(config_template: Optional[Path] = None) -> DcePipelineConf
     Unlike the other four detectors -- which are pure functions of the signal curve -- the
     biexponential fit is governed by the same `aif_lower_limits` / `aif_Robust` /
     `aif_peak_weight_exponent` settings as the production Stage-B fit. Those live in
-    `stage_overrides`, so the harness loads them from the real config template rather than
-    letting `_stage_override` fall through to its hardcoded defaults; otherwise this would
-    measure a configuration nobody actually runs.
+    `stage_overrides`, so the harness loads them from the real config template; otherwise this
+    would measure a configuration nobody actually runs. Values the template does not set now
+    come from `python/dce_defaults.json`, the same file a real run reads.
 
     The template's three required paths are placeholders here: nothing in the fit path touches
-    them (with no `dce_preferences_path` override, `_load_dce_preferences` never reaches the
-    filesystem).
+    them.
     """
     template = Path(config_template) if config_template is not None else DEFAULT_CONFIG_TEMPLATE
     try:

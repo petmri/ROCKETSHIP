@@ -25,6 +25,7 @@ from dce_pipeline import (  # noqa: E402
     _legacy_sobel_baseline_end,
     _piecewise_constant_baseline_end,
     _resolve_baseline_window,
+    _resolve_stage_b_timer,
     _resolve_timepoint_window,
     _resolve_dynamic_metadata,
     _tv_baseline_end,
@@ -229,6 +230,7 @@ class TestDcePipeline:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))
             config.stage_overrides = {
+                "relaxivity": 3.6,
                 "stage_a_mode": "real",
                 "tr_ms": 5.0,
                 "fa_deg": 15.0,
@@ -243,6 +245,7 @@ class TestDcePipeline:
             sidecar = Path(dynamic_text[:-7] + ".json")
             sidecar.write_text(json.dumps({"RepetitionTime": 0.005, "FlipAngle": 17}))
             config.stage_overrides = {
+                "relaxivity": 3.6,
                 "stage_a_mode": "real",
                 "tr_ms": 5.0,
             }
@@ -253,8 +256,8 @@ class TestDcePipeline:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))
             config.stage_overrides = {
+                "relaxivity": 3.6,
                 "stage_a_mode": "real",
-                "use_dce_preferences": False,
             }
             dynamic_text = str(config.dynamic_files[0])
             sidecar = Path(dynamic_text[:-7] + ".json")
@@ -450,6 +453,7 @@ class TestDcePipeline:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))
             config.stage_overrides = {
+                "relaxivity": 3.6,
                 "stage_a_mode": "scaffold",
                 "steady_state_auto_method": "piecewise_constant",
                 "steady_state_start": 1,
@@ -471,6 +475,7 @@ class TestDcePipeline:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))
             config.stage_overrides = {
+                "relaxivity": 3.6,
                 "stage_a_mode": "scaffold",
                 "steady_state_start": 1,
                 "steady_state_end": 3,
@@ -489,6 +494,7 @@ class TestDcePipeline:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))
             config.stage_overrides = {
+                "relaxivity": 3.6,
                 "stage_a_mode": "scaffold",
                 "steady_state_auto_method": "find_end_ss_edge",
             }
@@ -506,8 +512,8 @@ class TestDcePipeline:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))
             config.stage_overrides = {
+                "relaxivity": 3.6,
                 "stage_a_mode": "scaffold",
-                "use_dce_preferences": False,
             }
             mean_curve = np.full(24, 100.0, dtype=np.float64)
             mean_curve[8:12] = np.linspace(100.0, 140.0, 4)
@@ -518,7 +524,11 @@ class TestDcePipeline:
 
             assert ss_start == 0
             assert 1 <= ss_end <= 12
-            assert info["method_requested"] == "none"
+            # `method_requested` now reports the value that was actually resolved rather
+            # than a "none" sentinel: with every default in dce_defaults.json there is no
+            # "unset" state left. `source` still distinguishes defaulted from user-asked,
+            # via the resolver reporting which layer supplied the value.
+            assert info["method_requested"] == "tv"
             assert info["method_used"] == "tv"
             assert info["source"] == "default_auto_method:tv"
 
@@ -531,8 +541,8 @@ class TestDcePipeline:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))
             config.stage_overrides = {
+                "relaxivity": 3.6,
                 "stage_a_mode": "scaffold",
-                "use_dce_preferences": False,
                 "steady_state_auto_method": "biexp_fit",
             }
             mean_curve = np.full(24, 100.0, dtype=np.float64)
@@ -569,6 +579,7 @@ class TestDcePipeline:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))
             config.stage_overrides = {
+                "relaxivity": 3.6,
                 "stage_a_mode": "scaffold",
                 "steady_state_auto_method": "piecewise_constant",
             }
@@ -590,6 +601,7 @@ class TestDcePipeline:
             sidecar_path = Path(str(aif_path)[: -len(".nii.gz")] + ".json")
             sidecar_path.write_text(json.dumps({"SteadyStateEndTimeIndex": 5}))
             config.stage_overrides = {
+                "relaxivity": 3.6,
                 "stage_a_mode": "scaffold",
                 "steady_state_start": 1,
                 "steady_state_end": 3,
@@ -649,6 +661,7 @@ class TestDcePipeline:
             config.aif_mode = "imported"
             config.imported_aif_path = None
             config.stage_overrides = {
+                "relaxivity": 3.6,
                 "stage_a_mode": "scaffold",
                 "stage_b_mode": "scaffold",
                 "stage_d_mode": "scaffold",
@@ -1201,6 +1214,7 @@ class TestDcePipeline:
             roi_file.write_text("")
             config.roi_files = [roi_file]
             config.stage_overrides = {
+                "relaxivity": 3.6,
                 "stage_a_mode": "real",
                 "stage_b_mode": "scaffold",
                 "tr_ms": 5.0,
@@ -1268,6 +1282,7 @@ class TestDcePipeline:
             roi_file.write_text("")
             config.roi_files = [roi_file]
             config.stage_overrides = {
+                "relaxivity": 3.6,
                 "stage_a_mode": "real",
                 "tr_ms": 5.0,
                 "fa_deg": 15.0,
@@ -1335,6 +1350,7 @@ class TestDcePipeline:
             roi_file.write_text("")
             config.roi_files = [roi_file]
             config.stage_overrides = {
+                "relaxivity": 3.6,
                 "stage_a_mode": "real",
                 "stage_b_mode": "scaffold",
                 "tr_ms": 5.0,
@@ -1382,6 +1398,7 @@ class TestDcePipeline:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))
             config.stage_overrides = {
+                "relaxivity": 3.6,
                 "stage_b_mode": "real",
                 "aif_curve_mode": "fitted",
                 "start_time_min": 0.0,
@@ -1410,6 +1427,7 @@ class TestDcePipeline:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))
             config.stage_overrides = {
+                "relaxivity": 3.6,
                 "stage_b_mode": "real",
                 "aif_curve_mode": "raw",
             }
@@ -1425,6 +1443,7 @@ class TestDcePipeline:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))
             config.stage_overrides = {
+                "relaxivity": 3.6,
                 "stage_b_mode": "real",
                 "aif_curve_mode": "raw",
                 "auto_find_injection": 1,
@@ -1443,6 +1462,7 @@ class TestDcePipeline:
             with tempfile.TemporaryDirectory() as tmp:
                 config = _make_config(Path(tmp))
                 config.stage_overrides = {
+                    "relaxivity": 3.6,
                     "stage_b_mode": "real",
                     "aif_curve_mode": "raw",
                     key: 0.20,
@@ -1498,6 +1518,7 @@ class TestDcePipeline:
             config.imported_aif_path = None
             config.aif_mode = "auto"
             config.stage_overrides = {
+                "relaxivity": 3.6,
                 "stage_b_mode": "real",
                 "aif_type": 3,
                 "import_aif_path": str(imported_path),
@@ -1516,6 +1537,7 @@ class TestDcePipeline:
             roi_path.write_text("")
             config.roi_files = [roi_path]
             config.stage_overrides = {
+                "relaxivity": 3.6,
                 "stage_b_mode": "real",
                 "stage_d_mode": "real",
                 "aif_curve_mode": "raw",
@@ -1555,6 +1577,7 @@ class TestDcePipeline:
             roi_path.write_text("")
             config.roi_files = [roi_path]
             config.stage_overrides = {
+                "relaxivity": 3.6,
                 "stage_b_mode": "real",
                 "stage_d_mode": "real",
                 "aif_curve_mode": "raw",
@@ -1602,6 +1625,7 @@ class TestDcePipeline:
             config.roi_files = [roi_file]
             config.model_flags = {"tofts": 1, "patlak": 1}
             config.stage_overrides = {
+                "relaxivity": 3.6,
                 "stage_a_mode": "real",
                 "stage_b_mode": "real",
                 "stage_d_mode": "real",
@@ -1665,3 +1689,66 @@ class TestDcePipeline:
             assert result["stages"]["D"]["impl"] == "real"
             assert "tofts" in result["stages"]["D"]["models_run"]
             assert "patlak" in result["stages"]["D"]["models_run"]
+
+
+class TestResolveStageBTimer:
+    """The frame-spacing ladder: timer data, then the run config, then a hard stop.
+
+    No branch here may invent a spacing -- a guessed one silently rescales every time
+    axis downstream, which shows up as wrong Ktrans rather than as an error.
+    """
+
+    def _config(self, **overrides) -> DcePipelineConfig:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)
+            return DcePipelineConfig(
+                subject_source_path=path,
+                subject_tp_path=path,
+                output_dir=path,
+                stage_overrides=dict(overrides),
+            )
+
+    def test_builds_a_timer_from_time_resolution_min(self) -> None:
+        timer = _resolve_stage_b_timer(self._config(time_resolution_min=0.25), {}, 4)
+        assert timer == pytest.approx([0.0, 0.25, 0.5, 0.75])
+
+    def test_builds_a_timer_from_time_resolution_sec(self) -> None:
+        timer = _resolve_stage_b_timer(self._config(time_resolution_sec=30.0), {}, 3)
+        assert timer == pytest.approx([0.0, 0.5, 1.0])
+
+    def test_stage_a_supplies_the_spacing_when_the_run_config_does_not(self) -> None:
+        timer = _resolve_stage_b_timer(self._config(), {"time_resolution_min": 0.2}, 3)
+        assert timer == pytest.approx([0.0, 0.2, 0.4])
+
+    def test_no_timer_and_no_spacing_is_a_hard_stop(self) -> None:
+        with pytest.raises(ValueError, match="time_resolution_min"):
+            _resolve_stage_b_timer(self._config(), {}, 4)
+
+    def test_long_timer_is_truncated(self) -> None:
+        stage_a = {"arrays": {"timer": np.array([0.0, 0.1, 0.2, 0.3, 0.4])}}
+        timer = _resolve_stage_b_timer(self._config(), stage_a, 3)
+        assert timer == pytest.approx([0.0, 0.1, 0.2])
+
+    def test_short_timer_is_extended_at_its_own_spacing(self) -> None:
+        """The timer's own spacing wins -- the config is only consulted if it has none."""
+        stage_a = {"arrays": {"timer": np.array([0.0, 0.1, 0.2])}}
+        timer = _resolve_stage_b_timer(self._config(time_resolution_min=99.0), stage_a, 5)
+        assert timer == pytest.approx([0.0, 0.1, 0.2, 0.3, 0.4])
+
+    def test_degenerate_tail_spacing_falls_back_to_the_configured_spacing(self) -> None:
+        """A repeated final timestamp gives step 0, so the config has to supply one."""
+        stage_a = {"arrays": {"timer": np.array([0.0, 0.1, 0.1])}}
+        timer = _resolve_stage_b_timer(self._config(time_resolution_min=0.5), stage_a, 5)
+        assert timer == pytest.approx([0.0, 0.1, 0.1, 0.6, 1.1])
+
+    def test_degenerate_tail_spacing_with_nothing_configured_is_a_hard_stop(self) -> None:
+        """Previously this silently extended at 1.0 min/frame."""
+        stage_a = {"arrays": {"timer": np.array([0.0, 0.1, 0.1])}}
+        with pytest.raises(ValueError, match="spacing cannot be determined"):
+            _resolve_stage_b_timer(self._config(), stage_a, 5)
+
+    def test_degenerate_timer_is_rejected_before_it_reaches_stage_b(self) -> None:
+        """`_as_1d_float` squeezes, so single-sample and empty timers never get this far."""
+        for bad in (np.array([0.0]), np.array([])):
+            with pytest.raises(ValueError, match="timer must be"):
+                _resolve_stage_b_timer(self._config(), {"arrays": {"timer": bad}}, 3)

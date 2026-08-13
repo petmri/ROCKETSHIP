@@ -23,7 +23,14 @@ from dce_pipeline import (  # noqa: E402
     _stage_d_fit_prefs,
     run_dce_pipeline,
 )
+import dce_config  # noqa: E402
 import dce_qof  # noqa: E402
+
+# Fit budgets come from the shipped defaults file, not a literal here. A hardcoded 50 in this
+# config silently decoupled the gate from the shipped configuration: `dce/dce_preferences.txt`
+# and `python/dce_defaults.json` both moved to 200, so the suite was grading Python-at-50
+# against a MATLAB reference built at 200. Env vars stay as a sweep escape hatch.
+_PARITY_DEFAULTS = dce_config.load_defaults()
 
 MULTI_MODEL_PARITY_SPECS = {
     "tofts": {"params": ["Ktrans", "ve"]},
@@ -123,8 +130,14 @@ def _make_config(
         "snr_filter": 5.0,
         "time_smoothing": "none",
         "time_smoothing_window": 0,
-        "voxel_MaxFunEvals": int(os.environ.get("ROCKETSHIP_PARITY_VOXEL_MAXFUNEVALS", "50")),
-        "voxel_MaxIter": int(os.environ.get("ROCKETSHIP_PARITY_VOXEL_MAXITER", "50")),
+        "voxel_MaxFunEvals": int(
+            os.environ.get("ROCKETSHIP_PARITY_VOXEL_MAXFUNEVALS")
+            or _PARITY_DEFAULTS.default_for("voxel_MaxFunEvals")
+        ),
+        "voxel_MaxIter": int(
+            os.environ.get("ROCKETSHIP_PARITY_VOXEL_MAXITER")
+            or _PARITY_DEFAULTS.default_for("voxel_MaxIter")
+        ),
     }
 
     numeric_override_keys = {
@@ -575,9 +588,17 @@ def _compare_roi_table_against_reference(
 STANDARD_PARITY_MODELS = ["tofts", "patlak", "ex_tofts"]
 ALLMODELS_EXTRA = ["tissue_uptake", "2cxm"]
 
-# Gate policy, reviewed 2026-07-29. One rule applied uniformly: every parameter of every gated
-# model is gated, over every region, against one threshold pair, after one identifiability
-# filter. No per-model, per-parameter or per-region exceptions.
+# Gate policy, reviewed 2026-07-29, extended 2026-08-12. One rule applied uniformly: every
+# parameter of every gated model is gated, over every region, against one threshold pair, after
+# one identifiability filter. No per-model, per-parameter or per-region exceptions.
+#
+# Since 2026-08-12 the gate is three-part, matching tests/python/test_backend_equivalence.py:
+#   1. Parameter agreement on the identifiable subset -- voxels where neither side pinned a
+#      bound and neither settled in a different basin of an equally good fit.
+#   2. SSE agreement over *every* voxel, pinned and tied included. Python may choose a
+#      different optimum; it may not choose a worse one.
+#   3. Bound-hit accounting, reported per parameter, plus the collapse guard below.
+# Part 2 is what makes part 1's exclusions safe: nothing leaves the comparison entirely.
 GATED_MODELS = {"tofts", "patlak", "ex_tofts"}
 
 # The two models that stay reported-only, and the measurement that puts them there. Both were
@@ -614,6 +635,46 @@ BOUND_REL_TOL = 1e-6
 # fail rather than pass quietly. Observed minimum on gated models is 0.578 (ex_tofts/brain).
 IDENTIFIABLE_FRACTION_MIN = 0.25
 
+# Local-minimum ties. Bound-pinning above catches a flat objective pressed against a *constraint*;
+# this catches the same flatness in the *interior*, where two optimizers settle in different basins
+# of an equally good (or better) fit. Requiring agreement there would demand bug-compatibility with
+# MATLAB's choice of local minimum, which is not what the port owes.
+#
+# Real case that motivated it (sub-10bbbdownsample, ex_tofts, GM voxel (23,18)): MATLAB Ktrans
+# 0.021699 against Python 0.030951 -- 43% apart -- while Python's SSE is 2.4% *lower* and its value
+# sits inside MATLAB's own 95% CI [0.006894, 0.036503]. One such voxel in a 39-voxel region drove
+# nrmse to 0.175 (gate 0.25) while contributing 100.0% of the squared error; every other GM voxel
+# agreed to 0.000000. It only became visible once `voxel_MaxFunEvals` 50 -> 200 stopped MATLAB
+# truncating that fit with ve pinned on its 0.02 floor, which had been hiding it in the bound mask.
+#
+# This exclusion is only sound because SSE agreement (below) is gated over *every* voxel, including
+# the ones excluded here -- so a port defect that produces genuinely worse fits still fails, and
+# `IDENTIFIABLE_FRACTION_MIN` still fails a check whose comparable subset has collapsed.
+SSE_TIE_REL_TOL = 1e-3
+# A tie means "different basin", not "same basin, slightly different stopping point", so the
+# parameter difference has to be large before flatness is the explanation. At 1e-3 this mask
+# swallowed the accelerated comparison whole -- 302 of tofts' auto-vs-matlab voxels qualified on
+# sub-percent jitter and the identifiable fraction collapsed to 0.042, which the collapse guard
+# correctly failed. The motivating voxel differs by 43%.
+TIE_PARAM_REL_TOL = 0.25
+
+# SSE agreement, gated over all voxels. This is the load-bearing half of the arrangement above:
+# the port may pick a different basin, but must never fit the data *worse* than MATLAB.
+#
+# Thresholds are per-backend. `cpu` is the reference implementation and is held tight. `auto`
+# carries the accelerator's documented speed/accuracy tradeoff -- cpufit stops on `gpu_tolerance`
+# and so leaves some voxels marginally short of MATLAB's optimum -- and its looser bound matches
+# tests/python/test_backend_equivalence.py, which accepts the same tradeoff cpu-vs-cpufit at
+# SSE_REL_MEDIAN_MAX = 1e-3.
+#
+# Pearson correlation is deliberately NOT part of this gate. On a heavy-tailed SSE distribution it
+# is dominated by single voxels: ex_tofts/brain/cpu reads corr 0.9975 while its relative median is
+# 5.9e-8 and *no* voxel fits worse. That is the same reason check_matlabref_map_drift.py gates on
+# rank correlation instead. Relative median and worse-fraction are both robust, and both say
+# directly what this gate exists to say.
+SSE_REL_MEDIAN_MAX = {"cpu": 1e-6, "auto": 1e-3}   # observed <= 6.0e-8 (cpu) / 8.2e-5 (auto)
+SSE_WORSE_FRAC_MAX = {"cpu": 0.02, "auto": 0.30}   # observed 0.000 (cpu) / 0.193 (auto)
+
 
 def _at_bound(values: np.ndarray, lo: float, hi: float) -> np.ndarray:
     span = max(hi - lo, 1e-12)
@@ -645,6 +706,47 @@ def _identifiable_mask(
         per_param[param] = int(np.count_nonzero(hit))
         pinned |= hit
     return ~pinned, per_param
+
+
+def _local_minimum_tie_mask(
+    params: list[str],
+    lhs_maps: dict[str, np.ndarray],
+    rhs_maps: dict[str, np.ndarray],
+    lhs_sse: np.ndarray,
+    rhs_sse: np.ndarray,
+) -> np.ndarray:
+    """Voxels where `lhs` reached an equal-or-better fit than `rhs` at different parameters.
+
+    Both conditions are required. Equal SSE with equal parameters is the ordinary agreeing case
+    and stays in the comparison; worse SSE stays in too, and fails, which is the point.
+    """
+    not_worse = np.asarray(lhs_sse) <= np.asarray(rhs_sse) * (1.0 + SSE_TIE_REL_TOL)
+    differs = np.zeros(np.shape(rhs_maps[params[0]]), dtype=bool)
+    for param in params:
+        a = np.asarray(lhs_maps[param], dtype=np.float64)
+        b = np.asarray(rhs_maps[param], dtype=np.float64)
+        scale = np.maximum(np.maximum(np.abs(a), np.abs(b)), 1e-12)
+        differs |= np.abs(a - b) > TIE_PARAM_REL_TOL * scale
+    return np.asarray(not_worse, dtype=bool) & differs
+
+
+def _sse_agreement(lhs_sse: np.ndarray, rhs_sse: np.ndarray, mask: np.ndarray) -> dict:
+    """Fit-quality agreement over every voxel in `mask`, pinned and tied ones included."""
+    ok = np.asarray(mask, dtype=bool) & np.isfinite(lhs_sse) & np.isfinite(rhs_sse) & (rhs_sse > 0)
+    a = np.asarray(rhs_sse, dtype=np.float64)[ok]
+    b = np.asarray(lhs_sse, dtype=np.float64)[ok]
+    if a.size < 2:
+        return {"n": int(a.size), "corr": float("nan"), "rel_median": float("nan"),
+                "worse_frac": float("nan")}
+    rel = np.abs(a - b) / a
+    corr = float(np.corrcoef(a, b)[0, 1]) if a.std() > 0 and b.std() > 0 else 1.0
+    return {
+        "n": int(a.size),
+        "corr": corr,
+        "rel_median": float(np.median(rel)),
+        # Fraction where the left side fits materially worse than the right.
+        "worse_frac": float(np.mean(b > a * (1.0 + SSE_TIE_REL_TOL))),
+    }
 
 
 # QoF filtering (sigma_estimators.md): exclude voxels whose Python-CPU reduced χ² exceeds this
@@ -875,25 +977,42 @@ def test_bbb_p19_region_parity(
                 "auto": {p: _load_nifti(out_auto / f"Dyn-1_{model_name}_fit_{p}.nii.gz") for p in params},
             }
 
+            matlab_sse = _load_nifti(_matlab_map_path(paths, model_name, "sse"))
+            py_sse = {
+                b: _load_nifti(out / f"Dyn-1_{model_name}_fit_sse.nii.gz")
+                for b, out in (("cpu", out_cpu), ("auto", out_auto))
+            }
+
             # One identifiable mask per (model, comparison) -- shared by every parameter and
             # region of that comparison, so a voxel is never in-scope for ve and out for Ktrans.
             ident: dict[str, np.ndarray] = {}
             for backend in ("cpu", "auto"):
-                ident[f"{backend}_vs_matlab"], pinned_counts = _identifiable_mask(
+                mask, pinned_counts = _identifiable_mask(
                     params, py_maps[backend], matlab_maps, prefs_m
                 )
+                tie = _local_minimum_tie_mask(
+                    params, py_maps[backend], matlab_maps, py_sse[backend], matlab_sse
+                )
+                ident[f"{backend}_vs_matlab"] = mask & ~tie
                 ident_records.append({
                     "model": model_name,
                     "comparison": f"{backend}_vs_matlab",
                     "pinned_voxels_per_param": pinned_counts,
+                    "local_minimum_tie_voxels": int(np.count_nonzero(tie & mask)),
                 })
                 _parity_log(
                     f"  bound-pinned ({backend} vs matlab, either side): "
                     + ", ".join(f"{p}={n}" for p, n in pinned_counts.items())
+                    + f"; local-minimum ties (equal-or-better SSE, different params): "
+                    f"{int(np.count_nonzero(tie & mask))}"
                 )
+            tie_auto_cpu = _local_minimum_tie_mask(
+                params, py_maps["auto"], py_maps["cpu"], py_sse["auto"], py_sse["cpu"]
+            )
             ident["auto_vs_cpu"], _ = _identifiable_mask(
                 params, py_maps["auto"], py_maps["cpu"], prefs_m
             )
+            ident["auto_vs_cpu"] = ident["auto_vs_cpu"] & ~tie_auto_cpu
 
             # Reported-only CI diagnostics; loaded once per parameter, not once per region.
             ci_maps = {
@@ -903,6 +1022,39 @@ def test_bbb_p19_region_parity(
             }
 
             for region_name, region_mask in regions.items():
+                # Part 2: fit quality over EVERY voxel in the region -- bound-pinned and
+                # tied ones included. This is what licenses dropping tied voxels from the
+                # parameter checks: the port may land in a different basin, but a basin that
+                # fits the data worse still fails here.
+                for backend in ("cpu", "auto"):
+                    scope = np.asarray(region_mask, dtype=bool)
+                    if qof_mask_m is not None:
+                        scope = scope & np.asarray(qof_mask_m, dtype=bool)
+                    sse_m = _sse_agreement(py_sse[backend], matlab_sse, scope)
+                    label = f"{model_name}_sse_{region_name}_{backend}_vs_matlab"
+                    rel_max = SSE_REL_MEDIAN_MAX[backend]
+                    worse_max = SSE_WORSE_FRAC_MAX[backend]
+                    ok = (
+                        sse_m["n"] >= 2
+                        and np.isfinite(sse_m["rel_median"]) and sse_m["rel_median"] <= rel_max
+                        and np.isfinite(sse_m["worse_frac"]) and sse_m["worse_frac"] <= worse_max
+                    )
+                    summary = (
+                        f"{label}: n={sse_m['n']}, rel_median={sse_m['rel_median']:.3e}, "
+                        f"worse_frac={sse_m['worse_frac']:.4f}"
+                    )
+                    _parity_log(summary)
+                    checks.append({
+                        "label": label, "gated": bool(gated_model), "status": "pass" if ok else "failed",
+                        "metrics": sse_m, "check": "sse_agreement",
+                        "sse_rel_median_max": rel_max,
+                        "sse_worse_frac_max": worse_max,
+                    })
+                    if gated_model and not ok:
+                        err = f"{summary} (rel_median_max={rel_max}, worse_frac_max={worse_max})"
+                        failures.append(f"{label}: {err}")
+                        _parity_log(f"{label}: FAILED (gated)")
+
                 for param in params:
                     matlab_map = matlab_maps[param]
                     ci_cpu, ci_auto = ci_maps[param]
@@ -939,6 +1091,10 @@ def test_bbb_p19_region_parity(
             "qof_filtering": qof_records,
             "identifiability_filtering": ident_records,
             "identifiable_fraction_min": IDENTIFIABLE_FRACTION_MIN,
+            "sse_tie_rel_tol": SSE_TIE_REL_TOL,
+            "tie_param_rel_tol": TIE_PARAM_REL_TOL,
+            "sse_rel_median_max": SSE_REL_MEDIAN_MAX,
+            "sse_worse_frac_max": SSE_WORSE_FRAC_MAX,
             "gated_failures": failures,
             "checks": checks,
         }
