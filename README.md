@@ -18,8 +18,9 @@ For documentation and how-to guides, use the project docs site:
 
 The GitHub Wiki is being migrated and will be kept for transition notices.
 
+If you are using ROCKETSHIP for DCE-MRI, please cite this paper, which also has detailed information about the DCE models used in this project:
 
-## ROCKETSHIP Papers
+Ng, T.S.C., et al. [ROCKETSHIP: a flexible and modular software tool for the planning, processing and analysis of dynamic MRI studies](https://doi.org/10.1186/s12880-015-0062-3). *BMC Medical Imaging*, 15, 19 (2015). PMID: 26076957
 
 If you are using ROCKETSHIP for DCE-MRI, please cite this paper, which also has detailed information about the DCE models used in this project:
 
