@@ -88,7 +88,10 @@ from the original list were dropped as won't-do. Full rationale:
       (1/30), so **200 is a convergence plateau and 50 was truncating** — this is a
       correctness fix, not a cosmetic sync. Noise-free data converges at either budget, which
       is why the contracts never detected it. `tofts` and `patlak` are unaffected at every
-      noise level. Harness: `tests/matlab/compare_voxel_maxfunevals.m`.
+      noise level. Method, to redo it: build a prefs struct from `dce/dce_preferences.txt`'s
+      `voxel_*` values (not `default_dce_fit_prefs()`, which runs at MaxFunEvals 2000 and so
+      never sees a truncated fit), fit `make_synthetic_dce_fixture()` curves plus fixed-seed
+      noisy realizations at each budget, and diff the returned parameters.
 
 ### GPUfit / CPUfit Backend (closed 2026-08-12)
 The `E=Ktrans/Fp` reparam + O(N) convolution + analytic-Jacobian fix is **done and verified on

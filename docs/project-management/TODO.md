@@ -124,8 +124,7 @@ Larger feature requests should be logged in `docs/project-management/projects/fe
       settings change rather than parity drift. The contract baseline
       (`tests/contracts/baselines/matlab_reference_v1.json`) is *not* affected and needs no
       action — already verified by regenerating it and passing `check_baseline_drift.py`. Full
-      measurement archived under 2026-08-12 in `COMPLETED.md`; harness is
-      `tests/matlab/compare_voxel_maxfunevals.m`.
+      measurement archived under 2026-08-12 in `COMPLETED.md`.
 
 ## External Accelerator Handoff (Open Items Only)
 

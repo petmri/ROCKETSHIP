@@ -364,8 +364,9 @@ more generous, which is the right design for a contract (the reference should be
 *converged* answer, not a production-budget one).
 
 The `matlabref` pipeline tree does read `dce_preferences.txt` through `FXLfit_generic`, so it
-will move. `tests/matlab/compare_voxel_maxfunevals.m` measures by how much: on the parity
-fixture with production voxel prefs and 30 noisy realizations per model per noise level,
+will move, by how much was measured on the parity fixture with production voxel prefs
+(`dce_preferences.txt`'s `voxel_*`, not the contract's generous defaults) over 30 noisy
+realizations per model per noise level:
 50 -> 200 changes 0/30 tofts fits at every noise level but 7/30 ex_tofts, 20/30
 tissue_uptake and 28/30 2cxm at sigma 0.10, with relative differences up to 35%, 96% and 180%
 respectively. Repeating at 200 vs 2000 gives 0/30 everywhere except one 2cxm realization, so
