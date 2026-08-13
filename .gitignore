@@ -154,6 +154,8 @@ pip-log.txt
 # Unit test / coverage reports
 .coverage
 .tox
+# Also holds the parity-summary JSONs (conftest.py's --parity-summary-dir default)
+.pytest_cache/
 
 #Translations
 *.mo

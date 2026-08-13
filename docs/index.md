@@ -36,7 +36,6 @@ For advanced Python usage and configuration details, see:
 - [Project Management Docs (repository)](https://github.com/petmri/ROCKETSHIP/blob/dev/docs/project-management/README.md)
 - [Transition TODO (repository)](https://github.com/petmri/ROCKETSHIP/blob/dev/docs/project-management/TODO.md)
 - [Python Roadmap (repository)](https://github.com/petmri/ROCKETSHIP/blob/dev/docs/project-management/ROADMAP.md)
-- [Porting Status (repository)](https://github.com/petmri/ROCKETSHIP/blob/dev/docs/project-management/PORTING_STATUS.md)
 
 ## MATLAB (Legacy) Quick Start
 

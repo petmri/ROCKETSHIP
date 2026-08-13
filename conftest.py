@@ -59,12 +59,6 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     group.addoption("--parity-cpu-optional-models", "--cpu-opt-models", action="store", default="patlak")
     group.addoption("--parity-require-all-models", "--all-models", action="store_true", default=False)
     group.addoption(
-        "--run-qualification",
-        action="store_true",
-        default=False,
-        help="Enable dataset-level BIDS qualification tests.",
-    )
-    group.addoption(
         "--parity-suite",
         action="store",
         default="standard",
@@ -115,10 +109,16 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Override T1 BIDS fixture root used by runtime parity tests.",
     )
     group.addoption(
-        "--qualification-root",
+        "--run-phantom-gt",
+        action="store_true",
+        default=False,
+        help="Enable synthetic-phantom ground-truth reliability checks.",
+    )
+    group.addoption(
+        "--phantom-gt-root",
         action="store",
         default="",
-        help="Override BIDS root used by qualification tests.",
+        help="Override BIDS root used by phantom ground-truth reliability checks.",
     )
 
 
@@ -154,19 +154,8 @@ def parity_suite(request: pytest.FixtureRequest) -> set[str]:
 
 
 @pytest.fixture(scope="session")
-def run_qualification(request: pytest.FixtureRequest) -> bool:
-    return bool(request.config.getoption("--run-qualification"))
-
-
-@pytest.fixture(scope="session")
 def run_runtime_parity(request: pytest.FixtureRequest) -> bool:
     return bool(request.config.getoption("--run-runtime-parity"))
-
-
-@pytest.fixture(scope="session")
-def qualification_root(request: pytest.FixtureRequest) -> str:
-    option_value = str(request.config.getoption("--qualification-root") or "").strip()
-    return option_value
 
 
 @pytest.fixture(scope="session")
@@ -187,6 +176,16 @@ def runtime_parity_dce_root(request: pytest.FixtureRequest) -> str:
 @pytest.fixture(scope="session")
 def runtime_parity_t1_root(request: pytest.FixtureRequest) -> str:
     return str(request.config.getoption("--runtime-parity-t1-root") or "").strip()
+
+
+@pytest.fixture(scope="session")
+def run_phantom_gt(request: pytest.FixtureRequest) -> bool:
+    return bool(request.config.getoption("--run-phantom-gt"))
+
+
+@pytest.fixture(scope="session")
+def phantom_gt_root(request: pytest.FixtureRequest) -> str:
+    return str(request.config.getoption("--phantom-gt-root") or "").strip()
 
 
 @pytest.fixture(scope="session")

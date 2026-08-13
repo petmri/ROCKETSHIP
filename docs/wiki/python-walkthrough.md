@@ -146,4 +146,3 @@ cd /path/to/ROCKETSHIP
 - `/path/to/ROCKETSHIP/python/README.md`
 - `/path/to/ROCKETSHIP/docs/project-management/TODO.md`
 - `/path/to/ROCKETSHIP/docs/project-management/ROADMAP.md`
-- `/path/to/ROCKETSHIP/docs/project-management/PORTING_STATUS.md`

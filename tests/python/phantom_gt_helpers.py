@@ -18,7 +18,6 @@ sys.path.insert(0, str(REPO_ROOT / "python"))
 from bids_discovery import BidsSession, discover_bids_sessions  # noqa: E402
 from dce_pipeline import DcePipelineConfig, run_dce_pipeline  # noqa: E402
 from parametric_pipeline import ParametricT1Config, run_parametric_t1_pipeline  # noqa: E402
-from qualification import _default_model_flags, _load_array, _session_t1_inputs  # noqa: E402
 
 
 # Default gating/training set for the current tolerance profile. Diagnostic cases (for
@@ -48,6 +47,65 @@ def _find_one(parent: Path, pattern: str) -> Optional[Path]:
     if not matches:
         return None
     return matches[0]
+
+
+# The four helpers below came from the deleted python/qualification.py, whose
+# dataset-level runner this is now the only remaining consumer of.
+def _load_array(path: Path) -> np.ndarray:
+    suffixes = tuple(path.suffixes)
+    if suffixes and suffixes[-1] == ".npy":
+        return np.asarray(np.load(path), dtype=np.float64)
+    try:
+        import nibabel as nib  # type: ignore
+    except Exception as exc:  # pragma: no cover
+        raise RuntimeError("nibabel is required to load NIfTI maps") from exc
+    image = nib.load(str(path))
+    return np.asarray(image.get_fdata(), dtype=np.float64)
+
+
+def _parse_vfa_metadata(raw_anat_dir: Path) -> tuple[List[float], Optional[float], List[Path]]:
+    json_files = sorted(raw_anat_dir.glob("*_flip-*_VFA.json"))
+    if not json_files:
+        return [], None, []
+
+    rows: List[tuple[float, Optional[float], Path]] = []
+    for path in json_files:
+        with path.open() as handle:
+            payload = json.load(handle)
+        if "FlipAngle" not in payload:
+            continue
+        fa = float(payload["FlipAngle"])
+        tr_ms: Optional[float] = None
+        if "RepetitionTime" in payload:
+            tr_ms = float(payload["RepetitionTime"]) * 1000.0
+        rows.append((fa, tr_ms, path))
+    rows.sort(key=lambda row: row[0])
+
+    flip_angles = [float(row[0]) for row in rows]
+    tr_values = [row[1] for row in rows if row[1] is not None]
+    tr_ms = float(tr_values[0]) if tr_values else None
+    return flip_angles, tr_ms, [row[2] for row in rows]
+
+
+def _session_t1_inputs(session: BidsSession) -> Dict[str, Any]:
+    anat_deriv = session.derivatives_path / "anat"
+    anat_raw = session.rawdata_path / "anat"
+    vfa_deriv = _find_one(anat_deriv, "*desc-bfczunified_VFA.nii*")
+    if vfa_deriv is None:
+        raise FileNotFoundError(f"Missing derivative VFA file under {anat_deriv}")
+    flip_angles, tr_ms, sidecars = _parse_vfa_metadata(anat_raw)
+    return {
+        "vfa_deriv": vfa_deriv,
+        "flip_angles": flip_angles,
+        "tr_ms": tr_ms,
+        "raw_vfa_jsons": sidecars,
+    }
+
+
+def _default_model_flags(selected_models: Iterable[str]) -> Dict[str, int]:
+    keys = ("tofts", "ex_tofts", "patlak", "tissue_uptake", "two_cxm", "fxr", "auc", "nested", "FXL_rr")
+    selected = {str(m).strip().lower() for m in selected_models}
+    return {key: int(key in selected) for key in keys}
 
 
 def _gt_file(

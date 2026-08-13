@@ -74,9 +74,6 @@ Full CLI reference, config precedence, and output formats: `python/README.md` an
 # OSIPI reliability (ground truth vs published peer tolerances):
 .venv/bin/python -m pytest tests/python -m osipi -v
 
-# BIDS-level qualification:
-.venv/bin/python -m pytest tests/python --run-qualification
-
 # MATLAB tests (from MATLAB):
 results = run_unit_tests();
 results = run_all_tests('suite', 'all', 'includeIntegration', true);
@@ -84,7 +81,7 @@ results = run_all_tests('suite', 'all', 'includeIntegration', true);
 
 Full test-suite docs (regions, gated-vs-reported split, thresholds, fixture regeneration
 commands): `tests/README.md`. Pytest markers are declared in `pytest.ini`
-(`unit`, `integration`, `parity`, `slow`, `portability`, `osipi`, `qualification`, `fast`).
+(`unit`, `integration`, `parity`, `slow`, `portability`, `osipi`, `fast`).
 
 CI (`.github/workflows/run_DCE.yml`) runs, per push/PR to `master`/`dev`: `python_checks`
 (unit tests + coverage + OSIPI summary), `parity_checks` (MATLAB contract/baseline drift
@@ -193,8 +190,10 @@ are deliberately separate because the synthetic-curve contract never exercises
 Canonical planning and status docs:
 - `docs/project-management/ROADMAP.md` — strategy/sequencing, merge-readiness criteria.
 - `docs/project-management/TODO.md` — active open tasks/blockers only.
-- `docs/project-management/PORTING_STATUS.md` — current measurable port state.
 - `docs/project-management/COMPLETED.md` — historical completion log.
+
+Current measurable state is the test suite itself, not a document. Run it rather than
+consulting a snapshot; a checked-in status file went stale between reads and was removed.
 
 Keep planning docs non-overlapping. Do not update all planning docs by default.
 
@@ -205,9 +204,6 @@ Document roles:
 - `TODO.md`: active actionable tasks only.
   - Includes open blockers, open follow-ups, and open external handoff items.
   - Excludes completed history and broad strategic narrative.
-- `PORTING_STATUS.md`: current measurable state only.
-  - Includes latest test/qualification snapshot, current blockers, and active risks.
-  - Excludes long task inventories and archived progress history.
 - `COMPLETED.md`: historical completion log only.
   - Includes resolved milestones, completed work packages, and retired status notes.
   - Excludes open tasks.
@@ -215,7 +211,6 @@ Document roles:
 Update decision rule (apply smallest necessary set):
 - Strategy changed: update `ROADMAP.md`.
 - Open work changed: update `TODO.md`.
-- Current test/qualification state changed: update `PORTING_STATUS.md`.
 - Work finished or historical status archived: update `COMPLETED.md`.
 
 Do not leave important caveats only in commit messages or chat; record them in the single appropriate document above.

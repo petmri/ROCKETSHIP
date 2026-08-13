@@ -83,20 +83,20 @@ def _assert_session_within_tolerances(session: Dict[str, Any], tolerances: Dict[
 
 def _run_phantom_summary_or_skip(
     *,
-    run_qualification: bool,
-    qualification_root: str,
+    run_phantom_gt: bool,
+    phantom_gt_root: str,
     tmp_path: Path,
     backend: str,
     require_cpufit_cpu: bool,
 ) -> Dict[str, Any]:
-    if not run_qualification:
-        pytest.skip("Use --run-qualification to run phantom ground-truth reliability checks.")
+    if not run_phantom_gt:
+        pytest.skip("Use --run-phantom-gt to run phantom ground-truth reliability checks.")
 
-    bids_root = Path(qualification_root).expanduser().resolve() if qualification_root else (
+    bids_root = Path(phantom_gt_root).expanduser().resolve() if phantom_gt_root else (
         REPO_ROOT / "tests" / "data" / "BIDS_test"
     )
     if not bids_root.exists():
-        pytest.skip(f"Qualification root not found: {bids_root}")
+        pytest.skip(f"Phantom GT root not found: {bids_root}")
 
     sessions = discover_phantom_gt_sessions(bids_root)
     if not sessions:
@@ -128,16 +128,16 @@ def _run_phantom_summary_or_skip(
 
 
 @pytest.mark.integration
-@pytest.mark.qualification
+@pytest.mark.phantom_gt
 @pytest.mark.slow
 def test_phantom_ground_truth_reliability_cpu_against_region_tolerances(
-    run_qualification: bool, qualification_root: str, tmp_path: Path
+    run_phantom_gt: bool, phantom_gt_root: str, tmp_path: Path
 ) -> None:
     tolerances = load_phantom_gt_tolerances(PHANTOM_GT_TOLERANCES_PATH)
     _require_gate_ready_profile_or_xfail(tolerances)
     summary = _run_phantom_summary_or_skip(
-        run_qualification=run_qualification,
-        qualification_root=qualification_root,
+        run_phantom_gt=run_phantom_gt,
+        phantom_gt_root=phantom_gt_root,
         tmp_path=tmp_path,
         backend="cpu",
         require_cpufit_cpu=False,
@@ -147,15 +147,15 @@ def test_phantom_ground_truth_reliability_cpu_against_region_tolerances(
 
 
 @pytest.mark.integration
-@pytest.mark.qualification
+@pytest.mark.phantom_gt
 def test_phantom_ground_truth_reliability_auto_cpufit_against_region_tolerances(
-    run_qualification: bool, qualification_root: str, tmp_path: Path
+    run_phantom_gt: bool, phantom_gt_root: str, tmp_path: Path
 ) -> None:
     tolerances = load_phantom_gt_tolerances(PHANTOM_GT_TOLERANCES_PATH)
     _require_gate_ready_profile_or_xfail(tolerances)
     summary = _run_phantom_summary_or_skip(
-        run_qualification=run_qualification,
-        qualification_root=qualification_root,
+        run_phantom_gt=run_phantom_gt,
+        phantom_gt_root=phantom_gt_root,
         tmp_path=tmp_path,
         backend="auto",
         require_cpufit_cpu=True,

@@ -4,7 +4,7 @@
 Track only active, actionable tasks.
 
 Do not log historical completions here. Record finished work in `docs/project-management/COMPLETED.md`.
-Keep strategic sequencing in `docs/project-management/ROADMAP.md` and current measurable state in `docs/project-management/PORTING_STATUS.md`.
+Keep strategic sequencing in `docs/project-management/ROADMAP.md`. For current measurable state, run the test suite — there is no status document.
 Larger feature requests should be logged in `docs/project-management/projects/feature-request/new_features.md`.
 
 ## Secondary Active Work (Non-Blocking First Dev Merge)
@@ -27,51 +27,14 @@ Larger feature requests should be logged in `docs/project-management/projects/fe
       that is also a fixture run config, and tests that resolve from source rather than from
       the shipped file. Do it after the DCE work lands so the resolver (`dce_config.py`, or
       whatever it is named by then) can be reused rather than reinvented.
-- [ ] Decide whether accelerated 2CXM is still worth having. Moving every backend onto the 0.1 s
-      dense grid (2026-08-02) made cpufit/gpufit fit ~50x more points, and on CPU that erased the
-      advantage entirely: cpufit 2cxm went 0.01 s -> 1.72 s on a 24-voxel batch, against 1.70 s
-      for python. The numerical win was the point and it landed (backends now agree on Fp to
-      0.00% where they differed by 53%), but cpufit 2cxm currently buys nothing.
-      **Profiled 2026-08-02, and it is fixable in GPUfit rather than a reason to drop the path.**
-      91% of a cpufit run is inside `fit_constrained` (the spline upsampling is ~5%). The 50x point
-      count costs ~976x wall time (61 -> 3001 points, 0.0003 s -> 0.2927 s on a 24-voxel batch),
-      which factors cleanly into 49x points  x  7.5x LM iterations (mean 7.8 -> 58.4)  x  2.8x per
-      point per iteration (25.1 -> 69.6 ns). So the kernel is O(n) *per iteration* only; neither
-      other factor is waste to optimize away. The iteration growth is the fit doing real work it
-      previously skipped -- at 61 points the objective is nearly flat in Fp, so `tolerance=1e-6` is
-      met after 7.8 iterations and all 24 voxels report "converged" while disagreeing with python by
-      53% on Fp; on the dense grid 22/24 converge and 2 hit the 200 cap. The per-point cost rises
-      then plateaus (25 -> 36 -> 56 -> 60 -> 67 -> 70 -> 70 ns), the shape of a working set leaving
-      L1: ~1.7 KB at 61 points against ~84 KB at 3001. Two specific inefficiencies in
-      `~/code/GPUfit/Cpufit/lm_fit_cpp.cpp` account for the per-point cost:
-        1. `exp_conv_recurrence` calls `std::exp(-kappa*dt)` *inside* the per-point loop, to
-           support a non-uniform timer. On the dense grid dt is constant by construction, so the
-           decay factor could be computed once per rate instead of once per point -- ~3000 exp
-           calls collapsing to 1. This is what python's `_exp_weighted_trapz_uniform` does, and
-           it is why vectorized python ties compiled C that has an analytic Jacobian.
-        2. `calc_curve_values` calls `calc_values_two_compartment_exchange` and then
-           `calc_derivatives_two_compartment_exchange`, and both run the same two
-           `exp_conv_recurrence` passes -- the convolutions are computed twice per iteration
-           where the derivative pass already produces the values. Both also allocate fresh
-           `std::vector<REAL>` buffers of `n_points` on every call (six per LM iteration, ~72 KB
-           at 3001 points), which is allocator traffic and cache pressure that grows with n;
-           preallocating would attack the 2.8x above as well as the exp count.
-      Together that is ~12,000 `std::exp` calls per voxel-iteration against a measured 0.20 ms
-      per voxel-iteration, i.e. ~17 ns each, consistent with the transcendentals being nearly
-      the whole cost. Fixing both should restore a large cpufit margin.
-      gpufit is a separate and worse case: `Gpufit/models/two-compartment_exchange.cuh` computes
-      each point with its own `for (i = 1; i <= point_index; i++)` sum, because a gpufit model
-      function evaluates one point per thread. That is O(n^2) total work and 4 `exp` per inner
-      iteration, so the 50x point count costs ~2500x there, not 50x. A sequential recurrence does
-      not map onto gpufit's one-thread-per-point structure, so this is architectural -- it would
-      need a prefix-scan formulation or a model that evaluates a whole curve per thread. Do not
-      assume the extra points simply parallelize away. Measure on CUDA before deciding.
-- [ ] Fp is not identifiable from 2CXM at typical DCE temporal resolution, and unifying the
-      backends did not change that -- it cannot. On 24 synthetic voxels with 5 s frames, median
-      relative Fp error is ~150% on both backends, because the plasma MTT (1-2 s) is far below
-      the frame rate and upsampling cannot recover information the acquisition never recorded.
-      Ktrans/ve/vp recover to roughly 4%/3%/12%. Consider whether Fp should be reported at all
-      at this resolution, or gated on a frame-rate check.
+- [ ] Decide whether to gate `2cxm` Fp reporting on frame rate and/or fit quality. Fp is
+      recoverable at typical DCE frame rates — 0.8% median error at 5 s frames on the OSIPI DRO,
+      see `COMPLETED.md` (2026-08-12) — but it degrades sharply outside that: 567% at 10 s
+      frames, and at 5 s frames the p90 error runs 8.5% / 34.9% / 81.8% / 975% as SNR falls
+      through ~410 / ~40 / ~20 / ~8, so the median hides a heavy tail. A frame-rate check plus a
+      QoF/SNR caveat on Fp would keep the reported value honest; pairs naturally with the
+      QoF-aware ROI stats item below. Note the numbers above are best-case: the DRO is generated
+      by the exact model being fitted, with no model mismatch, AIF error or motion.
 - [ ] Migrate `tests/data/BIDS_test` onto the production BIDS layout and naming so
       `tests/python/run_dce_benchmark.py` resolves it again without a `--dataset-root` switch.
       The benchmark now assumes `sourcedata/raw/<sub>/<ses>` plus
@@ -95,6 +58,12 @@ Larger feature requests should be logged in `docs/project-management/projects/fe
       (`AcquisitionDateTime` 2017-03-09, `InstitutionName` USCINI), MATLAB 5.7 vs Python 3.4
       gave `python_sse / matlab_sse` = 2.8106 across 643,576 voxels, exactly `(5.7/3.4)^2`, and
       `dcedynamicCt` was affected the same way. So do not re-gate this on maps.
+- [ ] Remove the deprecated parity flag aliases from `conftest.py`
+      (`--run-multi-model-backend-parity`/`--mm-parity`, `--parity-required-models`/`--req-models`,
+      `--parity-require-all-models`/`--all-models`). CI and `tests/python/run_dce_parity.py` use
+      the `--parity-suite` selector exclusively; the aliases are kept only for back-compat and
+      should go once nothing external depends on them. (Carried over from the deleted
+      `PORTING_STATUS.md`, which was the only place this was recorded.)
 - [ ] Evaluate moving T1 fitting onto CPUfit/GPUfit for performance improvements.
 - [ ] Finish Python non-fit pipeline performance: make the Stage-A/B QC figures opt-out
       (0.62 s unconditionally, and 68% of in-scope time on the small single-slice fixtures).
@@ -125,6 +94,7 @@ Larger feature requests should be logged in `docs/project-management/projects/fe
       (`tests/contracts/baselines/matlab_reference_v1.json`) is *not* affected and needs no
       action — already verified by regenerating it and passing `check_baseline_drift.py`. Full
       measurement archived under 2026-08-12 in `COMPLETED.md`.
+- [ ] For install_python_acceleration.py. Remove "python" from the name as it installs acceleration for matlab too. Second, when it doesn't detect matlab have it print a warning, but continue and complete successfully. Don't make the user re-run with --skip-matlab
 
 ## External Accelerator Handoff (Open Items Only)
 

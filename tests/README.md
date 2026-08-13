@@ -13,14 +13,13 @@ shown here as `pytest` for brevity.
 | Runtime python vs MATLAB (no acceleration) | `pytest tests/python/test_runtime_parity.py --run-runtime-parity -s` |
 | Performance benchmark | `python tests/python/run_dce_benchmark.py --dataset-root <bids-root>` (see [Performance benchmark](#performance-benchmark)) |
 | OSIPI reliability | `pytest tests/python -m osipi -v` (runs the full 2CXM/2CUM sweeps by default) |
-| BIDS qualification | `pytest tests/python --run-qualification` |
 | MATLAB unit tests | `run_unit_tests()` in MATLAB |
 | Coverage | `pytest tests/python -q --cov=python --cov-report=term-missing --cov-fail-under=60` |
 
 ## Layout
 - `tests/matlab/{unit,integration,helpers}/`: MATLAB algorithm tests, fixtures, shared helpers.
 - `tests/contracts/`, `tests/contracts/baselines/`: cross-language parity contracts and generated MATLAB baselines.
-- `tests/python/`: Python pytest suite (pipeline, parity, OSIPI, qualification).
+- `tests/python/`: Python pytest suite (pipeline, parity, OSIPI, phantom GT).
 - `tests/data/`: fixtures. `BIDS_test/` holds the committed lightweight fixtures used by CI (no per-run generation), including the `sub-10bbbdownsample` / `sub-11tiny` fit-parity subjects.
 - `tests/data/osipi/`: imported OSIPI datasets + provenance + peer-result tolerances (see that dir's `README.md`).
 
@@ -222,8 +221,8 @@ ignored, so an old file will not error.
 
 `--run-multi-model-backend-parity` / `--mm-parity`, `--parity-required-models`, `--parity-cpu-optional-models`,
 and `--parity-require-all-models` / `--all-models` are superseded by `--parity-suite` (the gated/reported
-split is now fixed in code). They still work as aliases; migration of CI to `--parity-suite` is tracked in
-`docs/project-management/PORTING_STATUS.md`.
+split is now fixed in code). They still work as aliases; removing them is tracked in
+`docs/project-management/TODO.md`.
 
 ## Other Python test groups
 
@@ -256,12 +255,10 @@ pytest tests/python/test_osipi_pycpufit.py tests/python/test_osipi_pygpufit.py -
 python tests/python/run_osipi_reliability.py --suite all --summary-json /tmp/osipi_summary.json
 ```
 
-**BIDS discovery and qualification:**
+**BIDS discovery:**
 
 ```bash
 python run_bids_discovery.py --bids-root tests/data/BIDS_test --output-json out/bids_manifest.json --print-json
-python run_python_qualification.py --bids-root tests/data/BIDS_test \
-  --output-root out/python_qualification_bids_test --backend cpu --print-summary-json
 ```
 
 **Synthetic phantom GT reliability (diagnostic, not a merge gate yet):**
@@ -271,7 +268,7 @@ python tests/python/run_phantom_gt_reliability.py --backend auto [--subject sub-
 ```
 
 The phantom tolerance profile (`tests/data/BIDS_test/phantom_gt_mae_tolerances.json`) is provisional;
-`test_phantom_gt_reliability.py` is qualification-gated and `xfail`s when `gate_ready=false`. See
+`test_phantom_gt_reliability.py` `xfail`s when `gate_ready=false`. See
 `docs/project-management/projects/phantom-gt/PHANTOM_GT_QUALIFICATION_STATUS.md`.
 
 ## Performance benchmark
