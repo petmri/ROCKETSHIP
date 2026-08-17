@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
 import dce_config
 from bids_discovery import BidsSession
 from dce_file_discovery import discover_dce_input_paths, missing_required_inputs
+from dce_volume_viewer import Volume, VolumeViewer, discover_result_volumes
 
 
 EVENT_PREFIX = "ROCKETSHIP_EVENT "
@@ -713,11 +714,46 @@ class DceGuiWindow(QMainWindow):
         return scroll
 
     def _build_results_tab(self) -> QWidget:
-        """Placeholder: fitted-map review lands here."""
-        placeholder = QLabel("Results view not implemented yet.")
-        placeholder.setAlignment(Qt.AlignCenter)
-        placeholder.setEnabled(False)
-        return placeholder
+        """Slice viewer for the fitted maps and the dynamic they came from."""
+        self.results_viewer = VolumeViewer()
+        return self.results_viewer
+
+    def _populate_results_viewer(self) -> None:
+        """List the run's maps alongside the inputs that produced them.
+
+        Inputs come from the config the run was launched with, not from the form: auto-find
+        is free to rewrite those fields while the run is in flight, so the widgets are not a
+        reliable record of what was actually processed. Failures here are non-fatal -- a run
+        that produced numbers is still a successful run even if one file will not open.
+        """
+        try:
+            volumes = discover_result_volumes(Path(_resolve_repo_path(self.output_dir_edit.text())))
+            known = {v.path for v in volumes}
+            for label, path in self._last_run_input_volumes():
+                if path not in known:
+                    volumes.append(Volume(label=label, path=path))
+                    known.add(path)
+            self.results_viewer.set_volumes(volumes)
+        except Exception as exc:  # pragma: no cover - defensive, viewer is not load-bearing
+            self._append_log_line(f"Could not populate the Results tab: {exc}")
+
+    def _last_run_input_volumes(self) -> List[tuple]:
+        """(label, path) for the image inputs of the most recent run, from its saved config."""
+        if self._last_run_config_path is None or not self._last_run_config_path.exists():
+            return []
+        payload = json.loads(self._last_run_config_path.read_text())
+        found: List[tuple] = []
+        for key, suffix in (
+            ("dynamic_files", "dynamic"),
+            ("t1map_files", "T1 map"),
+            ("aif_files", "AIF mask"),
+            ("roi_files", "ROI mask"),
+        ):
+            for text in payload.get(key, []) or []:
+                path = Path(_resolve_repo_path(str(text)))
+                if path.is_file():
+                    found.append((f"{path.name}  ({suffix})", path.resolve()))
+        return found
 
     def _build_log_tab(self) -> QWidget:
         # No group box around these: the tab already frames and titles them, so a second
@@ -1123,6 +1159,8 @@ class DceGuiWindow(QMainWindow):
         else:
             self.stage_label.setText(f"Stage: failed (exit={exit_code})")
         self._append_log_line(f"Process finished with exit code {exit_code}")
+        if exit_code == 0:
+            self._populate_results_viewer()
         # Move on to the figures once there is something to look at. A failed run leaves the
         # user on the log, which is where the reason is.
         if exit_code == 0 and self.tabs.currentIndex() in (TAB_INPUTS, TAB_LOG):
