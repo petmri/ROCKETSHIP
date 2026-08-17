@@ -1769,10 +1769,6 @@ class TestResolveStageBTimer:
                 stage_overrides=dict(overrides),
             )
 
-    def test_builds_a_timer_from_time_resolution_min(self) -> None:
-        timer = _resolve_stage_b_timer(self._config(time_resolution_min=0.25), {}, 4)
-        assert timer == pytest.approx([0.0, 0.25, 0.5, 0.75])
-
     def test_builds_a_timer_from_time_resolution_sec(self) -> None:
         timer = _resolve_stage_b_timer(self._config(time_resolution_sec=30.0), {}, 3)
         assert timer == pytest.approx([0.0, 0.5, 1.0])
@@ -1782,7 +1778,7 @@ class TestResolveStageBTimer:
         assert timer == pytest.approx([0.0, 0.2, 0.4])
 
     def test_no_timer_and_no_spacing_is_a_hard_stop(self) -> None:
-        with pytest.raises(ValueError, match="time_resolution_min"):
+        with pytest.raises(ValueError, match="time_resolution_sec"):
             _resolve_stage_b_timer(self._config(), {}, 4)
 
     def test_long_timer_is_truncated(self) -> None:
@@ -1793,13 +1789,13 @@ class TestResolveStageBTimer:
     def test_short_timer_is_extended_at_its_own_spacing(self) -> None:
         """The timer's own spacing wins -- the config is only consulted if it has none."""
         stage_a = {"arrays": {"timer": np.array([0.0, 0.1, 0.2])}}
-        timer = _resolve_stage_b_timer(self._config(time_resolution_min=99.0), stage_a, 5)
+        timer = _resolve_stage_b_timer(self._config(time_resolution_sec=5940.0), stage_a, 5)
         assert timer == pytest.approx([0.0, 0.1, 0.2, 0.3, 0.4])
 
     def test_degenerate_tail_spacing_falls_back_to_the_configured_spacing(self) -> None:
         """A repeated final timestamp gives step 0, so the config has to supply one."""
         stage_a = {"arrays": {"timer": np.array([0.0, 0.1, 0.1])}}
-        timer = _resolve_stage_b_timer(self._config(time_resolution_min=0.5), stage_a, 5)
+        timer = _resolve_stage_b_timer(self._config(time_resolution_sec=30.0), stage_a, 5)
         assert timer == pytest.approx([0.0, 0.1, 0.1, 0.6, 1.1])
 
     def test_degenerate_tail_spacing_with_nothing_configured_is_a_hard_stop(self) -> None:

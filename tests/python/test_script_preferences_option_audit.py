@@ -60,7 +60,6 @@ def test_script_preferences_audit_status_values_and_new_alias_families() -> None
         "start_t",
         "end_t",
         "auto_find_injection",
-        "blood_t1",
         "import_aif_path",
         "timevectyn",
     ):
@@ -78,6 +77,7 @@ def test_script_preferences_audit_status_values_and_new_alias_families() -> None
         "start_injection",
         "end_injection",
         "aif_type",
+        "blood_t1",
     ):
         assert (
             by_key[key]["status"] == "intentionally_dropped"

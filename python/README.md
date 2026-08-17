@@ -310,7 +310,7 @@ Key expectations:
 - TR/FA/time-resolution for real Stage A are resolved strictly:
   - preferred from DCE metadata JSON sidecar (or explicit `stage_overrides.dce_metadata_path`)
   - if no metadata JSON is available, you must provide all three manually in `stage_overrides`
-    (`tr_ms`/`tr_sec`, `fa_deg`/`fa`, `time_resolution_sec`/`time_resolution`)
+    (`tr_ms`, `fa_deg`, `time_resolution_sec`)
   - partial manual override when metadata JSON is present is rejected (set all three or none)
   - there is no fallback to repository preference files for scan parameters
 - Supported backend values: `auto`, `cpu`, `gpufit`
@@ -323,8 +323,8 @@ Key expectations:
   - non-accelerated (currently pure CPU path): other models
 - Stage D logs backend selection on each run:
   - `[DCE] Stage-D backend selection: requested=... selected=... acceleration=... reason=...`
-- Supported AIF curve modes: `auto`, `fitted`, `raw`, `imported`
-- Static blood-T1 override for Stage A is available via `stage_overrides.blood_t1_ms` (or `blood_t1_sec`)
+- Supported AIF curve modes: `fitted`, `raw`, `imported`
+- Static blood-T1 override for Stage A is available via `stage_overrides.blood_t1_ms`
 
 Part E work-in-progress:
 

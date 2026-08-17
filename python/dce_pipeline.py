@@ -628,17 +628,13 @@ def _resolve_dynamic_metadata(
             metadata_source_path = str(candidate)
             break
 
-    tr_sec_raw, tr_sec_key = _explicit_stage_override(config, ("tr_sec",))
     tr_ms_raw, tr_ms_key = _explicit_stage_override(config, ("tr_ms",))
     time_resolution_raw, time_resolution_key = _explicit_stage_override(
         config, ("time_resolution_sec",)
     )
     fa_raw, fa_key = _explicit_stage_override(config, ("fa_deg",))
 
-    if tr_sec_raw is not None and tr_ms_raw is not None:
-        raise ValueError("Specify only one of stage_overrides.tr_sec and stage_overrides.tr_ms")
-
-    manual_tr = tr_sec_raw is not None or tr_ms_raw is not None
+    manual_tr = tr_ms_raw is not None
     manual_fa = fa_raw is not None
     manual_time = time_resolution_raw is not None
     manual_any = manual_tr or manual_fa or manual_time
@@ -646,13 +642,13 @@ def _resolve_dynamic_metadata(
 
     if metadata_source_path is None and not manual_all:
         raise ValueError(
-            "DCE metadata JSON not found. Provide stage_overrides.tr_ms/tr_sec, "
+            "DCE metadata JSON not found. Provide stage_overrides.tr_ms, "
             "stage_overrides.fa_deg, and stage_overrides.time_resolution_sec."
         )
     if metadata_source_path is not None and manual_any and not manual_all:
         raise ValueError(
             "Partial manual DCE metadata override is not allowed when metadata JSON is present. "
-            "Provide all of tr_ms/tr_sec + fa_deg + time_resolution_sec, or provide none."
+            "Provide all of tr_ms + fa_deg + time_resolution_sec, or provide none."
         )
 
     tr_ms: Optional[float] = None
@@ -660,10 +656,7 @@ def _resolve_dynamic_metadata(
     fa_deg: Optional[float] = None
     metadata_sources: Dict[str, str] = {}
 
-    if tr_sec_raw is not None:
-        tr_ms = float(tr_sec_raw) * 1000.0
-        metadata_sources["tr_ms"] = f"stage_overrides.{tr_sec_key}"
-    elif tr_ms_raw is not None:
+    if tr_ms_raw is not None:
         tr_ms = float(tr_ms_raw)
         metadata_sources["tr_ms"] = f"stage_overrides.{tr_ms_key}"
 
@@ -1861,18 +1854,22 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     
     t1_lv = t1_flat[lvind].astype(np.float64)
     blood_t1_override = _stage_override_optional(config, "blood_t1_ms")
-    if blood_t1_override is None:
-        blood_t1_override = _stage_override_optional(config, "blood_t1_sec")
-    if blood_t1_override is None:
-        blood_t1_override = _stage_override_optional(config, "blood_t1")
     blood_t1_override_sec: Optional[float] = None
     if blood_t1_override is not None:
-        blood_t1_override_sec = float(blood_t1_override)
-        # Mirror MATLAB conventions where blood_t1 is often entered in ms.
-        if blood_t1_override_sec > 20.0:
-            blood_t1_override_sec /= 1000.0
-        if blood_t1_override_sec <= 0.0:
-            raise ValueError("blood_t1 override must be positive")
+        blood_t1_ms = float(blood_t1_override)
+        # The unit is the key name, not the magnitude. This used to divide anything above
+        # 20 by 1000, which meant the suffix was decoration: blood_t1_sec=1500 became 1.5 s
+        # and blood_t1_ms=15 stayed 15 s, both silently. Refuse implausible values instead,
+        # since a wrong blood T1 rescales every AIF concentration without any other symptom.
+        # The floor sits well above any plausible seconds value (blood T1 is ~1.6-2.1 s) and
+        # well below any plausible millisecond one, so a unit mix-up lands outside it.
+        if not 50.0 <= blood_t1_ms <= 20000.0:
+            raise ValueError(
+                f"stage_overrides.blood_t1_ms={blood_t1_ms:g} is out of range (50-20000 ms). "
+                "The value is in milliseconds -- blood T1 is roughly 1600-2100 ms at 3T -- "
+                "so a value in seconds needs multiplying by 1000."
+            )
+        blood_t1_override_sec = blood_t1_ms / 1000.0
         t1_lv = np.full_like(t1_lv, blood_t1_override_sec, dtype=np.float64)
 
     t1_tum = t1_flat[tumind].astype(np.float64)
@@ -2110,7 +2107,9 @@ def _configured_time_step_min(config: DcePipelineConfig, stage_a: Dict[str, Any]
     Deliberately without a fallback: a guessed spacing silently rescales every time axis
     downstream, so callers raise instead of proceeding on a made-up number.
     """
-    step = _stage_override_optional(config, "time_resolution_min", stage_a.get("time_resolution_min", None))
+    # Stage A has already folded any `time_resolution_sec` override into its own value, so
+    # reading that first preserves the old precedence without a second override key.
+    step = stage_a.get("time_resolution_min", None)
     if step is None:
         seconds = _stage_override_optional(config, "time_resolution_sec")
         if seconds is None:
@@ -2141,7 +2140,7 @@ def _resolve_stage_b_timer(config: DcePipelineConfig, stage_a: Dict[str, Any], n
     if timer is None:
         time_resolution = _configured_time_step_min(config, stage_a)
         if time_resolution is None:
-            raise ValueError("Stage-B requires timer data; set stage_overrides.time_resolution_min")
+            raise ValueError("Stage-B requires timer data; set stage_overrides.time_resolution_sec")
         timer = np.arange(n_time, dtype=np.float64) * float(time_resolution)
 
     if timer.size > n_time:
@@ -2157,7 +2156,7 @@ def _resolve_stage_b_timer(config: DcePipelineConfig, stage_a: Dict[str, Any], n
             if configured is None or not math.isfinite(configured) or configured <= 0:
                 raise ValueError(
                     f"Timer vector has {timer.size} sample(s) for {n_time} frames and the frame "
-                    "spacing cannot be determined; set stage_overrides.time_resolution_min"
+                    "spacing cannot be determined; set stage_overrides.time_resolution_sec"
                 )
             step = configured
         extension = timer[-1] + step * np.arange(1, n_time - timer.size + 1, dtype=np.float64)

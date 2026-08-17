@@ -97,11 +97,10 @@ mid-study, so it stays. New Python work gets the hard stop.
 
 ### Acquisition / timing
 - `dce_metadata_path`: explicit metadata JSON path
-- `tr_sec`, `tr_ms`, `fa_deg`
-- `time_resolution_sec`, `time_resolution_min`
+- `tr_ms`, `fa_deg`, `time_resolution_sec`
 - Strict resolution behavior (real Stage A):
   - Preferred: resolve from DCE metadata JSON sidecar (or explicit `dce_metadata_path` JSON).
-  - If no metadata JSON is available, you must set all three manually: TR (`tr_ms`/`tr_sec`), FA (`fa_deg`), and time resolution (`time_resolution_sec`).
+  - If no metadata JSON is available, you must set all three manually: TR (`tr_ms`), FA (`fa_deg`), and time resolution (`time_resolution_sec`).
   - Partial manual override with metadata JSON present is rejected (set all three or none).
 - `time_vector_path`, `timevectpath`, `timer_path`
 - MATLAB script toggle: `timevectyn` controls whether legacy `timevectpath` is used
@@ -167,8 +166,8 @@ mid-study, so it stays. New Python work gets the hard stop.
 ### Stage A concentration conversion
 - `relaxivity` — per-scan, **no default, missing is a hard stop**; see [Precedence](#precedence)
 - `hematocrit` — per-scan, defaults to 0.45; see [Precedence](#precedence)
-- `blood_t1_ms`, `blood_t1_sec`
-- MATLAB script alias: `blood_t1`
+- `blood_t1_ms`: read as milliseconds and range-checked (50-20000). It is not rescaled
+  by magnitude, so a value in seconds is an error rather than a silent conversion.
 - `noise_pixsize`
 - `snr_filter`
 

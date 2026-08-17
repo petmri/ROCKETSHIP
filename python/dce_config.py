@@ -44,6 +44,12 @@ REMOVED_OVERRIDE_ALIASES: Dict[str, str] = {
     "aif_type": "aif_curve_mode",
     "tr": "tr_ms (milliseconds)",
     "fa": "fa_deg (degrees)",
+    # Second units for a quantity that only needs one. Convert the number yourself; the
+    # code no longer guesses which unit you meant.
+    "tr_sec": "tr_ms (milliseconds)",
+    "blood_t1": "blood_t1_ms (milliseconds)",
+    "blood_t1_sec": "blood_t1_ms (milliseconds)",
+    "time_resolution_min": "time_resolution_sec (seconds)",
 }
 
 _UNSET = object()

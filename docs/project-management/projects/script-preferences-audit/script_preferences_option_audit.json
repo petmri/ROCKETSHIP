@@ -164,9 +164,9 @@
     },
     {
       "key": "blood_t1",
-      "python_target": "stage_overrides.blood_t1 (alias)",
-      "status": "supported",
-      "notes": "Script-level static blood T1 alias is consumed."
+      "python_target": "stage_overrides.blood_t1_ms (ms)",
+      "status": "intentionally_dropped",
+      "notes": "Retired along with blood_t1_sec; blood_t1_ms is the single spelling and the value is read as milliseconds rather than guessed from its magnitude."
     },
     {
       "key": "injection_duration",

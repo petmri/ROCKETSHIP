@@ -230,21 +230,16 @@ def test_blood_t1_override_changes_aif_path(tiny_root: Path) -> None:
 
 
 @pytest.mark.integration
-def test_blood_t1_sec_override_alias(tiny_root: Path) -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        config_override = _make_config(tiny_root, Path(tmp) / "override_sec", {"blood_t1_sec": 1.55})
-        stage_a_override = _run_stage_a_real(config_override)
-        assert float(stage_a_override["blood_t1_override_sec"]) == pytest.approx(1.55)
-        assert stage_a_override["blood_t1_source"] == "override"
-        assert float(stage_a_override["blood_t1_mean_ms"]) == pytest.approx(1550.0)
-        assert np.allclose(stage_a_override["arrays"]["T1LV"], 1.55)
+@pytest.mark.parametrize("bad_value", [0.0, -1600.0, 1.55, 25000.0])
+def test_blood_t1_ms_rejects_values_that_are_not_milliseconds(tiny_root: Path, bad_value: float) -> None:
+    """The suffix is the unit now, so a seconds-magnitude value is an error.
 
-
-@pytest.mark.integration
-def test_blood_t1_override_rejects_nonpositive(tiny_root: Path) -> None:
+    It used to be silently multiplied into range, which made `blood_t1_sec=1500` mean 1.5 s
+    and `blood_t1_ms=15` mean 15 s. Both produced plausible-looking maps from a wrong T1.
+    """
     with tempfile.TemporaryDirectory() as tmp:
-        config_bad = _make_config(tiny_root, Path(tmp) / "bad", {"blood_t1_ms": 0.0})
-        with pytest.raises(ValueError, match="blood_t1 override must be positive"):
+        config_bad = _make_config(tiny_root, Path(tmp) / "bad", {"blood_t1_ms": bad_value})
+        with pytest.raises(ValueError, match="out of range"):
             _run_stage_a_real(config_bad)
 
 
@@ -268,9 +263,10 @@ def test_manual_metadata_overrides_replace_the_sidecar(tiny_root: Path) -> None:
 
 
 @pytest.mark.integration
-def test_script_level_blood_t1_alias(tiny_root: Path) -> None:
+def test_blood_t1_ms_is_taken_at_face_value(tiny_root: Path) -> None:
+    """1620 ms means 1.62 s, with no magnitude-based rescaling in between."""
     with tempfile.TemporaryDirectory() as tmp:
-        config = _make_config(tiny_root, Path(tmp) / "alias_blood_t1", {"blood_t1": 1.62})
+        config = _make_config(tiny_root, Path(tmp) / "blood_t1_ms", {"blood_t1_ms": 1620.0})
         stage_a = _run_stage_a_real(config)
         assert float(stage_a["blood_t1_override_sec"]) == pytest.approx(1.62)
         assert stage_a["blood_t1_source"] == "override"
