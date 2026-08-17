@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
 
 from bids_discovery import BidsSession
 
@@ -38,6 +38,20 @@ class DceInputs:
 DYNAMIC_PATTERN = "*desc-bfcz_DCE.nii*"
 DYNAMIC_FALLBACK_PATTERN = "*DCE.nii*"
 AIF_MASK_PATTERN = "*label-AIF_T1map.nii*"
+ROI_MASK_PATTERN = "*space-DCEref_label-brain_mask.nii*"
+T1_MAP_PATTERN = "*space-DCEref_T1map.nii*"
+NOISE_MASK_PATTERN = "*label-noise_mask.nii*"
+METADATA_PATTERN = "*DCE.json"
+
+# Inputs the pipeline cannot run without; the rest are optional.
+REQUIRED_INPUT_KINDS = ("dynamic", "aif_mask", "roi_mask", "t1_map")
+
+_PATTERN_HINTS = {
+    "dynamic": f"{DYNAMIC_PATTERN} or {DYNAMIC_FALLBACK_PATTERN}",
+    "aif_mask": AIF_MASK_PATTERN,
+    "roi_mask": ROI_MASK_PATTERN,
+    "t1_map": T1_MAP_PATTERN,
+}
 
 
 def _find_one(parent: Path, pattern: str) -> Optional[Path]:
@@ -46,6 +60,35 @@ def _find_one(parent: Path, pattern: str) -> Optional[Path]:
         return None
     matches = sorted(parent.glob(pattern))
     return matches[0] if matches else None
+
+
+def discover_dce_input_paths(session: BidsSession) -> Dict[str, Optional[Path]]:
+    """Locate each dceprep input, using None for anything that is missing.
+
+    Same conventions as `discover_dce_inputs`, without its all-or-nothing contract, so
+    callers that need to show partial results (the GUI's auto-fill) don't have to keep
+    a second copy of the naming convention.
+    """
+    dce_deriv = session.derivatives_path / "dce"
+    anat_deriv = session.derivatives_path / "anat"
+
+    dynamic = _find_one(dce_deriv, DYNAMIC_PATTERN)
+    if dynamic is None:
+        dynamic = _find_one(dce_deriv, DYNAMIC_FALLBACK_PATTERN)
+
+    return {
+        "dynamic": dynamic,
+        "aif_mask": _find_one(dce_deriv, AIF_MASK_PATTERN),
+        "roi_mask": _find_one(anat_deriv, ROI_MASK_PATTERN),
+        "t1_map": _find_one(anat_deriv, T1_MAP_PATTERN),
+        "noise_mask": _find_one(anat_deriv, NOISE_MASK_PATTERN),
+        "metadata_json": _find_one(dce_deriv, METADATA_PATTERN),
+    }
+
+
+def missing_required_inputs(found: Dict[str, Optional[Path]]) -> List[str]:
+    """Names of the required inputs that discovery could not locate."""
+    return [kind for kind in REQUIRED_INPUT_KINDS if found.get(kind) is None]
 
 
 def discover_dce_inputs(session: BidsSession) -> DceInputs:
@@ -66,50 +109,12 @@ def discover_dce_inputs(session: BidsSession) -> DceInputs:
     Raises:
         FileNotFoundError: If any required file is missing
     """
-    dce_deriv = session.derivatives_path / "dce"
-    anat_deriv = session.derivatives_path / "anat"
+    found = discover_dce_input_paths(session)
 
-    # Dynamic image
-    dynamic = _find_one(dce_deriv, DYNAMIC_PATTERN)
-    if dynamic is None:
-        dynamic = _find_one(dce_deriv, DYNAMIC_FALLBACK_PATTERN)
-
-    # AIF mask
-    aif = _find_one(dce_deriv, AIF_MASK_PATTERN)
-
-    # ROI mask
-    roi = _find_one(anat_deriv, "*space-DCEref_label-brain_mask.nii*")
-
-    # T1 map
-    t1map = _find_one(anat_deriv, "*space-DCEref_T1map.nii*")
-
-    # Noise mask (optional)
-    noise = _find_one(anat_deriv, "*label-noise_mask.nii*")
-
-    # Metadata (optional)
-    metadata_json = _find_one(dce_deriv, "*DCE.json")
-
-    missing = []
-    if dynamic is None:
-        missing.append("dynamic (pattern: *desc-bfcz_DCE.nii* or *DCE.nii*)")
-    if aif is None:
-        missing.append("aif_mask (pattern: *label-AIF_T1map.nii*)")
-    if roi is None:
-        missing.append("roi_mask (pattern: *label-brain_mask.nii*)")
-    if t1map is None:
-        missing.append("t1_map (pattern: *space-DCEref_T1map.nii*)")
-
+    missing = [f"{kind} (pattern: {_PATTERN_HINTS[kind]})" for kind in missing_required_inputs(found)]
     if missing:
         raise FileNotFoundError(
             f"Missing DCE derivative inputs for {session.id}:\n" + "\n  ".join([""] + missing)
         )
 
-    return DceInputs(
-        session=session,
-        dynamic=dynamic,
-        aif_mask=aif,
-        roi_mask=roi,
-        t1_map=t1map,
-        noise_mask=noise,
-        metadata_json=metadata_json,
-    )
+    return DceInputs(session=session, **found)
