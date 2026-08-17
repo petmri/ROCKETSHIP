@@ -28,8 +28,9 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
-    QSplitter,
+    QSizePolicy,
     QTableWidget,
+    QTabWidget,
     QTableWidgetItem,
     QToolButton,
     QVBoxLayout,
@@ -44,6 +45,61 @@ from dce_file_discovery import discover_dce_input_paths, missing_required_inputs
 
 EVENT_PREFIX = "ROCKETSHIP_EVENT "
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# Main-window tab order. Named because the run follows the user through them: starting a run
+# moves off Inputs to the log, and finishing moves on to the figures.
+TAB_INPUTS = 0
+TAB_LOG = 1
+TAB_FIGURES = 2
+TAB_RESULTS = 3
+
+# Window-wide palette. The default group-box grey sits within a few percent of the white of
+# the fields inside it, which on some displays made the edge of a text box invisible. These
+# darken the panel and give every white field a border, so "editable" reads at a glance.
+# Set once on the window and inherited by every child; widgets that carry their own
+# stylesheet (the log view, the progress bar) keep it, since a widget's own sheet wins.
+PANEL_BG = "#F0F0F0"
+PANEL_BORDER = "#b4b4bb"
+FIELD_BG = "#ffffff"
+FIELD_BORDER = "#9a9aa2"
+WINDOW_QSS = f"""
+QGroupBox {{
+    background-color: {PANEL_BG};
+    border: 1px solid {PANEL_BORDER};
+    border-radius: 4px;
+    /* Tall enough that the title clears the frame: with a shorter margin the top border is
+       drawn through the middle of the text. */
+    margin-top: 20px;
+    padding: 3px 8px 5px 8px;
+}}
+QGroupBox::title {{
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 8px;
+    padding: 0 4px;
+}}
+/* The collapsible sections are group boxes with no title, so they need no room above. */
+QGroupBox[titleless="true"] {{
+    margin-top: 0;
+    padding: 4px 8px;
+}}
+QLineEdit, QPlainTextEdit, QListWidget, QTableWidget {{
+    background-color: {FIELD_BG};
+    border: 1px solid {FIELD_BORDER};
+    border-radius: 3px;
+}}
+QLineEdit:disabled, QPlainTextEdit:disabled {{
+    background-color: #f0f0f2;
+    color: #6a6a70;
+}}
+"""
+
+# Widest text each run-bar label has to hold, used to reserve width up front. Without this
+# the labels resize as a run progresses and the progress bar's left edge jumps with them.
+# Stage text comes from `_handle_event` / `_on_process_finished`; the model line is the
+# longest model name in `_build_model_flags` with the largest plausible counter.
+WIDEST_STAGE_TEXT = "Stage: failed (exit=255)"
+WIDEST_MODEL_TEXT = "Model: tissue_uptake (9/9)"
 
 # Baseline-end detectors, as (label, canonical stage_overrides value). The values are the
 # ones `_normalize_steady_state_auto_method` accepts; `none` means "use steady_state_end".
@@ -131,7 +187,7 @@ class DceGuiWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("ROCKETSHIP DCE (Python GUI v1)")
-        self.resize(1500, 900)
+        self.resize(1000, 700)
 
         self._stdout_buffer = ""
         self._event_paths: set[str] = set()
@@ -148,50 +204,22 @@ class DceGuiWindow(QMainWindow):
         self._load_config(DEFAULT_CONFIG_PATH)
 
     def _build_ui(self) -> None:
+        self.setStyleSheet(WINDOW_QSS)
         root = QWidget()
         self.setCentralWidget(root)
         root_layout = QVBoxLayout(root)
 
-        top_controls = QHBoxLayout()
-        self.config_path_edit = QLineEdit(str(DEFAULT_CONFIG_PATH))
-        self.config_path_edit.setReadOnly(True)
-        self.load_button = QPushButton("Load Config")
-        self.save_button = QPushButton("Save Config As")
-        self.reset_button = QPushButton("Reset Defaults")
-        self.options_button = QPushButton("Open Options Doc")
-        top_controls.addWidget(QLabel("Config:"))
-        top_controls.addWidget(self.config_path_edit, 1)
-        top_controls.addWidget(self.load_button)
-        top_controls.addWidget(self.save_button)
-        top_controls.addWidget(self.reset_button)
-        top_controls.addWidget(self.options_button)
-        root_layout.addLayout(top_controls)
+        self.tabs = QTabWidget()
+        root_layout.addWidget(self.tabs, 1)
+        self.tabs.insertTab(TAB_INPUTS, self._build_inputs_tab(), "Inputs")
+        self.tabs.insertTab(TAB_LOG, self._build_log_tab(), "CLI Output")
+        self.tabs.insertTab(TAB_FIGURES, self._build_figures_tab(), "QC Figures")
+        self.tabs.insertTab(TAB_RESULTS, self._build_results_tab(), "Results")
 
-        splitter = QSplitter(Qt.Horizontal)
-        root_layout.addWidget(splitter, 1)
-
-        left_container = QWidget()
-        left_layout = QVBoxLayout(left_container)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_scroll = QScrollArea()
-        left_scroll.setWidgetResizable(True)
-        left_scroll.setWidget(left_container)
-        splitter.addWidget(left_scroll)
-
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(8, 8, 8, 8)
-        splitter.addWidget(right_panel)
-        splitter.setSizes([900, 600])
-
-        self._build_core_settings(left_layout)
-        self._build_model_flags(left_layout)
-        self._build_file_lists(left_layout)
-        self._build_stage_overrides(left_layout)
-        self._build_run_controls(left_layout)
-        left_layout.addStretch(1)
-
-        self._build_logs_and_figures(right_layout)
+        # Run/Stop and progress sit below the tabs rather than inside Inputs: the tab you
+        # watch during a run is CLI Output, and a Stop button you have to change tabs to
+        # reach is the wrong place for it.
+        self._build_run_controls(root_layout)
 
         self.load_button.clicked.connect(self._on_load_config_clicked)
         self.save_button.clicked.connect(self._on_save_config_clicked)
@@ -285,6 +313,8 @@ class DceGuiWindow(QMainWindow):
         collapsed, so controls that belong there (e.g. the auto-find checkbox) can be
         added by the caller."""
         group = QGroupBox()
+        # No title, so WINDOW_QSS should not reserve the strip a title would sit in.
+        group.setProperty("titleless", True)
         layout = QVBoxLayout(group)
 
         toggle = QToolButton()
@@ -420,7 +450,9 @@ class DceGuiWindow(QMainWindow):
         edit.setLineWrapMode(QPlainTextEdit.NoWrap)
         edit.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         edit.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        edit.setFixedHeight(QLineEdit().sizeHint().height())
+        # Match the one-line look of the Core Settings fields, plus the pixels the styled
+        # border and padding take, so the path text is not clipped.
+        edit.setFixedHeight(QLineEdit().sizeHint().height() + 4)
         edit.setPlaceholderText("One path per line")
         edit.textChanged.connect(lambda: self._refresh_file_list_tooltip(edit))
         self._refresh_file_list_tooltip(edit)
@@ -557,6 +589,10 @@ class DceGuiWindow(QMainWindow):
             "Only rows you change are written into the saved config.",
         )
         header.addStretch(1)
+        # The options doc explains these keys, so it belongs with them rather than in the
+        # config bar, where it read as another config-file action.
+        self.options_button = QPushButton("Open Options Doc")
+        header.addWidget(self.options_button)
 
         self.override_table = QTableWidget(0, 3)
         self.override_table.setHorizontalHeaderLabels(["key", "value", "source"])
@@ -585,30 +621,109 @@ class DceGuiWindow(QMainWindow):
         parent_layout.addWidget(group)
 
     def _build_run_controls(self, parent_layout: QVBoxLayout) -> None:
+        # This bar shows on every tab, so it is a single row: buttons, status text and the
+        # progress bar side by side. Each child is explicitly AlignVCenter rather than left
+        # to fill the row -- styles disagree about how much height a group box reserves for
+        # its title, and stacked rows drifted to the top of the box on macOS.
         group = QGroupBox("Run")
-        layout = QVBoxLayout(group)
-        buttons = QHBoxLayout()
+        group.setSizePolicy(group.sizePolicy().horizontalPolicy(), QSizePolicy.Fixed)
+        layout = QHBoxLayout(group)
+        layout.setContentsMargins(8, 2, 8, 2)
+        layout.setSpacing(8)
+
         self.run_button = QPushButton("Run DCE")
         self.stop_button = QPushButton("Hard Stop")
         self.stop_button.setEnabled(False)
-        buttons.addWidget(self.run_button)
-        buttons.addWidget(self.stop_button)
-        buttons.addStretch(1)
-        layout.addLayout(buttons)
-
         self.stage_label = QLabel("Stage: idle")
         self.model_label = QLabel("Model: -")
+        # Minimum rather than fixed width: this pins the progress bar's left edge for every
+        # message these labels actually show, without truncating an unexpectedly long one.
+        metrics = self.stage_label.fontMetrics()
+        self.stage_label.setMinimumWidth(metrics.horizontalAdvance(WIDEST_STAGE_TEXT) + 8)
+        self.model_label.setMinimumWidth(metrics.horizontalAdvance(WIDEST_MODEL_TEXT) + 8)
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
-        layout.addWidget(self.stage_label)
-        layout.addWidget(self.model_label)
-        layout.addWidget(self.progress)
+        self.progress.setTextVisible(True)
+        self.progress.setFixedHeight(18)
+        self.progress.setMinimumWidth(200)
+        # Styled rather than left native: the macOS style draws no text on a progress bar and
+        # gives it a near-white groove, so on that platform an idle bar was invisible against
+        # the group box. An explicit border and track render the same everywhere.
+        self.progress.setStyleSheet(
+            "QProgressBar {"
+            " border: 1px solid #909090;"
+            " border-radius: 3px;"
+            " background-color: #ffffff;"
+            " text-align: center;"
+            " color: #000000;"
+            "}"
+            "QProgressBar::chunk {"
+            " background-color: #3b82f6;"
+            " border-radius: 2px;"
+            "}"
+        )
+
+        for widget in (self.run_button, self.stop_button, self.stage_label, self.model_label):
+            layout.addWidget(widget, 0, Qt.AlignVCenter)
+        # No alignment flag here: a fixed-height widget is centred by the layout anyway, and
+        # an explicit flag would stop it stretching to fill the remaining width.
+        layout.addWidget(self.progress, 1)
         parent_layout.addWidget(group)
 
-    def _build_logs_and_figures(self, right_layout: QVBoxLayout) -> None:
-        logs_group = QGroupBox("CLI Output / Progress")
-        logs_layout = QVBoxLayout(logs_group)
+    def _build_inputs_tab(self) -> QWidget:
+        """Config file selection plus every settings section, in one scrolling column."""
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # A little air above the first group, so it does not sit flush against the tab bar.
+        layout.addSpacing(6)
+
+        config_group = QGroupBox("Run Config")
+        config_row = QHBoxLayout(config_group)
+        self.config_path_edit = QLineEdit(str(DEFAULT_CONFIG_PATH))
+        self.config_path_edit.setReadOnly(True)
+        # The styled border and padding eat into the field, clipping the path text at the
+        # default height. Give back the pixels they take.
+        self.config_path_edit.setMinimumHeight(self.config_path_edit.sizeHint().height() + 4)
+        self.load_button = QPushButton("Load Config")
+        self.save_button = QPushButton("Save Config As")
+        self.reset_button = QPushButton("Reset Defaults")
+        config_row.addWidget(self.config_path_edit, 1)
+        config_row.addWidget(self.load_button)
+        config_row.addWidget(self.save_button)
+        config_row.addWidget(self.reset_button)
+        layout.addWidget(config_group)
+
+        self._build_core_settings(layout)
+        self._build_model_flags(layout)
+        self._build_file_lists(layout)
+        self._build_stage_overrides(layout)
+        layout.addStretch(1)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(container)
+        # Always on, not as-needed: expanding a collapsible section is what pushes this tab
+        # past the viewport, and a scrollbar that appears at that moment shifts the layout
+        # underneath the click. Platforms drawing overlay scrollbars (macOS, depending on the
+        # system setting) still fade theirs out; this is the policy, not a guarantee.
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        return scroll
+
+    def _build_results_tab(self) -> QWidget:
+        """Placeholder: fitted-map review lands here."""
+        placeholder = QLabel("Results view not implemented yet.")
+        placeholder.setAlignment(Qt.AlignCenter)
+        placeholder.setEnabled(False)
+        return placeholder
+
+    def _build_log_tab(self) -> QWidget:
+        # No group box around these: the tab already frames and titles them, so a second
+        # border with the same caption inside it is just noise.
+        panel = QWidget()
+        logs_layout = QVBoxLayout(panel)
         self.log_view = QPlainTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
@@ -621,11 +736,20 @@ class DceGuiWindow(QMainWindow):
             " border: 1px solid #444444;"
             "}"
         )
+        self._reset_log_view()
         logs_layout.addWidget(self.log_view)
-        right_layout.addWidget(logs_group, 2)
+        return panel
 
-        fig_group = QGroupBox("QC Figures")
-        fig_layout = QVBoxLayout(fig_group)
+    def _reset_log_view(self) -> None:
+        """Idle text, so an untouched tab is not an unexplained black rectangle."""
+        self.log_view.setPlainText(
+            "[idle] No run yet.\n"
+            "Pipeline output appears here once you press Run DCE."
+        )
+
+    def _build_figures_tab(self) -> QWidget:
+        panel = QWidget()
+        fig_layout = QVBoxLayout(panel)
         self.figure_list = QListWidget()
         self.figure_preview = QLabel("No figure selected")
         self.figure_preview.setAlignment(Qt.AlignCenter)
@@ -633,7 +757,7 @@ class DceGuiWindow(QMainWindow):
         self.figure_preview.setStyleSheet("border: 1px solid #888;")
         fig_layout.addWidget(self.figure_list, 1)
         fig_layout.addWidget(self.figure_preview, 3)
-        right_layout.addWidget(fig_group, 3)
+        return panel
 
     def _on_open_options_doc(self) -> None:
         if not OPTIONS_DOC_PATH.exists():
@@ -949,6 +1073,10 @@ class DceGuiWindow(QMainWindow):
         proc.start(sys.executable, args)
         self.run_button.setEnabled(False)
         self.stop_button.setEnabled(True)
+        # Follow the run to the log, but only from Inputs: if the user has deliberately
+        # opened another tab, leave them there.
+        if self.tabs.currentIndex() == TAB_INPUTS:
+            self.tabs.setCurrentIndex(TAB_LOG)
 
     def _stop_run_hard(self) -> None:
         if self._process is None:
@@ -995,6 +1123,14 @@ class DceGuiWindow(QMainWindow):
         else:
             self.stage_label.setText(f"Stage: failed (exit={exit_code})")
         self._append_log_line(f"Process finished with exit code {exit_code}")
+        # Move on to the figures once there is something to look at. A failed run leaves the
+        # user on the log, which is where the reason is.
+        if exit_code == 0 and self.tabs.currentIndex() in (TAB_INPUTS, TAB_LOG):
+            self.tabs.setCurrentIndex(TAB_FIGURES)
+            # Switching to an empty preview defeats the point of switching, so show the
+            # first figure unless the user already picked one mid-run.
+            if self.figure_list.currentItem() is None and self.figure_list.count() > 0:
+                self.figure_list.setCurrentRow(0)
 
     def _handle_event(self, event: Dict[str, Any]) -> None:
         event_type = str(event.get("type", ""))
