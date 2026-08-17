@@ -113,11 +113,6 @@ def _run_abd(config: DcePipelineConfig) -> tuple[dict, dict, dict]:
     return stage_a, stage_b, stage_d
 
 
-def _drop_stage_overrides(config: DcePipelineConfig, *keys: str) -> None:
-    for key in keys:
-        config.stage_overrides.pop(key, None)
-
-
 @pytest.fixture(scope="module")
 def tiny_root() -> Path:
     root = _tiny_root()
@@ -254,18 +249,17 @@ def test_blood_t1_override_rejects_nonpositive(tiny_root: Path) -> None:
 
 
 @pytest.mark.integration
-def test_script_level_tr_fa_time_resolution_aliases(tiny_root: Path) -> None:
+def test_manual_metadata_overrides_replace_the_sidecar(tiny_root: Path) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         config = _make_config(
             tiny_root,
-            Path(tmp) / "alias_meta",
+            Path(tmp) / "manual_meta",
             {
-                "tr": 9.7,
-                "fa": 18.5,
-                "time_resolution": 6.0,
+                "tr_ms": 9.7,
+                "fa_deg": 18.5,
+                "time_resolution_sec": 6.0,
             },
         )
-        _drop_stage_overrides(config, "tr_ms", "fa_deg", "time_resolution_sec")
         stage_a = _run_stage_a_real(config)
 
         assert float(stage_a["tr_ms"]) == pytest.approx(9.7)
@@ -307,18 +301,17 @@ def test_script_level_start_t_end_t_aliases_clip_stage_a_timepoints(tiny_root: P
 
 
 @pytest.mark.integration
-def test_script_level_aif_type_and_injection_aliases(tiny_root: Path) -> None:
+def test_raw_aif_mode_with_an_explicit_injection_end(tiny_root: Path) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         config = _make_config(
             tiny_root,
-            Path(tmp) / "alias_aif",
+            Path(tmp) / "raw_aif",
             {
-                "aif_type": 2,
+                "aif_curve_mode": "raw",
                 "steady_state_end": 4,
-                "end_injection": 1.05,
+                "end_injection_min": 1.05,
             },
         )
-        _drop_stage_overrides(config, "aif_curve_mode", "end_injection_min")
 
         stage_a = _run_stage_a_real(config)
         stage_b = _run_stage_b_real(config, stage_a)
@@ -347,10 +340,9 @@ def test_script_level_timevectyn_controls_timevectpath(tiny_root: Path) -> None:
             {
                 "timevectpath": str(timer_file),
                 "timevectyn": 1,
-                "aif_type": 2,
+                "aif_curve_mode": "raw",
             },
         )
-        _drop_stage_overrides(config_enabled, "aif_curve_mode")
         stage_a_enabled = _run_stage_a_real(config_enabled)
         stage_b_enabled = _run_stage_b_real(config_enabled, stage_a_enabled)
         assert np.allclose(stage_b_enabled["arrays"]["timer"], custom_timer)
@@ -361,10 +353,9 @@ def test_script_level_timevectyn_controls_timevectpath(tiny_root: Path) -> None:
             {
                 "timevectpath": str(timer_file),
                 "timevectyn": 0,
-                "aif_type": 2,
+                "aif_curve_mode": "raw",
             },
         )
-        _drop_stage_overrides(config_disabled, "aif_curve_mode")
         stage_a_disabled = _run_stage_a_real(config_disabled)
         stage_b_disabled = _run_stage_b_real(config_disabled, stage_a_disabled)
         assert not np.allclose(stage_b_disabled["arrays"]["timer"], custom_timer)

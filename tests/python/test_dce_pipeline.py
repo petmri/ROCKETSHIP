@@ -1461,8 +1461,8 @@ class TestDcePipeline:
                 "relaxivity": 3.6,
                 "stage_b_mode": "real",
                 "aif_curve_mode": "fitted",
-                "start_time_min": 0.0,
-                "end_time_min": 0.0,
+                "restrict_fit_start_min": 0.0,
+                "restrict_fit_end_min": 0.0,
                 "aif_MaxFunEvals": 4000,
                 # Pinned rather than inherited: `aif_Robust` now defaults to `off` (S11), and
                 # this test is the only coverage of the Tukey IRLS path, which is still shipped.
@@ -1574,13 +1574,14 @@ class TestDcePipeline:
                 start_injection=timer[4],
             )
 
-            # Exercise script-style aliases without using top-level imported_aif_path.
+            # Drive imported mode purely from stage_overrides, without the top-level
+            # imported_aif_path field.
             config.imported_aif_path = None
             config.aif_mode = "fitted"
             config.stage_overrides = {
                 "relaxivity": 3.6,
                 "stage_b_mode": "real",
-                "aif_type": 3,
+                "aif_curve_mode": "imported",
                 "import_aif_path": str(imported_path),
             }
 

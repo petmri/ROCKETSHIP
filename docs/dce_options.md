@@ -98,12 +98,10 @@ mid-study, so it stays. New Python work gets the hard stop.
 ### Acquisition / timing
 - `dce_metadata_path`: explicit metadata JSON path
 - `tr_sec`, `tr_ms`, `fa_deg`
-- MATLAB script aliases: `tr` (ms), `fa` (deg)
 - `time_resolution_sec`, `time_resolution_min`
-- MATLAB script alias: `time_resolution` (sec)
 - Strict resolution behavior (real Stage A):
   - Preferred: resolve from DCE metadata JSON sidecar (or explicit `dce_metadata_path` JSON).
-  - If no metadata JSON is available, you must set all three manually: TR (`tr_ms`/`tr_sec`), FA (`fa_deg`/`fa`), and time resolution (`time_resolution_sec`/`time_resolution`).
+  - If no metadata JSON is available, you must set all three manually: TR (`tr_ms`/`tr_sec`), FA (`fa_deg`), and time resolution (`time_resolution_sec`).
   - Partial manual override with metadata JSON present is rejected (set all three or none).
 - `time_vector_path`, `timevectpath`, `timer_path`
 - MATLAB script toggle: `timevectyn` controls whether legacy `timevectpath` is used
@@ -140,8 +138,10 @@ mid-study, so it stays. New Python work gets the hard stop.
   - Aliases accepted: `legacy`, `dce_auto_aif`, `sobel`, `piecewise`, `find_end_ss`, `edge`, `find_end_ss_edge`, `tv`, `find_end_ss_tv`, `biexp`, `find_end_ss_biexp`
   - Precedence overall: `steady_state_end` > AIF sidecar `SteadyStateEndTimeIndex` > `steady_state_auto_method`
   - If none of the above is set, Python defaults to `tv` (MATLAB `find_end_ss_tv`)
-- `start_time`, `end_time`, `start_time_min`, `end_time_min`
-- `end_injection_min` (MATLAB script alias: `end_injection`, min). There is no
+- `restrict_fit_start_min`, `restrict_fit_end_min`: minutes on the timer axis, restricting
+  the curve window Stage B fits. Unlike `start_t`/`end_t` they discard nothing and leave
+  the baseline alone, so they are the way to fit only a late phase.
+- `end_injection_min` (min). There is no
   `start_injection_min`: the injection start is *defined* as the resolved baseline end, so
   move it with `steady_state_end` / the AIF sidecar / `steady_state_auto_method`. Passing
   `start_injection_min` or `start_injection` is rejected with an error pointing at those.
@@ -173,9 +173,8 @@ mid-study, so it stays. New Python work gets the hard stop.
 - `snr_filter`
 
 ### Stage B AIF fit
-- `aif_curve_mode`: `fitted|raw|imported|auto`
-- MATLAB script alias: `aif_type` (`1=fitted`, `2=raw`, `3=imported`)
-- Imported AIF path fallback alias: `import_aif_path`
+- `aif_curve_mode`: `fitted|raw|imported`
+- Imported AIF path override: `import_aif_path`
 - `aif_lower_limits`: 4 values `[A,B,c,d]`
 - `aif_upper_limits`: 4 values `[A,B,c,d]`
 - `aif_initial_values`: 4 values `[A,B,c,d]`

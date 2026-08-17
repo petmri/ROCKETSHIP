@@ -116,15 +116,15 @@
     },
     {
       "key": "tr",
-      "python_target": "stage_overrides.tr (alias to tr_ms)",
-      "status": "supported",
-      "notes": "MATLAB script-level TR (ms) alias is now consumed."
+      "python_target": "stage_overrides.tr_ms (ms)",
+      "status": "intentionally_dropped",
+      "notes": "Retired as a duplicate spelling; use tr_ms (ms). Setting the old name now raises from validate_override_keys with the replacement named."
     },
     {
       "key": "fa",
-      "python_target": "stage_overrides.fa (alias to fa_deg)",
-      "status": "supported",
-      "notes": "MATLAB script-level flip-angle alias is now consumed."
+      "python_target": "stage_overrides.fa_deg (degrees)",
+      "status": "intentionally_dropped",
+      "notes": "Retired as a duplicate spelling; use fa_deg (degrees). Setting the old name now raises from validate_override_keys with the replacement named."
     },
     {
       "key": "hematocrit",
@@ -176,15 +176,15 @@
     },
     {
       "key": "start_time",
-      "python_target": "stage_overrides.start_time",
-      "status": "supported",
-      "notes": "Alias consumed by Stage-B windowing."
+      "python_target": "stage_overrides.restrict_fit_start_min (minutes)",
+      "status": "intentionally_dropped",
+      "notes": "Retired as a duplicate spelling; use restrict_fit_start_min (minutes). Setting the old name now raises from validate_override_keys with the replacement named."
     },
     {
       "key": "end_time",
-      "python_target": "stage_overrides.end_time",
-      "status": "supported",
-      "notes": "Alias consumed by Stage-B windowing."
+      "python_target": "stage_overrides.restrict_fit_end_min (minutes)",
+      "status": "intentionally_dropped",
+      "notes": "Retired as a duplicate spelling; use restrict_fit_end_min (minutes). Setting the old name now raises from validate_override_keys with the replacement named."
     },
     {
       "key": "auto_find_injection",
@@ -194,27 +194,27 @@
     },
     {
       "key": "start_injection",
-      "python_target": "stage_overrides.start_injection (alias to start_injection_min)",
-      "status": "supported",
-      "notes": "Script-level injection start alias is consumed as minutes."
+      "python_target": "stage_overrides.steady_state_end",
+      "status": "intentionally_dropped",
+      "notes": "The injection start is always the resolved baseline end; setting this raises and points at steady_state_end / the AIF sidecar / steady_state_auto_method."
     },
     {
       "key": "end_injection",
-      "python_target": "stage_overrides.end_injection (alias to end_injection_min)",
-      "status": "supported",
-      "notes": "Script-level injection end alias is consumed as minutes."
+      "python_target": "stage_overrides.end_injection_min (minutes)",
+      "status": "intentionally_dropped",
+      "notes": "Retired as a duplicate spelling; use end_injection_min (minutes). Setting the old name now raises from validate_override_keys with the replacement named."
     },
     {
       "key": "time_resolution",
-      "python_target": "stage_overrides.time_resolution (alias to time_resolution_sec)",
-      "status": "supported",
-      "notes": "Script-level temporal resolution alias is consumed in seconds."
+      "python_target": "stage_overrides.time_resolution_sec (seconds)",
+      "status": "intentionally_dropped",
+      "notes": "Retired as a duplicate spelling; use time_resolution_sec (seconds). Setting the old name now raises from validate_override_keys with the replacement named."
     },
     {
       "key": "aif_type",
-      "python_target": "stage_overrides.aif_type (alias to aif_curve_mode)",
-      "status": "supported",
-      "notes": "MATLAB numeric modes map as 1=fitted, 2=raw, 3=imported."
+      "python_target": "stage_overrides.aif_curve_mode",
+      "status": "intentionally_dropped",
+      "notes": "Retired as a duplicate spelling; use aif_curve_mode. Setting the old name now raises from validate_override_keys with the replacement named."
     },
     {
       "key": "import_aif_path",

@@ -235,6 +235,30 @@ def test_deleted_keys_are_gone() -> None:
     assert not clash, f"{DEFAULTS_FILE.name} still declares removed key(s): {sorted(clash)}"
 
 
+def test_retired_aliases_are_not_declared() -> None:
+    """A retired spelling must not be re-declared, or it silently starts working again."""
+    payload = _defaults_payload()
+    declared = {k.lower() for section in ("defaults", "required", "optional") for k in payload.get(section, {})}
+    clash = declared & set(dce_config.REMOVED_OVERRIDE_ALIASES)
+    assert not clash, f"{DEFAULTS_FILE.name} re-declares retired alias(es): {sorted(clash)}"
+
+
+@pytest.mark.parametrize("alias", sorted(dce_config.REMOVED_OVERRIDE_ALIASES))
+def test_retired_alias_names_its_replacement(alias: str) -> None:
+    """Rejecting the old spelling is not enough on its own.
+
+    These are the MATLAB script names, so they arrive in configs translated by hand from
+    `run_dce_cli.m`. A bare "unknown key" would read as "unsupported" rather than "renamed",
+    so the message has to carry the surviving key.
+    """
+    replacement = dce_config.REMOVED_OVERRIDE_ALIASES[alias]
+    with pytest.raises(dce_config.DceConfigError) as excinfo:
+        dce_config.validate_override_keys({alias: 1})
+    message = str(excinfo.value)
+    assert "was removed" in message
+    assert replacement in message
+
+
 class TestResolution:
     """The behaviours the single-source migration exists to produce."""
 

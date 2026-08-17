@@ -27,6 +27,25 @@ DEFAULTS_PATH = Path(__file__).resolve().parent / DEFAULTS_FILENAME
 # Keys that may be set per scan in the image's JSON sidecar, which outranks the run config.
 SCAN_LEVEL_KEYS = ("relaxivity", "hematocrit")
 
+# Override spellings that were retired, mapped to the surviving key and its units. Each of
+# these was a second name for a setting that already had one; carrying both meant the
+# resolution order decided which won, and that order was not something a user could infer
+# from the config. Kept here so the "unknown key" guard can name the replacement instead of
+# just rejecting a spelling that used to work -- these are the MATLAB script names, so they
+# turn up in configs translated by hand from `run_dce_cli.m`.
+REMOVED_OVERRIDE_ALIASES: Dict[str, str] = {
+    "start_time": "restrict_fit_start_min (minutes)",
+    "end_time": "restrict_fit_end_min (minutes)",
+    "start_time_min": "restrict_fit_start_min (minutes)",
+    "end_time_min": "restrict_fit_end_min (minutes)",
+    "end_injection": "end_injection_min (minutes)",
+    "time_resolution": "time_resolution_sec (seconds)",
+    "imported_aif_path": "import_aif_path",
+    "aif_type": "aif_curve_mode",
+    "tr": "tr_ms (milliseconds)",
+    "fa": "fa_deg (degrees)",
+}
+
 _UNSET = object()
 
 
@@ -324,8 +343,17 @@ def validate_override_keys(stage_overrides: Mapping[str, Any], *, defaults: Opti
     """Raise if a run config sets a key the defaults file does not recognise (typo guard)."""
     table = defaults if defaults is not None else load_defaults()
     unknown = sorted(k for k in stage_overrides if not table.knows(k))
-    if unknown:
+    if not unknown:
+        return
+
+    retired = [(k, REMOVED_OVERRIDE_ALIASES[k.lower()]) for k in unknown if k.lower() in REMOVED_OVERRIDE_ALIASES]
+    if retired:
+        detail = "; ".join(f"'{key}' was removed, use '{replacement}'" for key, replacement in retired)
         raise DceConfigError(
-            f"Unknown DCE preference key(s) in stage_overrides: {', '.join(unknown)}. "
+            f"Retired DCE preference key(s) in stage_overrides: {detail}. "
             f"Recognised keys are listed in {table.path}."
         )
+    raise DceConfigError(
+        f"Unknown DCE preference key(s) in stage_overrides: {', '.join(unknown)}. "
+        f"Recognised keys are listed in {table.path}."
+    )

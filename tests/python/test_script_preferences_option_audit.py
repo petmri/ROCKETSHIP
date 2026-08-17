@@ -55,19 +55,30 @@ def test_script_preferences_audit_status_values_and_new_alias_families() -> None
         assert status in allowed, f"Unexpected audit status for '{key}': {status!r}"
         assert str(item.get("python_target", "")).strip(), f"Missing python_target for '{key}'"
 
-    # Newly-wired script-level alias families should remain explicitly marked supported.
+    # Script-level options the port genuinely consumes stay marked supported.
     for key in (
         "start_t",
         "end_t",
-        "tr",
-        "fa",
-        "time_resolution",
         "auto_find_injection",
         "blood_t1",
-        "start_injection",
-        "end_injection",
-        "aif_type",
         "import_aif_path",
         "timevectyn",
     ):
         assert by_key[key]["status"] == "supported", f"Expected '{key}' to be marked supported"
+
+    # Duplicate spellings that were retired in favour of a single canonical key. The audit
+    # has to record them as dropped rather than quietly forgetting them, because these are
+    # the names a config hand-translated from run_dce_cli.m will carry.
+    for key in (
+        "tr",
+        "fa",
+        "time_resolution",
+        "start_time",
+        "end_time",
+        "start_injection",
+        "end_injection",
+        "aif_type",
+    ):
+        assert (
+            by_key[key]["status"] == "intentionally_dropped"
+        ), f"Expected '{key}' to be marked intentionally_dropped"

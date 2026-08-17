@@ -61,7 +61,7 @@ BASELINE_END_METHODS = (
 # its MATLAB alias `aif_type` are here because `_resolve_stage_b_aif_mode` treats them and
 # the top-level `aif_mode` as three spellings of one setting, with these two winning -- so a
 # table row would silently override the AIF Mode combo.
-PROMOTED_OVERRIDE_KEYS = {"steady_state_auto_method", "aif_curve_mode", "aif_type"}
+PROMOTED_OVERRIDE_KEYS = {"steady_state_auto_method", "aif_curve_mode"}
 
 # Per-item data on the value column, used to decide whether a row is an override.
 DEFAULT_TEXT_ROLE = Qt.UserRole
@@ -774,15 +774,15 @@ class DceGuiWindow(QMainWindow):
     def _set_aif_mode(self, payload: Dict[str, Any]) -> None:
         """Show the mode the run will actually use.
 
-        `stage_overrides.aif_curve_mode` / `aif_type` beat the top-level `aif_mode` in
+        `stage_overrides.aif_curve_mode` beats the top-level `aif_mode` in
         `_resolve_stage_b_aif_mode`, so a config carrying both must display the winner.
-        Collecting writes `aif_mode` only, which collapses the three spellings to one."""
+        Collecting writes `aif_mode` only, which collapses the two spellings to one."""
         overrides = payload.get("stage_overrides", {})
         mode = next(
             (
                 v
                 for k, v in overrides.items()
-                if k.strip().lower() in {"aif_curve_mode", "aif_type"} and str(v).strip()
+                if k.strip().lower() == "aif_curve_mode" and str(v).strip()
             ),
             payload.get("aif_mode", DEFAULT_AIF_MODE),
         )

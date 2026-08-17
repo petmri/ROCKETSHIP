@@ -445,7 +445,7 @@ class DcePipelineConfig:
         override_import_path = None
         for override_key, override_val in self.stage_overrides.items():
             key_lc = str(override_key).strip().lower()
-            if key_lc in {"import_aif_path", "imported_aif_path"} and str(override_val).strip():
+            if key_lc == "import_aif_path" and str(override_val).strip():
                 override_import_path = str(override_val).strip()
                 break
 
@@ -474,8 +474,7 @@ class DcePipelineConfig:
         # `aif_mode=auto` used to promote a supplied import path to imported mode on its own.
         # With `auto` gone, an unused import path would silently fall through to a fitted-ROI
         # run -- a wrong answer, not an error -- so say so instead of guessing.
-        aif_type = str(self.stage_overrides.get("aif_type", "")).strip().lower()
-        effective_aif_mode = aif_curve_mode or aif_type or self.aif_mode.strip().lower()
+        effective_aif_mode = aif_curve_mode or self.aif_mode.strip().lower()
         if (self.imported_aif_path is not None or override_import_path) and effective_aif_mode not in {
             "imported",
             "3",
@@ -630,14 +629,14 @@ def _resolve_dynamic_metadata(
             break
 
     tr_sec_raw, tr_sec_key = _explicit_stage_override(config, ("tr_sec",))
-    tr_ms_raw, tr_ms_key = _explicit_stage_override(config, ("tr_ms", "tr"))
+    tr_ms_raw, tr_ms_key = _explicit_stage_override(config, ("tr_ms",))
     time_resolution_raw, time_resolution_key = _explicit_stage_override(
-        config, ("time_resolution_sec", "time_resolution")
+        config, ("time_resolution_sec",)
     )
-    fa_raw, fa_key = _explicit_stage_override(config, ("fa_deg", "fa"))
+    fa_raw, fa_key = _explicit_stage_override(config, ("fa_deg",))
 
     if tr_sec_raw is not None and tr_ms_raw is not None:
-        raise ValueError("Specify only one of stage_overrides.tr_sec and stage_overrides.tr_ms/tr")
+        raise ValueError("Specify only one of stage_overrides.tr_sec and stage_overrides.tr_ms")
 
     manual_tr = tr_sec_raw is not None or tr_ms_raw is not None
     manual_fa = fa_raw is not None
@@ -648,12 +647,12 @@ def _resolve_dynamic_metadata(
     if metadata_source_path is None and not manual_all:
         raise ValueError(
             "DCE metadata JSON not found. Provide stage_overrides.tr_ms/tr_sec, "
-            "stage_overrides.fa_deg/fa, and stage_overrides.time_resolution_sec/time_resolution."
+            "stage_overrides.fa_deg, and stage_overrides.time_resolution_sec."
         )
     if metadata_source_path is not None and manual_any and not manual_all:
         raise ValueError(
             "Partial manual DCE metadata override is not allowed when metadata JSON is present. "
-            "Provide all of tr_ms/tr_sec + fa_deg/fa + time_resolution_sec/time_resolution, or provide none."
+            "Provide all of tr_ms/tr_sec + fa_deg + time_resolution_sec, or provide none."
         )
 
     tr_ms: Optional[float] = None
@@ -740,11 +739,9 @@ def _resolve_dynamic_metadata(
 
     if time_resolution_sec is None:
         pref_time = _stage_override_optional(config, "time_resolution_sec")
-        if not _override_value_is_set(pref_time):
-            pref_time = _stage_override_optional(config, "time_resolution")
         if _override_value_is_set(pref_time):
             time_resolution_sec = float(pref_time)
-            metadata_sources["time_resolution_sec"] = "preferences_or_stage_overrides.time_resolution[_sec]"
+            metadata_sources["time_resolution_sec"] = "preferences_or_stage_overrides.time_resolution_sec"
 
     if (
         time_resolution_sec is not None
@@ -2115,9 +2112,7 @@ def _configured_time_step_min(config: DcePipelineConfig, stage_a: Dict[str, Any]
     """
     step = _stage_override_optional(config, "time_resolution_min", stage_a.get("time_resolution_min", None))
     if step is None:
-        seconds = _stage_override_optional(
-            config, "time_resolution_sec", _stage_override_optional(config, "time_resolution")
-        )
+        seconds = _stage_override_optional(config, "time_resolution_sec")
         if seconds is None:
             return None
         step = float(seconds) / 60.0
@@ -2174,16 +2169,10 @@ def _resolve_stage_b_timer(config: DcePipelineConfig, stage_a: Dict[str, Any], n
 
 
 def _resolve_stage_b_limits(config: DcePipelineConfig) -> Tuple[float, float]:
-    # `start_time`/`end_time` are the MATLAB script aliases of the `_min` keys. Both spellings
-    # carry a defaults-file value, so an explicitly set alias has to be consulted before the
-    # file is, or setting `start_time` alone would silently resolve to the file's
-    # `start_time_min` instead.
-    start_raw, _ = _explicit_stage_override(config, ("start_time_min", "start_time"))
-    end_raw, _ = _explicit_stage_override(config, ("end_time_min", "end_time"))
-    start_time = float(
-        start_raw if start_raw is not None else _stage_override(config, "start_time_min")
-    )
-    end_time = float(end_raw if end_raw is not None else _stage_override(config, "end_time_min"))
+    # Minutes on the timer axis, not frame indices: these restrict the curve window Stage B
+    # fits, and unlike `start_t`/`end_t` they do not discard data or move the baseline.
+    start_time = float(_stage_override(config, "restrict_fit_start_min"))
+    end_time = float(_stage_override(config, "restrict_fit_end_min"))
     return start_time, end_time
 
 
@@ -2199,11 +2188,10 @@ def _restrict_timer_window(timer: np.ndarray, start_time: float, end_time: float
 
 
 def _resolve_stage_b_aif_mode(config: DcePipelineConfig) -> str:
-    # `aif_curve_mode`, the MATLAB script alias `aif_type`, and `config.aif_mode` are three
-    # spellings of one setting. Every explicit source is consulted before the defaults file:
-    # `aif_curve_mode` always has a defaults-file value now, so reading it first would mask
-    # an `aif_type` or `config.aif_mode` the caller actually set.
-    mode_raw, _ = _explicit_stage_override(config, ("aif_curve_mode", "aif_type"))
+    # `aif_curve_mode` and `config.aif_mode` are two spellings of one setting. An explicitly
+    # set override is consulted before the defaults file: `aif_curve_mode` always has a
+    # defaults-file value, so reading it first would mask a `config.aif_mode` the caller set.
+    mode_raw, _ = _explicit_stage_override(config, ("aif_curve_mode",))
     if mode_raw is None or str(mode_raw).strip() == "":
         mode_raw = config.aif_mode
     if mode_raw is None or str(mode_raw).strip() == "":
@@ -2225,9 +2213,7 @@ def _resolve_stage_b_aif_mode(config: DcePipelineConfig) -> str:
 def _resolve_imported_aif_path(config: DcePipelineConfig) -> Optional[Path]:
     if config.imported_aif_path is not None:
         return config.imported_aif_path.expanduser().resolve()
-    path_val = _stage_override_optional(
-        config, "import_aif_path", _stage_override_optional(config, "imported_aif_path")
-    )
+    path_val = _stage_override_optional(config, "import_aif_path")
     if path_val is None:
         return None
     path_text = str(path_val).strip()
@@ -2263,9 +2249,7 @@ def _resolve_stage_b_injection_window(
                 "sidecar's SteadyStateEndTimeIndex, or steady_state_auto_method) instead."
             )
 
-    end_override = _stage_override_optional(
-        config, "end_injection_min", _stage_override_optional(config, "end_injection")
-    )
+    end_override = _stage_override_optional(config, "end_injection_min")
     end_override_is_set = _override_value_is_set(end_override)
 
     # MATLAB CLI parity: auto_find_injection=1 enforces Stage-A auto timing.
@@ -3038,8 +3022,8 @@ def _run_stage_b_real(config: DcePipelineConfig, stage_a: Dict[str, Any]) -> Dic
         raise ValueError("Stage-A arrays Cp/Ct/Stlv/Sttum must have matching time dimension")
 
     timer_full = _resolve_stage_b_timer(config, stage_a, n_time)
-    start_time_min, end_time_min = _resolve_stage_b_limits(config)
-    start_idx, end_idx = _restrict_timer_window(timer_full, start_time_min, end_time_min)
+    restrict_fit_start_min, restrict_fit_end_min = _resolve_stage_b_limits(config)
+    start_idx, end_idx = _restrict_timer_window(timer_full, restrict_fit_start_min, restrict_fit_end_min)
     timer = timer_full[start_idx:end_idx]
 
     cp = cp_all[start_idx:end_idx, :]
