@@ -111,7 +111,7 @@ def _make_config(tmp_dir: Path) -> DcePipelineConfig:
         backend="auto",
         checkpoint_dir=tmp_dir / "checkpoints",
         write_xls=True,
-        aif_mode="auto",
+        aif_mode="fitted",
         dynamic_files=[dynamic_file],
         aif_files=[aif_file],
         roi_files=[],
@@ -668,6 +668,26 @@ class TestDcePipeline:
                 "import_aif_path": str(Path(tmp) / "imported_alias.npz"),
             }
             config.validate()
+
+    def test_validate_rejects_the_removed_auto_aif_mode(self) -> None:
+        """`auto` was dropped: it read as "auto-find an AIF ROI", which it never did."""
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            config.aif_mode = "auto"
+
+            with pytest.raises(ValueError, match=r"Unsupported aif_mode 'auto'"):
+                config.validate()
+
+    def test_validate_rejects_an_import_path_the_mode_would_ignore(self) -> None:
+        """`auto` used to promote a supplied import path to imported mode. Without it, an
+        unused path would silently produce a fitted-ROI run instead of the imported one."""
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            config.aif_mode = "fitted"
+            config.imported_aif_path = Path(tmp) / "imported.npz"
+
+            with pytest.raises(ValueError, match=r"imported AIF path is set but aif_mode is 'fitted'"):
+                config.validate()
 
     def test_backend_auto_falls_back_to_cpu_when_gpufit_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1516,7 +1536,7 @@ class TestDcePipeline:
 
             # Exercise script-style aliases without using top-level imported_aif_path.
             config.imported_aif_path = None
-            config.aif_mode = "auto"
+            config.aif_mode = "fitted"
             config.stage_overrides = {
                 "relaxivity": 3.6,
                 "stage_b_mode": "real",

@@ -186,7 +186,7 @@ def _build_session_config(
         "checkpoint_dir": str(output_dir / "checkpoints") if enable_checkpoints else None,
         "backend": backend,
         "write_xls": True,
-        "aif_mode": "auto",
+        "aif_mode": "fitted",
         "dynamic_files": [],
         "aif_files": [],
         "roi_files": [],

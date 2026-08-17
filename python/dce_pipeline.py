@@ -44,7 +44,7 @@ from dce_models import (
 )
 
 
-ALLOWED_AIF_MODES = {"auto", "fitted", "raw", "imported"}
+ALLOWED_AIF_MODES = {"fitted", "raw", "imported"}
 ALLOWED_STAGE_A_MODES = {"real", "scaffold"}
 ALLOWED_STAGE_B_MODES = {"real", "scaffold", "auto"}
 ALLOWED_STAGE_D_MODES = {"real", "scaffold", "auto"}
@@ -396,7 +396,7 @@ class DcePipelineConfig:
     backend: str = "auto"
     checkpoint_dir: Optional[Path] = None
     write_xls: bool = True
-    aif_mode: str = "auto"
+    aif_mode: str = "fitted"
     imported_aif_path: Optional[Path] = None
     dynamic_files: List[Path] = field(default_factory=list)
     aif_files: List[Path] = field(default_factory=list)
@@ -418,7 +418,7 @@ class DcePipelineConfig:
             if data.get("checkpoint_dir")
             else None,
             write_xls=bool(data.get("write_xls", True)),
-            aif_mode=str(data.get("aif_mode", "auto")),
+            aif_mode=str(data.get("aif_mode", "fitted")),
             imported_aif_path=Path(data["imported_aif_path"]).expanduser().resolve()
             if data.get("imported_aif_path")
             else None,
@@ -471,6 +471,20 @@ class DcePipelineConfig:
             )
         if aif_curve_mode == "imported" and self.imported_aif_path is None and not override_import_path:
             raise ValueError("stage_overrides.aif_curve_mode=imported requires imported_aif_path")
+        # `aif_mode=auto` used to promote a supplied import path to imported mode on its own.
+        # With `auto` gone, an unused import path would silently fall through to a fitted-ROI
+        # run -- a wrong answer, not an error -- so say so instead of guessing.
+        aif_type = str(self.stage_overrides.get("aif_type", "")).strip().lower()
+        effective_aif_mode = aif_curve_mode or aif_type or self.aif_mode.strip().lower()
+        if (self.imported_aif_path is not None or override_import_path) and effective_aif_mode not in {
+            "imported",
+            "3",
+            "import",
+        }:
+            raise ValueError(
+                f"An imported AIF path is set but aif_mode is '{effective_aif_mode}'. "
+                "Set aif_mode=imported to use it, or remove the path."
+            )
         if _override_value_is_set(self.stage_overrides.get("aif_biexp_timing_method", None)):
             raise ValueError(
                 "stage_overrides.aif_biexp_timing_method was removed. The Stage-B AIF fit now "
@@ -2175,8 +2189,6 @@ def _resolve_stage_b_aif_mode(config: DcePipelineConfig) -> str:
         mode = "raw"
     elif mode in {"3", "import", "imported"}:
         mode = "imported"
-    if mode == "auto":
-        mode = "imported" if _resolve_imported_aif_path(config) is not None else "fitted"
     if mode not in {"fitted", "raw", "imported"}:
         raise ValueError(f"Unsupported Stage-B AIF mode '{mode}'")
     if mode == "imported" and _resolve_imported_aif_path(config) is None:
@@ -2613,7 +2625,7 @@ def _fit_aif_biexp(
     max_nfev = int(_safe_float(_stage_override(config, "aif_MaxFunEvals"), aif_maxiter))
     aif_tol_fun = max(_safe_float(_stage_override(config, "aif_TolFun"), 1e-20), np.finfo(np.float64).eps)
     aif_tol_x = max(_safe_float(_stage_override(config, "aif_TolX"), 1e-23), np.finfo(np.float64).eps)
-    # Default matches dce_preferences.txt / dce_default.json. `Bisquare` was the default while
+    # Default matches dce_preferences.txt / dce_defaults.json. `Bisquare` was the default while
     # the peak prior was the only guard against a noise-inflated peak; measured across 265
     # sessions it made the production fit worse, not better -- adjusted R² mean 0.882 against
     # 0.944 with it off, 106 sessions below 0.90 against 30, and a worst case of -1.46 (a fit

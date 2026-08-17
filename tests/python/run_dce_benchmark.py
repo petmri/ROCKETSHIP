@@ -524,7 +524,7 @@ def _python_config_payload(
         # D_fit_voxels_func writes no ROI table. Leaving this on makes Python do an extra
         # whole-brain average-then-fit that the MATLAB side never runs.
         "write_xls": False,
-        "aif_mode": "auto",
+        "aif_mode": "fitted",
         "dynamic_files": [str(files["dynamic"])],
         "aif_files": [str(files["aif"])],
         "roi_files": [str(files["roi"])],

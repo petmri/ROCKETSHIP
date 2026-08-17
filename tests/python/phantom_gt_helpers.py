@@ -230,7 +230,7 @@ def _run_dce_for_phantom_session(
             "checkpoint_dir": str(output_dir / "checkpoints"),
             "backend": str(backend),
             "write_xls": False,
-            "aif_mode": "auto",
+            "aif_mode": "fitted",
             "dynamic_files": [str(dynamic)],
             "aif_files": [str(aif_path)],
             "roi_files": [str(roi)],

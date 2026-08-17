@@ -5,7 +5,7 @@
   "checkpoint_dir": "./out/dce_cli/checkpoints",
   "backend": "auto",
   "write_xls": true,
-  "aif_mode": "auto",
+  "aif_mode": "fitted",
   "dynamic_files": [
     "/ABS/PATH/TO/BIDS_example/derivatives/sub-01/ses-01/dce/sub-01_ses-01_desc-bfcz_DCE.nii.gz"
   ],

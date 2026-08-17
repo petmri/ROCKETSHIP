@@ -65,7 +65,9 @@ mid-study, so it stays. New Python work gets the hard stop.
   - `cpu`: force pure CPU fitting path (no acceleration backend)
   - `gpufit`: require `pygpufit` import; CUDA is used when available, otherwise fallback path
 - `write_xls`: write ROI spreadsheet output
-- `aif_mode`: `auto|fitted|raw|imported`
+- `aif_mode`: `fitted|raw|imported` — where the AIF curve comes from and how it is treated.
+  `fitted` and `raw` both take the curve from the AIF ROI mask, fitting a biexponential or
+  not; `imported` loads a curve from `imported_aif_path` and never fits it.
 - `imported_aif_path`: used when imported AIF mode is selected
 - `dynamic_files`: dynamic DCE NIfTI list
 - `aif_files`: AIF ROI/mask files
