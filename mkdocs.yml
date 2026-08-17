@@ -3,6 +3,13 @@ site_url: https://petmri.github.io/ROCKETSHIP/
 repo_url: https://github.com/petmri/ROCKETSHIP
 repo_name: petmri/ROCKETSHIP
 docs_dir: docs
+# Archived project notes are kept for reference, not publication. They link freely to source
+# files outside `docs/`, which `mkdocs build --strict` rejects as broken -- the CI failure
+# these caused was in retired notes nobody reads on the site. Excluding the directory keeps
+# the strict build honest about the pages that are actually published, and means archiving a
+# project no longer means fixing up its links first.
+exclude_docs: |
+  project-management/projects/archived/
 theme:
   name: material
   features:
@@ -27,12 +34,9 @@ nav:
       - Enable GPU Acceleration: wiki/enable-gpu-acceleration.md
   - Technical Reference:
       - DCE Options: dce_options.md
-      - Script Preferences Option Audit: project-management/projects/script-preferences-audit/script_preferences_option_audit.md
   - Project Management:
       - Overview: project-management/README.md
       - TODO: project-management/TODO.md
       - Completed: project-management/COMPLETED.md
       - Roadmap: project-management/ROADMAP.md
-      - Batch Parity: project-management/projects/archived/batch-parity/batch_parity.md
-      - OSIPI Verification: project-management/projects/archived/osipi-verification/osipi_summary.md
       - Phantom GT Status: project-management/projects/phantom-gt/PHANTOM_GT_QUALIFICATION_STATUS.md

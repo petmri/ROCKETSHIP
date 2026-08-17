@@ -95,6 +95,12 @@ Larger feature requests should be logged in `docs/project-management/projects/fe
       action — already verified by regenerating it and passing `check_baseline_drift.py`. Full
       measurement archived under 2026-08-12 in `COMPLETED.md`.
 - [ ] For install_python_acceleration.py. Remove "python" from the name as it installs acceleration for matlab too. Second, when it doesn't detect matlab have it print a warning, but continue and complete successfully. Don't make the user re-run with --skip-matlab
+-[ ] Redo the python terminal outputs so they are user readable. Make shorter, format properly. 
+- [ ] Decide the fate of the MATLAB `script_preferences.txt` options the port has never ruled
+      on either way: `drift_files`, `drift_global`, `aif_rr_type`, `fxl_rr`, `injection_time`,
+      `force_use_default_relaxivity`, `nested`, `xy_smooth_size`, `roi_list`, `fit_voxels`.
+      Each needs porting or an explicit decision not to. Carried over from the script
+      preferences audit, retired 2026-08-16 — it was the only record that these are open.
 
 ## External Accelerator Handoff (Open Items Only)
 
