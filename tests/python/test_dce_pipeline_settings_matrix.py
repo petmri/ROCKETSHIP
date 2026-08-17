@@ -52,14 +52,18 @@ def _load_meta(root: Path) -> dict:
     return json.loads(_tiny_paths(root)["meta"].read_text())
 
 
-def _make_config(root: Path, output_dir: Path, extra_overrides: dict | None = None) -> DcePipelineConfig:
+def _make_config(
+    root: Path,
+    output_dir: Path,
+    extra_overrides: dict | None = None,
+    aif_mode: str = "fitted",
+) -> DcePipelineConfig:
     meta = _load_meta(root)
     overrides = {
         "rootname": "Dyn-1",
         "stage_a_mode": "real",
         "stage_b_mode": "real",
         "stage_d_mode": "real",
-        "aif_curve_mode": "fitted",
         "tr_ms": float(meta["tr_ms"]),
         "fa_deg": float(meta["fa_deg"]),
         "time_resolution_sec": float(meta["time_resolution_sec"]),
@@ -84,6 +88,7 @@ def _make_config(root: Path, output_dir: Path, extra_overrides: dict | None = No
         subject_tp_path=paths["tp"],
         output_dir=output_dir,
         backend="cpu",
+        aif_mode=aif_mode,
         checkpoint_dir=output_dir / "checkpoints",
         write_xls=False,
         dynamic_files=[paths["dynamic"]],
@@ -303,10 +308,10 @@ def test_raw_aif_mode_with_an_explicit_injection_end(tiny_root: Path) -> None:
             tiny_root,
             Path(tmp) / "raw_aif",
             {
-                "aif_curve_mode": "raw",
                 "steady_state_end": 4,
                 "end_injection_min": 1.05,
             },
+            aif_mode="raw",
         )
 
         stage_a = _run_stage_a_real(config)
@@ -336,8 +341,8 @@ def test_script_level_timevectyn_controls_timevectpath(tiny_root: Path) -> None:
             {
                 "timevectpath": str(timer_file),
                 "timevectyn": 1,
-                "aif_curve_mode": "raw",
             },
+            aif_mode="raw",
         )
         stage_a_enabled = _run_stage_a_real(config_enabled)
         stage_b_enabled = _run_stage_b_real(config_enabled, stage_a_enabled)
@@ -349,8 +354,8 @@ def test_script_level_timevectyn_controls_timevectpath(tiny_root: Path) -> None:
             {
                 "timevectpath": str(timer_file),
                 "timevectyn": 0,
-                "aif_curve_mode": "raw",
             },
+            aif_mode="raw",
         )
         stage_a_disabled = _run_stage_a_real(config_disabled)
         stage_b_disabled = _run_stage_b_real(config_disabled, stage_a_disabled)

@@ -511,13 +511,13 @@ def _python_config_payload(
         "stage_a_mode": "real",
         "stage_b_mode": "real",
         "stage_d_mode": "real",
-        "aif_curve_mode": "fitted",
     }
     stage_overrides.update(shared_overrides)
     return {
         "subject_source_path": str(source_root),
         "subject_tp_path": str(tp_root),
         "output_dir": str(output_dir),
+        "aif_mode": "fitted",
         "checkpoint_dir": str(checkpoint_dir) if checkpoint_dir else None,
         "backend": backend,
         # False to match MATLAB: script_preferences.txt leaves roi_list empty, so

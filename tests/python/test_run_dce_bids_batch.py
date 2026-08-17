@@ -56,7 +56,7 @@ def test_batch_config_strips_template_injection_windows_by_default() -> None:
                 "stage_overrides": {
                     "start_injection_min": 1.056,
                     "end_injection_min": 1.584,
-                    "aif_curve_mode": "fitted",
+                    "steady_state_auto_method": "tv",
                 }
             },
             set_overrides={},
@@ -65,7 +65,7 @@ def test_batch_config_strips_template_injection_windows_by_default() -> None:
         keys = {str(k).strip().lower() for k in config.stage_overrides}
         assert "start_injection_min" not in keys
         assert "end_injection_min" not in keys
-        assert config.stage_overrides.get("aif_curve_mode") == "fitted"
+        assert config.stage_overrides.get("steady_state_auto_method") == "tv"
 
 
 def test_batch_config_keeps_injection_windows_when_explicitly_set() -> None:

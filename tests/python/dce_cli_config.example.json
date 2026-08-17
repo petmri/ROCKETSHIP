@@ -35,7 +35,6 @@
     "stage_a_mode": "real",
     "stage_b_mode": "real",
     "stage_d_mode": "real",
-    "aif_curve_mode": "fitted",
     "time_smoothing": "none",
     "time_smoothing_window": 0,
     "write_postfit_arrays": false,

@@ -464,24 +464,12 @@ class DcePipelineConfig:
         stage_d_mode = str(self.stage_overrides.get("stage_d_mode", "auto")).strip().lower()
         if stage_d_mode not in ALLOWED_STAGE_D_MODES:
             raise ValueError(f"Unsupported stage_d_mode '{stage_d_mode}'. Allowed: {sorted(ALLOWED_STAGE_D_MODES)}")
-        aif_curve_mode = str(self.stage_overrides.get("aif_curve_mode", "")).strip().lower()
-        if aif_curve_mode and aif_curve_mode not in ALLOWED_AIF_MODES:
-            raise ValueError(
-                f"Unsupported stage_overrides.aif_curve_mode '{aif_curve_mode}'. Allowed: {sorted(ALLOWED_AIF_MODES)}"
-            )
-        if aif_curve_mode == "imported" and self.imported_aif_path is None and not override_import_path:
-            raise ValueError("stage_overrides.aif_curve_mode=imported requires imported_aif_path")
         # `aif_mode=auto` used to promote a supplied import path to imported mode on its own.
         # With `auto` gone, an unused import path would silently fall through to a fitted-ROI
         # run -- a wrong answer, not an error -- so say so instead of guessing.
-        effective_aif_mode = aif_curve_mode or self.aif_mode.strip().lower()
-        if (self.imported_aif_path is not None or override_import_path) and effective_aif_mode not in {
-            "imported",
-            "3",
-            "import",
-        }:
+        if (self.imported_aif_path is not None or override_import_path) and mode != "imported":
             raise ValueError(
-                f"An imported AIF path is set but aif_mode is '{effective_aif_mode}'. "
+                f"An imported AIF path is set but aif_mode is '{mode}'. "
                 "Set aif_mode=imported to use it, or remove the path."
             )
         if _override_value_is_set(self.stage_overrides.get("aif_biexp_timing_method", None)):
@@ -2187,15 +2175,10 @@ def _restrict_timer_window(timer: np.ndarray, start_time: float, end_time: float
 
 
 def _resolve_stage_b_aif_mode(config: DcePipelineConfig) -> str:
-    # `aif_curve_mode` and `config.aif_mode` are two spellings of one setting. An explicitly
-    # set override is consulted before the defaults file: `aif_curve_mode` always has a
-    # defaults-file value, so reading it first would mask a `config.aif_mode` the caller set.
-    mode_raw, _ = _explicit_stage_override(config, ("aif_curve_mode",))
-    if mode_raw is None or str(mode_raw).strip() == "":
-        mode_raw = config.aif_mode
-    if mode_raw is None or str(mode_raw).strip() == "":
-        mode_raw = _stage_override(config, "aif_curve_mode")
-    mode = str(mode_raw).strip().lower()
+    # One setting, one place: the top-level `aif_mode` config field. It used to also be
+    # settable as `stage_overrides.aif_curve_mode`, which outranked it, so a config carrying
+    # both ran the override and left the visible field reading as dead text.
+    mode = str(config.aif_mode).strip().lower()
     if mode in {"1", "fitted", "fit"}:
         mode = "fitted"
     elif mode in {"2", "raw"}:

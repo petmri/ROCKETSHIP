@@ -1445,7 +1445,8 @@ class TestDcePipeline:
     def test_stage_b_real_raw_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))
-            config.stage_overrides = {"stage_b_mode": "real", "aif_curve_mode": "raw"}
+            config.aif_mode = "raw"
+            config.stage_overrides = {"stage_b_mode": "real"}
             stage_a = _make_stage_a_payload()
 
             result = _run_stage_b_real(config, stage_a)
@@ -1457,10 +1458,10 @@ class TestDcePipeline:
     def test_stage_b_real_fitted_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))
+            config.aif_mode = "fitted"
             config.stage_overrides = {
                 "relaxivity": 3.6,
                 "stage_b_mode": "real",
-                "aif_curve_mode": "fitted",
                 "restrict_fit_start_min": 0.0,
                 "restrict_fit_end_min": 0.0,
                 "aif_MaxFunEvals": 4000,
@@ -1486,10 +1487,10 @@ class TestDcePipeline:
     def test_stage_b_real_prefers_stage_a_auto_injection_minutes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))
+            config.aif_mode = "raw"
             config.stage_overrides = {
                 "relaxivity": 3.6,
                 "stage_b_mode": "real",
-                "aif_curve_mode": "raw",
             }
             stage_a = _make_stage_a_payload()
             stage_a["start_injection_min_auto"] = 0.62
@@ -1502,10 +1503,10 @@ class TestDcePipeline:
     def test_stage_b_real_auto_find_injection_overrides_manual_window(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))
+            config.aif_mode = "raw"
             config.stage_overrides = {
                 "relaxivity": 3.6,
                 "stage_b_mode": "real",
-                "aif_curve_mode": "raw",
                 "auto_find_injection": 1,
                 "end_injection_min": 0.30,
             }
@@ -1521,10 +1522,10 @@ class TestDcePipeline:
         for key in ("start_injection_min", "start_injection"):
             with tempfile.TemporaryDirectory() as tmp:
                 config = _make_config(Path(tmp))
+                config.aif_mode = "raw"
                 config.stage_overrides = {
                     "relaxivity": 3.6,
                     "stage_b_mode": "real",
-                    "aif_curve_mode": "raw",
                     key: 0.20,
                 }
                 stage_a = _make_stage_a_payload()
@@ -1577,11 +1578,10 @@ class TestDcePipeline:
             # Drive imported mode purely from stage_overrides, without the top-level
             # imported_aif_path field.
             config.imported_aif_path = None
-            config.aif_mode = "fitted"
+            config.aif_mode = "imported"
             config.stage_overrides = {
                 "relaxivity": 3.6,
                 "stage_b_mode": "real",
-                "aif_curve_mode": "imported",
                 "import_aif_path": str(imported_path),
             }
 
@@ -1597,11 +1597,11 @@ class TestDcePipeline:
             roi_path = config.subject_tp_path / "roi_mask_for_d.nii.gz"
             roi_path.write_text("")
             config.roi_files = [roi_path]
+            config.aif_mode = "raw"
             config.stage_overrides = {
                 "relaxivity": 3.6,
                 "stage_b_mode": "real",
                 "stage_d_mode": "real",
-                "aif_curve_mode": "raw",
                 "write_param_maps": True,
             }
             config.model_flags = {"tofts": 1, "patlak": 1}
@@ -1637,11 +1637,11 @@ class TestDcePipeline:
             roi_path = config.subject_tp_path / "roi_mask_for_part_e.nii.gz"
             roi_path.write_text("")
             config.roi_files = [roi_path]
+            config.aif_mode = "raw"
             config.stage_overrides = {
                 "relaxivity": 3.6,
                 "stage_b_mode": "real",
                 "stage_d_mode": "real",
-                "aif_curve_mode": "raw",
                 "write_param_maps": True,
                 "write_postfit_arrays": True,
             }
@@ -1685,12 +1685,12 @@ class TestDcePipeline:
             roi_file.write_text("")
             config.roi_files = [roi_file]
             config.model_flags = {"tofts": 1, "patlak": 1}
+            config.aif_mode = "raw"
             config.stage_overrides = {
                 "relaxivity": 3.6,
                 "stage_a_mode": "real",
                 "stage_b_mode": "real",
                 "stage_d_mode": "real",
-                "aif_curve_mode": "raw",
                 "tr_ms": 5.0,
                 "fa_deg": 15.0,
                 "time_resolution_sec": 5.0,

@@ -172,7 +172,9 @@ mid-study, so it stays. New Python work gets the hard stop.
 - `snr_filter`
 
 ### Stage B AIF fit
-- `aif_curve_mode`: `fitted|raw|imported`
+- The AIF curve mode is the top-level `aif_mode` field, not a stage override -- see the
+  Core section above. It used to also be settable as `stage_overrides.aif_curve_mode`,
+  which silently outranked it.
 - Imported AIF path override: `import_aif_path`
 - `aif_lower_limits`: 4 values `[A,B,c,d]`
 - `aif_upper_limits`: 4 values `[A,B,c,d]`

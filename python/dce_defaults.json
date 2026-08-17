@@ -113,7 +113,6 @@
     "voxel_Robust_tissue_uptake": "Robust mode for tissue_uptake; absent = use voxel_Robust."
   },
   "defaults": {
-    "aif_curve_mode": "fitted",
     "aif_initial_values": [
       1,
       1,

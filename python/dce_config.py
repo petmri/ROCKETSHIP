@@ -41,7 +41,8 @@ REMOVED_OVERRIDE_ALIASES: Dict[str, str] = {
     "end_injection": "end_injection_min (minutes)",
     "time_resolution": "time_resolution_sec (seconds)",
     "imported_aif_path": "import_aif_path",
-    "aif_type": "aif_curve_mode",
+    "aif_type": "aif_mode (top-level config field, not a stage override)",
+    "aif_curve_mode": "aif_mode (top-level config field, not a stage override)",
     "tr": "tr_ms (milliseconds)",
     "fa": "fa_deg (degrees)",
     # Second units for a quantity that only needs one. Convert the number yourself; the

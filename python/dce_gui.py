@@ -57,11 +57,9 @@ BASELINE_END_METHODS = (
 )
 
 # stage_overrides keys that have a dedicated Core Settings widget. They are kept out of the
-# Advanced table so one key never has two controls that can disagree. `aif_curve_mode` and
-# its MATLAB alias `aif_type` are here because `_resolve_stage_b_aif_mode` treats them and
-# the top-level `aif_mode` as three spellings of one setting, with these two winning -- so a
-# table row would silently override the AIF Mode combo.
-PROMOTED_OVERRIDE_KEYS = {"steady_state_auto_method", "aif_curve_mode"}
+# Advanced table so one key never has two controls that can disagree. The AIF mode is not
+# listed: it is no longer a stage override at all, just the top-level `aif_mode` field.
+PROMOTED_OVERRIDE_KEYS = {"steady_state_auto_method"}
 
 # Per-item data on the value column, used to decide whether a row is an override.
 DEFAULT_TEXT_ROLE = Qt.UserRole
@@ -772,21 +770,8 @@ class DceGuiWindow(QMainWindow):
         )
 
     def _set_aif_mode(self, payload: Dict[str, Any]) -> None:
-        """Show the mode the run will actually use.
-
-        `stage_overrides.aif_curve_mode` beats the top-level `aif_mode` in
-        `_resolve_stage_b_aif_mode`, so a config carrying both must display the winner.
-        Collecting writes `aif_mode` only, which collapses the two spellings to one."""
-        overrides = payload.get("stage_overrides", {})
-        mode = next(
-            (
-                v
-                for k, v in overrides.items()
-                if k.strip().lower() == "aif_curve_mode" and str(v).strip()
-            ),
-            payload.get("aif_mode", DEFAULT_AIF_MODE),
-        )
-        text = str(mode).strip().lower()
+        """Show the mode the run will use, tolerating the numeric MATLAB spellings."""
+        text = str(payload.get("aif_mode", DEFAULT_AIF_MODE)).strip().lower()
         text = {"1": "fitted", "fit": "fitted", "2": "raw", "3": "imported", "import": "imported"}.get(text, text)
         if self.aif_mode_combo.findText(text) >= 0:
             self.aif_mode_combo.setCurrentText(text)

@@ -212,9 +212,9 @@
     },
     {
       "key": "aif_type",
-      "python_target": "stage_overrides.aif_curve_mode",
+      "python_target": "aif_mode (top-level config field)",
       "status": "intentionally_dropped",
-      "notes": "Retired as a duplicate spelling; use aif_curve_mode. Setting the old name now raises from validate_override_keys with the replacement named."
+      "notes": "Retired as a duplicate spelling; use the top-level aif_mode field. Setting the old name now raises from validate_override_keys with the replacement named."
     },
     {
       "key": "import_aif_path",

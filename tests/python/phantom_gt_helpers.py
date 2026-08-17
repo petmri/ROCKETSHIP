@@ -203,7 +203,6 @@ def _run_dce_for_phantom_session(
         "stage_a_mode": "real",
         "stage_b_mode": "real",
         "stage_d_mode": "real",
-        "aif_curve_mode": "raw",
         "write_param_maps": True,
         "write_postfit_arrays": False,
     }
@@ -230,7 +229,7 @@ def _run_dce_for_phantom_session(
             "checkpoint_dir": str(output_dir / "checkpoints"),
             "backend": str(backend),
             "write_xls": False,
-            "aif_mode": "fitted",
+            "aif_mode": "raw",
             "dynamic_files": [str(dynamic)],
             "aif_files": [str(aif_path)],
             "roi_files": [str(roi)],

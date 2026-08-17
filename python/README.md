@@ -207,7 +207,6 @@ Example: BIDS-native run with config template:
   --pipeline-folder dceprep \
   --config-template python/dceprep_run_example.json \
   --set blood_t1_ms=1600 \
-  --set aif_curve_mode=fitted \
   --backend auto
 ```
 
