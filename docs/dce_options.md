@@ -117,6 +117,13 @@ mid-study, so it stays. New Python work gets the hard stop.
   documented way to get a fixed/reproducible run without disabling auto-detection for
   everyone else; used when `steady_state_end` is not set, and takes precedence over
   `steady_state_auto_method`.
+  - **The index counts acquired frames, before `start_t`/`end_t` trimming.** The sidecar
+    describes the file on disk, so the pinned frame stays the same physical timepoint no
+    matter how the analysis window is set; the pipeline subtracts the trim internally. If
+    `start_t` advances past the pinned frame the run stops, because the window has removed
+    the entire baseline.
+  - `steady_state_end` is *not* adjusted this way: it lives in the same run config as
+    `start_t`, so it is applied to the analysed (post-trim) series.
 - `steady_state_auto_method`: automatic baseline-end detector, used only when neither
   `steady_state_end` nor the AIF sidecar's `SteadyStateEndTimeIndex` is set
   - `legacy_sobel`: MATLAB `dce_auto_aif`-style global-signal Sobel/line-fit heuristic

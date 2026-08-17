@@ -1456,7 +1456,15 @@ def _resolve_baseline_window(
     config: DcePipelineConfig,
     n_timepoints: int,
     stlv: Optional[np.ndarray] = None,
+    window_start_0b: int = 0,
 ) -> Tuple[int, int, Dict[str, Any]]:
+    """Resolve the baseline (pre-contrast) frame window.
+
+    `n_timepoints` and the returned indices are in *analysed* coordinates -- i.e. after
+    Stage A has trimmed the series with `start_t`/`end_t`. `window_start_0b` is how many
+    frames that trim removed from the front, which the AIF sidecar's index has to be
+    corrected by (see below).
+    """
     sentinel = object()
     start_raw = _stage_override(config, "steady_state_start")
     end_raw = _stage_override_optional(config, "steady_state_end", sentinel)
@@ -1477,7 +1485,18 @@ def _resolve_baseline_window(
         end_1b = int(end_raw)
         end_source = "steady_state_end"
     elif sidecar_end_1b is not None:
-        end_1b = int(sidecar_end_1b)
+        # The sidecar describes the acquired series, so its index counts from the first
+        # acquired frame -- not from the first frame Stage A kept. Subtract the trim, or the
+        # pinned frame would slide every time `start_t` changed, which is the opposite of the
+        # fixed, reproducible baseline this mechanism exists to provide.
+        end_1b = int(sidecar_end_1b) - int(window_start_0b)
+        if end_1b < 1:
+            raise ValueError(
+                f"AIF sidecar SteadyStateEndTimeIndex={int(sidecar_end_1b)} is before the "
+                f"first analysed frame (start_t={int(window_start_0b) + 1}), so the timepoint "
+                f"window trims away the whole baseline. Lower start_t, or repin the sidecar "
+                f"(the index counts acquired frames, before trimming). Sidecar: {sidecar_path}"
+            )
         used_method = "aif_sidecar"
         end_source = f"aif_sidecar:SteadyStateEndTimeIndex:{sidecar_path}"
     else:
@@ -1515,6 +1534,11 @@ def _resolve_baseline_window(
         "end_1b": int(end_1b),
         "source": end_source,
     }
+    if sidecar_end_1b is not None:
+        # Both coordinate systems, so a run log shows what the sidecar said as well as
+        # where that landed once the timepoint window was applied.
+        info["aif_sidecar_end_1b_acquired"] = int(sidecar_end_1b)
+        info["window_start_0b"] = int(window_start_0b)
     if auto_details is not None:
         info["auto_details"] = auto_details
     return start_1b - 1, end_1b, info
@@ -1874,7 +1898,9 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     if not (0.0 <= hematocrit < 1.0):
         raise ValueError(f"hematocrit must be in [0, 1), got {hematocrit}")
 
-    ss_start, ss_end, baseline_info = _resolve_baseline_window(config, n_time, stlv=stlv)
+    ss_start, ss_end, baseline_info = _resolve_baseline_window(
+        config, n_time, stlv=stlv, window_start_0b=time_start_0b
+    )
     baseline_slice = slice(ss_start, ss_end)
 
     # AIF path to R1

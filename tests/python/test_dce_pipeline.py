@@ -490,6 +490,46 @@ class TestDcePipeline:
             assert info["method_used"] == "manual"
             assert info["source"] == "steady_state_end"
 
+    def _config_with_aif_sidecar(self, tmp: Path, end_time_index: int):
+        """Config whose AIF file has a sidecar pinning the baseline end."""
+        config = _make_config(tmp)
+        aif = tmp / "sub-01_ses-01_label-AIF_T1map.nii"
+        aif.write_text("")
+        aif.with_suffix(".json").write_text(json.dumps({"SteadyStateEndTimeIndex": end_time_index}))
+        config.aif_files = [aif]
+        config.stage_overrides = {"relaxivity": 3.6, "stage_a_mode": "scaffold"}
+        return config
+
+    def test_aif_sidecar_baseline_end_is_corrected_for_the_timepoint_trim(self) -> None:
+        """The sidecar indexes acquired frames, so `start_t` must not move the pinned frame.
+
+        Stage A hands `_resolve_baseline_window` an already-trimmed series; reading the
+        sidecar in those coordinates made the pinned frame slide by the trim amount."""
+        with tempfile.TemporaryDirectory() as tmp:
+            config = self._config_with_aif_sidecar(Path(tmp), end_time_index=4)
+            stlv = np.full((24, 2), 100.0, dtype=np.float64)
+
+            # Untrimmed: acquired frame 4 is analysed frame 4.
+            _, ss_end, info = _resolve_baseline_window(config, 24, stlv=stlv, window_start_0b=0)
+            assert ss_end == 4
+            assert info["method_used"] == "aif_sidecar"
+            assert info["aif_sidecar_end_1b_acquired"] == 4
+
+            # start_t=3 drops two frames, so the same acquired frame is analysed frame 2.
+            _, ss_end_trimmed, info_trimmed = _resolve_baseline_window(
+                config, 22, stlv=stlv[2:], window_start_0b=2
+            )
+            assert ss_end_trimmed == 2
+            assert ss_end_trimmed + info_trimmed["window_start_0b"] == 4
+
+    def test_aif_sidecar_baseline_end_before_the_window_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = self._config_with_aif_sidecar(Path(tmp), end_time_index=2)
+            stlv = np.full((18, 2), 100.0, dtype=np.float64)
+
+            with pytest.raises(ValueError, match=r"trims away the whole baseline"):
+                _resolve_baseline_window(config, 18, stlv=stlv, window_start_0b=5)
+
     def test_resolve_baseline_window_accepts_glr_alias(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))
