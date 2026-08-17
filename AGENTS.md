@@ -30,8 +30,10 @@ Fitting, Parallel Computing, Statistics and Machine Learning, Image Processing.
 ## Running the pipelines
 
 ```bash
-# DCE (Python), built-in tiny fixture:
+# DCE (Python), shipped example config (sub-02downsample, ~11 s):
 .venv/bin/python run_dce_python_cli.py
+# DCE smoke test on the tiny fixture (~0.5 s):
+.venv/bin/python run_dce_python_cli.py --config tests/python/dce_run_tiny.json
 # DCE with an explicit config + overrides:
 .venv/bin/python run_dce_python_cli.py --config tests/python/dce_cli_config.example.json --set voxel_MaxFunEvals=100
 

@@ -49,7 +49,7 @@ Examples:
 
   # Use config template with custom overrides
   %(prog)s --bids-root /data/my_study --pipeline-folder dceprep \\
-    --config-template python/dce_default.json \\
+    --config-template python/dceprep_run_example.json \\
     --set blood_t1_ms=1600 \\
     --set aif_curve_mode=fitted
 
@@ -101,7 +101,7 @@ Examples:
         "--config-template",
         type=Path,
         default=None,
-        help="Optional JSON config template for base settings (e.g., dce_default.json). Auto-discovered inputs and CLI args override template values.",
+        help="Optional JSON config template for base settings (e.g., dceprep_run_example.json). Auto-discovered inputs and CLI args override template values.",
     )
     parser.add_argument(
         "--backend",

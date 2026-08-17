@@ -36,7 +36,7 @@ from dce_pipeline import (  # noqa: E402
 )
 
 
-DEFAULT_CONFIG_TEMPLATE = REPO_ROOT / "python" / "dce_default.json"
+DEFAULT_CONFIG_TEMPLATE = REPO_ROOT / "python" / "dce_run_example.json"
 
 
 def load_biexp_config(config_template: Optional[Path] = None) -> DcePipelineConfig:

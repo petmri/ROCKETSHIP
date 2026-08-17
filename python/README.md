@@ -94,10 +94,10 @@ cd /path/to/ROCKETSHIP
 
 Default template location:
 
-- `/path/to/ROCKETSHIP/python/dce_default.json`
-- This default is prewired to the tiny fixture:
-  - `/path/to/ROCKETSHIP/tests/data/BIDS_test` (subject `sub-11tiny`, session `ses-01`)
-  - outputs to `/path/to/ROCKETSHIP/out/dce_gui_tiny`
+- `/path/to/ROCKETSHIP/python/dce_run_example.json`
+- This default is prewired to a conforming example session:
+  - `/path/to/ROCKETSHIP/tests/data/BIDS_test` (subject `sub-02downsample`, session `ses-01`)
+  - outputs to `/path/to/ROCKETSHIP/out/dce_run_example`
 
 Optional runtime overrides:
 
@@ -205,7 +205,7 @@ Example: BIDS-native run with config template:
 .venv/bin/python run_dce_bids_batch.py \
   --bids-root /path/to/data \
   --pipeline-folder dceprep \
-  --config-template python/dce_default.json \
+  --config-template python/dceprep_run_example.json \
   --set blood_t1_ms=1600 \
   --set aif_curve_mode=fitted \
   --backend auto
@@ -303,8 +303,8 @@ Config fields are parsed by:
 Key expectations:
 
 - **Configuration priority**: Python workflows use JSON defaults and JSON config only. The precedence chain is:
-  - `dce_default.json` or `dceprep_default.json` (base defaults)
-  - `stage_overrides` in JSON config (explicit overrides)
+  - `python/dce_defaults.json` (the defaults file — every knob)
+  - `stage_overrides` in your run config (explicit overrides)
   - CLI arguments (final overrides)
 - Dynamic image + ROI/AIF/T1/noise masks are provided (NIfTI path lists)
 - TR/FA/time-resolution for real Stage A are resolved strictly:
@@ -338,9 +338,9 @@ Part E work-in-progress:
 Preference precedence (highest to lowest):
 
 1. CLI arguments (e.g., `--roi-mask-path`)
-2. `stage_overrides` in JSON config
-3. `dce_default.json` or `dceprep_default.json` base values
-4. Python built-in fallback defaults
+2. `stage_overrides` in your run config (`dce_run_example.json` is an example of one)
+3. `python/dce_defaults.json`
+4. **Error** — there are no built-in fallbacks in source
 
 Shared options documentation for CLI + GUI:
 
@@ -526,7 +526,7 @@ cd /path/to/ROCKETSHIP
 One-click test run:
 
 - Launch the GUI and click `Run DCE` without changing fields.
-- It uses `/path/to/ROCKETSHIP/python/dce_default.json` and the tiny fixture by default.
+- It uses `/path/to/ROCKETSHIP/python/dce_run_example.json` (subject `sub-02downsample`) by default.
 
 GUI v1 behavior:
 

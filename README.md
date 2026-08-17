@@ -115,10 +115,10 @@ python run_dce_python_cli.py
 
 Default template location:
 
-- `/path/to/ROCKETSHIP/python/dce_default.json`
-- This default is prewired to the tiny fixture:
-  - `/path/to/ROCKETSHIP/tests/data/BIDS_test` (subject `sub-11tiny`, session `ses-01`)
-  - outputs to `/path/to/ROCKETSHIP/out/dce_gui_tiny`
+- `/path/to/ROCKETSHIP/python/dce_run_example.json`
+- This default is prewired to a conforming example session:
+  - `/path/to/ROCKETSHIP/tests/data/BIDS_test` (subject `sub-02downsample`, session `ses-01`)
+  - outputs to `/path/to/ROCKETSHIP/out/dce_run_example`
 
 Optional runtime overrides:
 
@@ -231,7 +231,7 @@ python run_parametric_python_gui.py
 One-click test run:
 
 - Launch the GUI and click `Run DCE` without changing fields.
-- It uses `/path/to/ROCKETSHIP/python/dce_default.json` and the tiny fixture by default.
+- It uses `/path/to/ROCKETSHIP/python/dce_run_example.json` (subject `sub-02downsample`) by default.
 
 Parametric GUI v1 behavior:
 

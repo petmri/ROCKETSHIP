@@ -24,7 +24,7 @@ def _abs_path(path_text: str) -> str:
 
 
 def _make_temp_config(tmp_dir: Path) -> Path:
-    payload = json.loads((REPO_ROOT / "python" / "dce_default.json").read_text(encoding="utf-8"))
+    payload = json.loads((REPO_ROOT / "tests" / "python" / "dce_run_tiny.json").read_text(encoding="utf-8"))
     payload["subject_source_path"] = _abs_path(str(payload["subject_source_path"]))
     payload["subject_tp_path"] = _abs_path(str(payload["subject_tp_path"]))
     payload["output_dir"] = str((tmp_dir / "out").resolve())

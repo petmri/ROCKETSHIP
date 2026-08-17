@@ -41,7 +41,7 @@ python3 -m venv .venv
 
 ## 2. Run DCE CLI
 
-Default run (uses `/path/to/ROCKETSHIP/python/dce_default.json`):
+Default run (uses `/path/to/ROCKETSHIP/python/dce_run_example.json`):
 
 ```bash
 cd /path/to/ROCKETSHIP

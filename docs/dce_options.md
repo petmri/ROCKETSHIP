@@ -9,8 +9,11 @@ Two files with confusingly similar names, doing different jobs:
   preference lives here, and it is the file to edit to change how the software behaves for
   every run. It is user-editable by design; you should never need to touch source code to
   change a default.
-- **`python/dce_default.json`** — *an example run config*. One study's settings, used as the
-  GUI's starting template. It overrides the defaults file for that run only.
+- **`python/dce_run_example.json`** — *an example run config*. Which data to process, plus
+  only the settings that run overrides; the GUI and the no-arg CLI load it as their starting
+  template. Keys matching the defaults file are deliberately absent, so it stays short.
+  `python/dceprep_run_example.json` is the same thing with glob file lists, which is the form
+  `run_dce_bids_batch.py --config-template` expects.
 
 ## Precedence
 For options in `stage_overrides`:
