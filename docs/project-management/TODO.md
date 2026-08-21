@@ -15,6 +15,13 @@ Larger feature requests should be logged in `docs/project-management/projects/fe
 - [ ] Redo the python terminal outputs so they are user readable. Make shorter, format properly.
 - [ ] Have GUI save/load last selected options
 - [ ] Have GUI browse buttons start in logical dir
+- [ ] Confirm the OSIPI badge publishes on the first real run. The gist
+      (`ironictoo/b65ef98aadaa684f2d7d31e82137c4b4`) and the `GIST_TOKEN` secret are set up,
+      and the id is wired into the `accelerated_backends` job in `.github/workflows/run_DCE.yml`
+      and the `README.md` badge URL.
+      The badge renders "invalid" until a push to `master`/`dev` runs the workflow and writes
+      real JSON over the gist's placeholder `{}`. Note the gist lives outside the repo, so it
+      is not version-controlled with the code and will not appear in a release snapshot.
 
 ## Secondary Active Work (Non-Blocking First Dev Merge)
 

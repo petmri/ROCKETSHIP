@@ -87,9 +87,11 @@ jobs:
       - name: Run Python unit/integration tests (non-parity mode)
         run: python -m pytest tests/python -m "not parity" -q
 
-  # Kept out of python_checks so a flaky external release download cannot fail the main
-  # Python job, and so this doubles as the only end-to-end exercise of the installer.
-  backend_equivalence:
+  # Every test that needs the accelerated backends, plus the OSIPI badge, in one job so the
+  # release download happens once. Kept out of python_checks so a flaky external download
+  # cannot fail the main Python job, and so this doubles as the only end-to-end exercise of
+  # the installer. python_checks still runs all of these tests; without the wheels they skip.
+  accelerated_backends:
     runs-on: ubuntu-latest
 
     steps:
@@ -108,8 +110,54 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python install.py --no-matlab --no-gui --venv-path .venv
 
+      # Runs before the equivalence gate so the badge publishes even when that gate is red.
+      # continue-on-error keeps a failing suite from skipping the publish; the final step
+      # restores the non-zero exit so the job status stays meaningful.
+      - name: Run OSIPI conformance tests
+        continue-on-error: true
+        run: .venv/bin/python -m pytest tests/python -m osipi -q -rs --junitxml=osipi-results.xml
+
+      - name: Summarize OSIPI results for the badge
+        id: count
+        run: python .github/scripts/osipi_badge_summary.py osipi-results.xml >> "$GITHUB_OUTPUT"
+
+      # Lets the job run cleanly on forks and before GIST_TOKEN is configured, instead of
+      # failing the publish step.
+      - name: Check badge credentials
+        id: creds
+        env:
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+        run: |
+          if [ -n "$GIST_TOKEN" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::GIST_TOKEN is not set; skipping badge publish."
+          fi
+
+      # GitHub's own Actions badges are binary and per-workflow, so reporting a pass *count*
+      # for the osipi-marked subset needs a value parked where shields.io can fetch it.
+      # Skipped on pull_request so PR runs cannot overwrite the branch status in the gist.
+      - name: Publish OSIPI badge
+        if: github.event_name != 'pull_request' && steps.creds.outputs.available == 'true'
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_TOKEN }}
+          gistID: b65ef98aadaa684f2d7d31e82137c4b4
+          filename: osipi.json
+          label: OSIPI
+          message: ${{ steps.count.outputs.message }}
+          color: ${{ steps.count.outputs.color }}
+
       - name: Run backend-equivalence gate (cpu vs cpufit on frozen Stage-B arrays)
         run: .venv/bin/python -m pytest tests/python/test_backend_equivalence.py -q -rs
+
+      # always() so an OSIPI failure is still reported when the equivalence gate above failed.
+      - name: Fail if any OSIPI test failed
+        if: always() && steps.count.outputs.failed != '0'
+        run: |
+          echo "OSIPI suite reported ${{ steps.count.outputs.failed }} failure(s)/error(s)."
+          exit 1
 
   parity_checks:
     runs-on: ubuntu-latest

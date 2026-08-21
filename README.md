@@ -1,5 +1,7 @@
 # ROCKETSHIP v2.0.rc
 ---
+[![OSIPI](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/ironictoo/b65ef98aadaa684f2d7d31e82137c4b4/raw/osipi.json)](https://github.com/petmri/ROCKETSHIP/actions/workflows/run_DCE.yml)
+[![CI](https://github.com/petmri/ROCKETSHIP/actions/workflows/run_DCE.yml/badge.svg?branch=dev)](https://github.com/petmri/ROCKETSHIP/actions/workflows/run_DCE.yml)
 [![Docs](https://github.com/petmri/ROCKETSHIP/actions/workflows/docs.yml/badge.svg)](https://petmri.github.io/ROCKETSHIP/)
 
 
