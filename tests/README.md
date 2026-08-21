@@ -161,7 +161,7 @@ pytest tests/python/test_backend_equivalence.py
 
 **Skips with a reason** when `pycpufit`/`pygpufit` are absent. CI runs it in a dedicated
 `backend_equivalence` job that installs the backends with
-`python install_python_acceleration.py --no-matlab --no-gui` (prebuilt wheels from the
+`python install.py --no-matlab --no-gui` (prebuilt wheels from the
 `ironictoo/Gpufit` release). GitHub runners have no CUDA, so the `cpufit` half gates and the
 `gpufit` half skips itself; both halves gate on a CUDA workstation.
 

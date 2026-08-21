@@ -16,6 +16,7 @@ All commands are run from the repository root.
 | Parametric \(T_1\) graphical interface | `run_parametric_python_gui.py` |
 | BIDS dataset discovery | `run_bids_discovery.py` |
 | BIDS batch processing | `run_dce_bids_batch.py` |
+| GUI launcher (written by the installer) | `rocketship.sh` (`rocketship.bat` on Windows) |
 
 ## 1. Environment setup
 
@@ -23,8 +24,19 @@ The installer creates a virtual environment, installs dependencies, and adds the
 acceleration libraries for your platform:
 
 ```bash
-python3 install_python_acceleration.py
+python3 install.py
 ```
+
+It also writes `rocketship.sh` (`rocketship.bat` on Windows) into the repository root, a
+wrapper that activates the virtual environment and launches a GUI:
+
+```bash
+./rocketship.sh              # DCE GUI
+./rocketship.sh parametric   # parametric T1 GUI
+```
+
+MATLAB is optional. If it is not on `PATH`, the installer warns that the MATLAB MEX files
+could not be verified and finishes successfully; the Python interfaces are unaffected.
 
 See [GPU and CPU Acceleration](enable-gpu-acceleration.md) for platform support and installer
 options.

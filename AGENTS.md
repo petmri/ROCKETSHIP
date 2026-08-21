@@ -20,8 +20,13 @@ deviates from the *intended* algorithm rather than tuning tolerances to paper ov
 ## Setup
 
 ```bash
-python3 install_python_acceleration.py   # creates .venv, installs deps + pyGpufit/pyCpufit
+python3 install.py   # creates .venv, installs deps + pyGpufit/pyCpufit, writes rocketship.sh
 ```
+
+MATLAB is optional here: without it on `PATH` the installer warns that the MATLAB MEX files
+could not be verified and still exits 0. `rocketship.sh` (`rocketship.bat` on Windows) is a
+generated, machine-local, gitignored wrapper that activates the venv and launches a GUI
+(`./rocketship.sh [dce|parametric]`).
 
 Manual alternative: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`
 (add `-r requirements_gui.txt` for the PySide6 GUI). MATLAB toolboxes required: Curve
@@ -161,7 +166,7 @@ multi-start machinery (`FitInputs`, per-model `assemble_*_candidates`, `fit_with
 so every backend — cpufit/gpufit or plain Python — sees the same candidate starting points
 and the same bounds clamp; `tissue_uptake`/`2cxm` are fit in E-space (`E = Ktrans/Fp`) and
 converted back on output. `pygpufit`/`pycpufit` are not in `requirements.txt` (installed
-separately via `install_python_acceleration.py`), so CI's `auto` always resolves to pure CPU.
+separately via `install.py`), so CI's `auto` always resolves to pure CPU.
 
 ### Data layout and fixtures
 

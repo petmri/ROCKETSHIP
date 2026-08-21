@@ -56,7 +56,7 @@ Recommended setup (default):
 
 ```bash
 cd /path/to/ROCKETSHIP
-python3 install_python_acceleration.py
+python3 install.py
 ```
 
 What this script does:
@@ -68,7 +68,11 @@ What this script does:
 - detects local CUDA version (when available) and prefers the closest matching CUDA asset for your host
 - falls back to CPU asset IDs when CUDA builds are not a good local match
 - installs both `pyCpufit` and `pyGpufit` into the venv
+- installs the MATLAB MEX files from the bundle and verifies them when MATLAB is on `PATH`
+  (if MATLAB is not found the installer warns and still finishes successfully)
 - verifies imports and reports CUDA availability
+- writes the `rocketship.sh` launcher (`rocketship.bat` on Windows), which activates the
+  virtual environment and starts a GUI
 
 Common installer options:
 
@@ -203,6 +207,18 @@ This utility reads `rawdata/` and `derivatives/` and emits subject/session pairs
 exist in both trees, so other tools can run over the same discovered set.
 
 ### Python GUI (PySide6)
+
+If you used the automated installer, the quickest launch is the generated wrapper, which
+activates the virtual environment for you:
+
+```bash
+cd /path/to/ROCKETSHIP
+./rocketship.sh              # DCE GUI
+./rocketship.sh parametric   # parametric T1 GUI
+```
+
+On Windows the installer writes `rocketship.bat`, used the same way. The remaining commands
+in this section are the manual equivalents.
 
 Install GUI dependency:
 

@@ -14,13 +14,15 @@ The Python installer sets up the virtual environment and installs the accelerati
 appropriate for your platform. Run it from the repository root:
 
 ```bash
-python3 install_python_acceleration.py
+python3 install.py
 ```
 
 This creates a `.venv` virtual environment, installs the Python dependencies, detects your
 platform and CUDA version, and downloads the matching pre-built `pyCpufit` and `pyGpufit`
 packages. Where a release bundle includes MATLAB MEX files for your platform, these are
-installed and verified as well.
+installed as well, and verified when MATLAB is on `PATH`. If MATLAB is not found the
+installer reports a warning and still completes successfully, since the Python interfaces do
+not need it; rerun the installer after installing MATLAB to get the MEX files verified.
 
 Pre-built packages are published for Linux and Windows with several CUDA versions, and for
 macOS on Apple silicon. macOS packages provide CPU acceleration only, as CUDA is not available
@@ -39,7 +41,7 @@ on that platform.
 | `-m`, `--matlab-cmd` | Use a specific MATLAB executable for post-install verification |
 | `-k`, `--no-sha256` | Disable checksum verification of downloaded assets |
 
-Run `python3 install_python_acceleration.py --help` for the complete list.
+Run `python3 install.py --help` for the complete list.
 
 ### Verifying the installation
 

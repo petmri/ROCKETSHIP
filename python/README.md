@@ -35,7 +35,7 @@ Recommended setup (default):
 
 ```bash
 cd /path/to/ROCKETSHIP
-python3 install_python_acceleration.py
+python3 install.py
 ```
 
 What this script does:
@@ -47,7 +47,11 @@ What this script does:
 - detects local CUDA version (when available) and prefers the closest matching CUDA asset for your host
 - falls back to CPU asset IDs when CUDA builds are not a good local match
 - installs both `pyCpufit` and `pyGpufit` into the venv
+- installs the MATLAB MEX files from the bundle and verifies them when MATLAB is on `PATH`
+  (if MATLAB is not found the installer warns and still finishes successfully)
 - verifies imports and reports CUDA availability
+- writes the `rocketship.sh` launcher (`rocketship.bat` on Windows), which activates the
+  virtual environment and starts a GUI
 
 Common installer options:
 
@@ -417,7 +421,7 @@ cd /path/to/ROCKETSHIP
 ```
 
 This includes Phase-1 reliability coverage such as installer asset-selection logic and
-pipeline output/event contract checks (`tests/python/test_install_python_acceleration.py`,
+pipeline output/event contract checks (`tests/python/test_install.py`,
 `tests/python/test_dce_pipeline_contracts.py`).
 
 ### Contract parity against MATLAB baseline JSON
@@ -500,6 +504,18 @@ CI currently runs:
 - MATLAB DCE smoke/full jobs (event-dependent)
 
 ## GUI (PySide6) v1
+
+The automated installer writes `rocketship.sh` (`rocketship.bat` on Windows) into the
+repository root. It activates the virtual environment and launches a GUI:
+
+```bash
+cd /path/to/ROCKETSHIP
+./rocketship.sh              # DCE GUI
+./rocketship.sh parametric   # parametric T1 GUI
+```
+
+Arguments after the GUI name are forwarded to the GUI entry point. The launcher is
+machine-local (it embeds the virtual environment path) and is not committed.
 
 Install GUI dependency:
 

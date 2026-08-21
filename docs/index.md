@@ -64,8 +64,16 @@ git clone https://github.com/petmri/ROCKETSHIP.git
 ```
 
 ```bash
-cd ROCKETSHIP && python3 install_python_acceleration.py
+cd ROCKETSHIP && python3 install.py
 ```
+
+Launch the GUI:
+
+```bash
+./rocketship.sh
+```
+
+Or work from the command line:
 
 ```bash
 source .venv/bin/activate

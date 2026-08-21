@@ -7,6 +7,15 @@ Do not log historical completions here. Record finished work in `docs/project-ma
 Keep strategic sequencing in `docs/project-management/ROADMAP.md`. For current measurable state, run the test suite — there is no status document.
 Larger feature requests should be logged in `docs/project-management/projects/feature-request/new_features.md`.
 
+## Blocking Items
+- [ ] Confirm function of GUI/CLI on non-bids data
+- [ ] Confirm function of CLI on bids data if only bids dirs set
+
+## Primary Items
+- [ ] Redo the python terminal outputs so they are user readable. Make shorter, format properly.
+- [ ] Have GUI save/load last selected options
+- [ ] Have GUI browse buttons start in logical dir
+
 ## Secondary Active Work (Non-Blocking First Dev Merge)
 
 ### 1. Synthetic Example Dataset Coverage
@@ -65,12 +74,6 @@ Larger feature requests should be logged in `docs/project-management/projects/fe
       should go once nothing external depends on them. (Carried over from the deleted
       `PORTING_STATUS.md`, which was the only place this was recorded.)
 - [ ] Evaluate moving T1 fitting onto CPUfit/GPUfit for performance improvements.
-- [ ] Finish Python non-fit pipeline performance: make the Stage-A/B QC figures opt-out
-      (0.62 s unconditionally, and 68% of in-scope time on the small single-slice fixtures).
-      The per-voxel seeding (round 1) and the `model_*_cfit` curve functions (round 2) are
-      done. Profiles, results, the bit-exactness gotchas and the peak-memory/multiprocessing
-      findings are in
-      `docs/project-management/projects/python-pipeline-performance/python_pipeline_performance.md`.
 - [ ] Expand DSC support beyond current core (`DSC_convolution_oSVD` and broader workflow parity).
 - [ ] Decide final status of `nested` and `FXL_rr` (full support vs explicit non-support with cleanup).
 - [ ] End steady-state long term: implement a more robust end_ss estimation method
@@ -93,9 +96,7 @@ Larger feature requests should be logged in `docs/project-management/projects/fe
       settings change rather than parity drift. The contract baseline
       (`tests/contracts/baselines/matlab_reference_v1.json`) is *not* affected and needs no
       action — already verified by regenerating it and passing `check_baseline_drift.py`. Full
-      measurement archived under 2026-08-12 in `COMPLETED.md`.
-- [ ] For install_python_acceleration.py. Remove "python" from the name as it installs acceleration for matlab too. Second, when it doesn't detect matlab have it print a warning, but continue and complete successfully. Don't make the user re-run with --skip-matlab
--[ ] Redo the python terminal outputs so they are user readable. Make shorter, format properly. 
+      measurement archived under 2026-08-12 in `COMPLETED.md`. 
 - [ ] Decide the fate of the MATLAB `script_preferences.txt` options the port has never ruled
       on either way: `drift_files`, `drift_global`, `aif_rr_type`, `fxl_rr`, `injection_time`,
       `force_use_default_relaxivity`, `nested`, `xy_smooth_size`, `roi_list`, `fit_voxels`.

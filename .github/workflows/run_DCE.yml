@@ -106,7 +106,7 @@ jobs:
       - name: Install Python acceleration (pyCpufit/pyGpufit)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python install_python_acceleration.py --no-matlab --no-gui --venv-path .venv
+        run: python install.py --no-matlab --no-gui --venv-path .venv
 
       - name: Run backend-equivalence gate (cpu vs cpufit on frozen Stage-B arrays)
         run: .venv/bin/python -m pytest tests/python/test_backend_equivalence.py -q -rs

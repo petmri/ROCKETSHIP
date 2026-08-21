@@ -7,6 +7,28 @@ Do not track open items in this file; active work belongs in `docs/project-manag
 
 Completed items moved from `TODO.md` on 2026-03-05 to keep the active backlog short.
 
+## Completed Recent Updates (2026-08-21)
+
+### Installer usability (from TODO Primary Items)
+- [x] **Renamed `install_python_acceleration.py` to `install.py`**, along with its test module
+      (`tests/python/test_install.py`). The name no longer undersells what it does: it is the
+      whole environment setup, not just the acceleration wheels. All docs, the walkthrough and
+      the `run_DCE.yml` CI step were updated; archived project notes and earlier entries in this
+      file keep the old name, since they record what was true at the time.
+- [x] **A missing MATLAB installation is now a warning, not a failure.** Previously an install
+      on a machine without MATLAB aborted on "Required MATLAB Gpufit symbols were not detected"
+      and had to be rerun with `--no-matlab`. The MATLAB probe/verify step is now one helper,
+      `_check_matlab_install()`, which returns SKIP health rows plus a warning when the MATLAB
+      command is not on `PATH`, and still raises when MATLAB *is* present but cannot see the
+      required Gpufit symbols (that case is a real packaging problem). The helper also absorbed
+      the duplicated status-row logic that main() used to recompute.
+- [x] **The installer writes a `rocketship.sh` GUI launcher** (`rocketship.bat` on Windows) into
+      the repository root: it activates the virtual environment and launches the DCE GUI, or the
+      parametric one via `./rocketship.sh parametric`, forwarding any remaining arguments. It
+      embeds a repo-root-relative venv path when the venv is inside the repo (absolute otherwise),
+      so the checkout stays movable. Because it encodes a machine-local path it is gitignored, and
+      it is skipped under `--no-gui` since the GUI dependencies are not installed then.
+
 ## Completed Recent Updates (2026-08-12)
 
 ### Archived from TODO on 2026-08-12 (completed earlier, never moved across)
