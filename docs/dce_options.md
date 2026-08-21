@@ -1,244 +1,314 @@
-# DCE Options Reference (CLI + GUI)
+# DCE Options Reference
 
-This file is the shared options reference for:
-- Python CLI: `/path/to/ROCKETSHIP/run_dce_python_cli.py`
-- Python GUI: `/path/to/ROCKETSHIP/run_dce_python_gui.py`
+This is the complete reference for the options accepted by the Python DCE pipeline, whether
+run from the command line (`run_dce_python_cli.py`) or the graphical interface
+(`run_dce_python_gui.py`).
 
-Two files with confusingly similar names, doing different jobs:
-- **`python/dce_defaults.json`** — *the defaults file*. Every DCE default, limit and
-  preference lives here, and it is the file to edit to change how the software behaves for
-  every run. It is user-editable by design; you should never need to touch source code to
-  change a default.
-- **`python/dce_run_example.json`** — *an example run config*. Which data to process, plus
-  only the settings that run overrides; the GUI and the no-arg CLI load it as their starting
-  template. Keys matching the defaults file are deliberately absent, so it stays short.
-  `python/dceprep_run_example.json` is the same thing with glob file lists, which is the form
-  `run_dce_bids_batch.py --config-template` expects.
+## Configuration files
+
+Two files govern a run, with distinct roles.
+
+**`python/dce_defaults.json`** holds every default value, limit and preference. This is the
+file to edit to change how the software behaves across all runs. It is intended to be
+user-editable; changing a default should never require editing source code.
+
+**A run configuration** specifies which data to process, together with only those settings the
+run overrides. Keys that match the defaults file are omitted, which keeps run
+configurations short and makes the differences between them visible. `python/dce_run_example.json`
+is a worked example, and is the template loaded by the graphical interface and by the command
+line interface when invoked without arguments. `python/dceprep_run_example.json` is the
+equivalent using glob patterns for file lists, which is the form expected by
+`run_dce_bids_batch.py --config-template`.
 
 ## Precedence
-For options in `stage_overrides`:
-1. Explicit value in the runtime config / CLI `--set KEY=VALUE`
-2. Value in `python/dce_defaults.json`
-3. **Error** — the run stops
 
-There is no built-in fallback in source code. A key that neither the run config nor the
-defaults file supplies raises `DceConfigError` naming the key and the file, rather than
-proceeding on a guess; a key in the run config that the defaults file does not declare is
-rejected as a typo rather than silently ignored. `python/dce_config.py` is the resolver, and
-a test (`tests/python/test_dce_defaults_file.py`) fails the build if any source file
-reintroduces a literal default at a resolution call site.
+For options within `stage_overrides`, values are resolved in this order:
 
-A handful of keys are declared *optional* rather than defaulted: absence is meaningful for
-them, because it hands the decision to auto-detection (`steady_state_end` is the clearest
-case). Those resolve to "unset" rather than erroring.
+1. An explicit value in the run configuration, or a `--set KEY=VALUE` argument
+2. The value in `python/dce_defaults.json`
+3. Otherwise the run stops with an error
 
-### Per-scan values: `relaxivity` and `hematocrit`
-These two describe the scan, not the analysis, so they can vary per participant and their
-precedence is **inverted** relative to everything above:
+There is no fallback value embedded in source code. A key supplied by neither the run
+configuration nor the defaults file raises an error naming both the key and the file, rather
+than proceeding on an assumed value. A key present in the run configuration but not declared
+in the defaults file is rejected as a probable typographical error rather than being ignored.
 
-1. The DCE image's JSON sidecar (same discovery convention as the metadata sidecar)
-2. Runtime config / `--set`
+A small number of keys are declared optional rather than defaulted, because their absence is
+meaningful and hands the decision to automatic detection. `steady_state_end` is the clearest
+example. These resolve to an unset state rather than raising an error.
+
+### Per-scan values
+
+`relaxivity` and `hematocrit` describe the scan rather than the analysis, and may legitimately
+differ between participants. Their precedence is therefore inverted relative to every other
+option:
+
+1. The JSON sidecar accompanying the DCE image
+2. The run configuration, or `--set`
 3. `python/dce_defaults.json`
-4. Error
+4. Otherwise the run stops with an error
 
-`relaxivity` deliberately has **no default**. The correct value depends on the contrast
-agent used, so there is nothing safe to fall back to — a wrong relaxivity silently rescales
-every concentration and therefore every Ktrans, producing plausible-looking wrong numbers
-rather than an error. A run without one stops. Our `dce2bids` tool writes it into the
-sidecar, so data prepared with our tooling already satisfies this.
+!!! danger "Relaxivity has no default"
+    The correct relaxivity depends on the contrast agent, so there is no safe value to fall
+    back on. A run that does not supply one stops. An incorrect value rescales every
+    concentration, and therefore every \(K^{trans}\), producing results that appear entirely
+    plausible but are wrong by a constant factor.
 
-`hematocrit` does have a default (0.45), because it is typically one study-wide value rather
-than a per-agent one.
+    Haematocrit does have a default of 0.45, on the basis that it is normally a single
+    study-wide value.
 
-**Deliberate MATLAB/Python divergence:** the MATLAB path keeps its `script_preferences.txt`
-relaxivity fallback (`relaxivity = 2.8`, gated by `force_use_default_relaxivity`); the Python
-port has none. Removing it from MATLAB would change results for existing MATLAB users
-mid-study, so it stays. New Python work gets the hard stop.
+## Top-level keys
 
-## Top-level config keys
-- `subject_source_path`: source BIDS path (rawdata side)
-- `subject_tp_path`: processed/derivatives path for this timepoint
-- `output_dir`: output folder for maps, logs, figures, summary
-- `checkpoint_dir`: optional stage checkpoint folder
-- `backend`: `auto|cpu|gpufit`
-  - `auto`: probe in order `gpufit_cuda -> cpufit_cpu -> gpufit_cpu_fallback -> pure_cpu`
-  - `cpu`: force pure CPU fitting path (no acceleration backend)
-  - `gpufit`: require `pygpufit` import; CUDA is used when available, otherwise fallback path
-- `write_xls`: write ROI spreadsheet output
-- `aif_mode`: `fitted|raw|imported` — where the AIF curve comes from and how it is treated.
-  `fitted` and `raw` both take the curve from the AIF ROI mask, fitting a biexponential or
-  not; `imported` loads a curve from `imported_aif_path` and never fits it.
-- `imported_aif_path`: used when imported AIF mode is selected
-- `dynamic_files`: dynamic DCE NIfTI list
-- `aif_files`: AIF ROI/mask files
-- `roi_files`: tissue ROI/mask files
-- `t1map_files`: T1 map files
-- `noise_files`: optional noise mask files
-- `drift_files`: optional drift files (reserved)
-- `model_flags`: map of model enable flags
-- `stage_overrides`: advanced settings and fit controls
+| Key | Description |
+| --- | --- |
+| `subject_source_path` | Source BIDS path |
+| `subject_tp_path` | Derivatives path for this timepoint |
+| `output_dir` | Destination for maps, logs, figures and summaries |
+| `checkpoint_dir` | Optional folder for stage checkpoints |
+| `backend` | `auto`, `cpu` or `gpufit`; see [GPU and CPU Acceleration](wiki/enable-gpu-acceleration.md) |
+| `write_xls` | Write region of interest results to a spreadsheet |
+| `aif_mode` | `fitted`, `raw` or `imported`; see [Arterial Input Function](reference/models/aif.md) |
+| `imported_aif_path` | Curve to load when `aif_mode` is `imported` |
+| `dynamic_files` | Dynamic DCE NIfTI files |
+| `aif_files` | Arterial region mask files |
+| `roi_files` | Tissue region of interest mask files |
+| `t1map_files` | Pre-contrast \(T_1\) map files |
+| `noise_files` | Optional noise mask files |
+| `drift_files` | Optional drift correction files |
+| `model_flags` | Models to fit |
+| `stage_overrides` | Advanced settings and fit controls |
 
-## `model_flags`
-- `tofts`, `ex_tofts`, `patlak`, `tissue_uptake`, `two_cxm`, `fxr`, `auc`, `nested`, `FXL_rr`
-- Value convention: `1` enabled, `0` disabled
+### `model_flags`
 
-## `stage_overrides` groups
+Set each entry to `1` to enable the model or `0` to disable it. Any combination may be
+enabled; each produces its own outputs.
 
-### Runtime / staging
-- `stage_a_mode`: `real|scaffold`
-- `stage_b_mode`: `real|scaffold|auto`
-- `stage_d_mode`: `real|scaffold|auto`
-- `rootname`: output name prefix
-- `write_param_maps`: bool for map writing
-- `write_postfit_arrays`: bool for optional Part E array export (`*_postfit_arrays.npz`)
+`tofts`, `ex_tofts`, `patlak`, `tissue_uptake`, `two_cxm`, `fxr`, `auc`, `nested`, `FXL_rr`
+
+Equations and selection guidance for each are in the
+[pharmacokinetic models reference](reference/models/index.md).
+
+---
+
+## Stage overrides
+
+### Runtime and staging
+
+| Option | Description |
+| --- | --- |
+| `stage_a_mode` | `real` or `scaffold` |
+| `stage_b_mode` | `real`, `scaffold` or `auto` |
+| `stage_d_mode` | `real`, `scaffold` or `auto` |
+| `rootname` | Prefix for output filenames |
+| `write_param_maps` | Write per-voxel parameter map NIfTIs. Default `true` |
+| `write_postfit_arrays` | Export post-fit arrays as `*_postfit_arrays.npz` |
 
 ### Backend
-- `force_cpu`: when backend is `auto`, force CPU path if non-zero
 
-### Acquisition / timing
-- `dce_metadata_path`: explicit metadata JSON path
-- `tr_ms`, `fa_deg`, `time_resolution_sec`
-- Strict resolution behavior (real Stage A):
-  - Preferred: resolve from DCE metadata JSON sidecar (or explicit `dce_metadata_path` JSON).
-  - If no metadata JSON is available, you must set all three manually: TR (`tr_ms`), FA (`fa_deg`), and time resolution (`time_resolution_sec`).
-  - Partial manual override with metadata JSON present is rejected (set all three or none).
-- `time_vector_path`, `timevectpath`, `timer_path`
-- MATLAB script toggle: `timevectyn` controls whether legacy `timevectpath` is used
-- `steady_state_start`, `steady_state_end`: manual pin, highest priority. Prefer the AIF
-  sidecar mechanism below for fixed/predictable runs instead of setting these directly;
-  this remains available as a low-level escape hatch.
-- AIF JSON sidecar `SteadyStateEndTimeIndex`: a `<file>.json` sidecar next to
-  `aif_files[0]` (same discovery convention as the DCE metadata sidecar: swap
-  `.nii`/`.nii.gz` for `.json`) may set a 1-based `SteadyStateEndTimeIndex` field to pin
-  a fixed, predictable baseline end (e.g. `{"SteadyStateEndTimeIndex": 3}`). This is the
-  documented way to get a fixed/reproducible run without disabling auto-detection for
-  everyone else; used when `steady_state_end` is not set, and takes precedence over
-  `steady_state_auto_method`.
-  - **The index counts acquired frames, before `start_t`/`end_t` trimming.** The sidecar
-    describes the file on disk, so the pinned frame stays the same physical timepoint no
-    matter how the analysis window is set; the pipeline subtracts the trim internally. If
-    `start_t` advances past the pinned frame the run stops, because the window has removed
-    the entire baseline.
-  - `steady_state_end` is *not* adjusted this way: it lives in the same run config as
-    `start_t`, so it is applied to the analysed (post-trim) series.
-- `steady_state_auto_method`: automatic baseline-end detector, used only when neither
-  `steady_state_end` nor the AIF sidecar's `SteadyStateEndTimeIndex` is set
-  - `legacy_sobel`: MATLAB `dce_auto_aif`-style global-signal Sobel/line-fit heuristic
-  - `piecewise_constant`: MATLAB `find_end_ss`-style two-constant brute-force split with local-min backtrack
-  - `glr`: GLR-like one-sided change-in-mean detector (ported from `synthetic_dce` `ismrm_submit/end_baseline_detect.py`)
-  - `tv`: total-variation/fused-lasso style denoise + first significant upward jump detector (same source)
-  - `biexp_fit`: 6-parameter biexponential fit to the mean AIF *signal* curve, seeded by
-    `tv`. Unlike the shape heuristics this also reports where the upslope ends, which
-    becomes `end_injection` and the Stage-B fit's start point for the upslope duration.
-    Falls back to its `tv` seed if the fit cannot run or does not converge. **Not the
-    default**: on 280 human-rated sessions it is right 74.6% of the time against `tv`'s
-    95.0%, always erring one frame late (S11 in
-    `docs/project-management/projects/archived/batch-parity/aif_fitting_parity.md`).
-  - Aliases accepted: `legacy`, `dce_auto_aif`, `sobel`, `piecewise`, `find_end_ss`, `edge`, `find_end_ss_edge`, `tv`, `find_end_ss_tv`, `biexp`, `find_end_ss_biexp`
-  - Precedence overall: `steady_state_end` > AIF sidecar `SteadyStateEndTimeIndex` > `steady_state_auto_method`
-  - If none of the above is set, Python defaults to `tv` (MATLAB `find_end_ss_tv`)
-- `restrict_fit_start_min`, `restrict_fit_end_min`: minutes on the timer axis, restricting
-  the curve window Stage B fits. Unlike `start_t`/`end_t` they discard nothing and leave
-  the baseline alone, so they are the way to fit only a late phase.
-- `end_injection_min` (min). There is no
-  `start_injection_min`: the injection start is *defined* as the resolved baseline end, so
-  move it with `steady_state_end` / the AIF sidecar / `steady_state_auto_method`. Passing
-  `start_injection_min` or `start_injection` is rejected with an error pointing at those.
-- `aif_Robust`: robust estimator for the Stage-B AIF fit. `off` (default) is plain least
-  squares; `Bisquare` runs a Tukey biweight IRLS with a per-iteration MAD scale and leverage
-  correction, matched between Python and MATLAB; `LAR` maps to scipy `soft_l1`. `Bisquare` was
-  the default until S11 measured it making the production fit worse across 265 sessions
-  (adjusted R² mean 0.882 against 0.944 off, and a worst case of -1.46 -- a fit worse than a
-  horizontal line).
-- `aif_Robust_timing`: same values, applied only to the Stage-A `biexp_fit` timing pass.
-  Defaults to `aif_Robust`. Exists because the peak's *height* is unreliable while its
-  *position* is exactly what the timing pass estimates, so rejecting it there costs the pass
-  its primary evidence.
-- `aif_peak_weight_exponent` (default 2): prior de-weighting of the AIF peak sample. The weight
-  is the peak's excess over the median relative to the next largest sample's excess, raised to
-  this exponent; 0 disables it (weight 1). The peak has leverage 1 in the biexponential model,
-  so a residual-based robust scheme cannot see a noise-inflated peak — this weight comes from
-  the curve's shape instead. Applied only to the production fit, never to the Stage-A timing
-  pass, whose whole job is to locate the peak.
-- `save_aif_figure` (default true): write the Stage-B AIF fit figure (`dceAIF_fitting.png`),
-  showing measured vs fitted curves with `t_base_end` and `t0_exp` marked as vertical lines.
+| Option | Description |
+| --- | --- |
+| `force_cpu` | When `backend` is `auto`, force the standard CPU path if non-zero |
 
-### Stage A concentration conversion
-- `relaxivity` — per-scan, **no default, missing is a hard stop**; see [Precedence](#precedence)
-- `hematocrit` — per-scan, defaults to 0.45; see [Precedence](#precedence)
-- `blood_t1_ms`: read as milliseconds and range-checked (50-20000). It is not rescaled
-  by magnitude, so a value in seconds is an error rather than a silent conversion.
-- `noise_pixsize`
-- `snr_filter`
+### Acquisition and timing
 
-### Stage B AIF fit
-- The AIF curve mode is the top-level `aif_mode` field, not a stage override -- see the
-  Core section above. It used to also be settable as `stage_overrides.aif_curve_mode`,
-  which silently outranked it.
-- Imported AIF path override: `import_aif_path`
-- `aif_lower_limits`: 4 values `[A,B,c,d]`
-- `aif_upper_limits`: 4 values `[A,B,c,d]`
-- `aif_initial_values`: 4 values `[A,B,c,d]`
-- `aif_TolFun`, `aif_TolX`, `aif_MaxIter`, `aif_MaxFunEvals`, `aif_Robust`
+| Option | Description |
+| --- | --- |
+| `dce_metadata_path` | Explicit path to a metadata JSON file |
+| `tr_ms` | Repetition time, in milliseconds |
+| `fa_deg` | Flip angle, in degrees |
+| `time_resolution_sec` | Temporal resolution, in seconds |
+| `time_vector_path` | Path to an explicit time vector, for unequally spaced acquisitions |
 
-### Stage D fit controls
-- `time_smoothing`, `time_smoothing_window`
-- `fxr_fw`
-- `write_param_maps`: bool (default `true`) — write per-voxel parameter map NIfTIs.
-- `fit_voxels`: bool (default `true`). Set `false` for **ROI-only mode**: skip the per-voxel fit and
-  fit only each ROI's averaged concentration curve (average-then-fit, matching MATLAB). Much faster,
-  and for nonlinear models the pre-fit averaging reduces noise. Requires `roi_files`; parameter maps
-  are not written. Each ROI is averaged over its intersection with the primary fit region
-  (`roi_files[0]`), so make `roi_files[0]` the encompassing ROI (e.g. the whole-brain mask).
-- `time_unit` / `timer_unit` (optional direct-fit hint): `minutes|seconds`
-  - No implicit or runtime-selectable algorithm switching.
-  - `model_2cxm_fit` uses the OSIPI LEK-style resampled fit path.
-  - `model_tissue_uptake_fit` uses the standard least-squares fit path.
-  - For `model_tissue_uptake_fit` and `model_2cxm_fit`, internal fitting is always done in minutes with rate constants in 1/min.
-  - Input preferences for rate limits/initial values are interpreted in the same units as the input timer, then converted internally.
-  - Returned rate parameters (`ktrans`, `fp`) are converted back to match the input timer unit.
+Repetition time, flip angle and temporal resolution are preferably resolved from the JSON
+sidecar accompanying the DCE image, or from an explicit `dce_metadata_path`. Where no metadata
+JSON is available, all three must be set manually. Setting only some of them while a metadata
+JSON is present is rejected: supply all three, or none.
 
-### Voxel fit bounds / initial values
-- `voxel_lower_limit_ktrans`, `voxel_upper_limit_ktrans`, `voxel_initial_value_ktrans`
-- `voxel_lower_limit_ve`, `voxel_upper_limit_ve`, `voxel_initial_value_ve`
-- `voxel_lower_limit_vp`, `voxel_upper_limit_vp`, `voxel_initial_value_vp`
-- `voxel_lower_limit_fp`, `voxel_upper_limit_fp`, `voxel_initial_value_fp`
-- `voxel_lower_limit_tp`, `voxel_upper_limit_tp`, `voxel_initial_value_tp`
-- `voxel_lower_limit_tau`, `voxel_upper_limit_tau`, `voxel_initial_value_tau`
-- `voxel_lower_limit_ktrans_RR`, `voxel_upper_limit_ktrans_RR`, `voxel_initial_value_ktrans_RR`
-- `voxel_value_ve_RR`
-- `voxel_TolFun`, `voxel_TolX`, `voxel_MaxIter`, `voxel_MaxFunEvals`, `voxel_Robust`
+### Baseline and injection timing
 
-### Acceleration tuning
-- `gpu_tolerance`
-- `gpu_max_n_iterations`
-- `gpu_initial_value_ktrans`
-- `gpu_initial_value_ve`
-- `gpu_initial_value_vp`
-- `gpu_initial_value_fp`
+The end of the pre-contrast baseline is resolved with the following precedence:
 
-Notes:
-- Stage-D acceleration currently applies to `tofts`, `ex_tofts`, `patlak`, `tissue_uptake`, and `2cxm`.
-- `gpu_tolerance` is a shared accelerated solver tolerance (CPUfit/GPUfit path) for all
-  accelerated Stage-D models; the default is `1e-6`. Tightening it does not buy accuracy, it
-  loses voxels: cpufit/gpufit mark a voxel non-converged below roughly `1e-10` and the
-  pipeline NaNs those. Measured on 2000 frozen real voxels, `1e-6` is the only setting with
-  100% voxel yield on every model, while `1e-10` falls to 93.5% (tofts) and 95.9% (2CXM).
-  MATLAB's former `1e-12` was worst-of-both and has been changed to match.
-- Stage summary for part D includes:
-  - `selected_backend`
-  - `acceleration_backend`
-  - `backend_reason`
-  - `backend_used`
+1. `steady_state_end`, an explicit manual setting
+2. `SteadyStateEndTimeIndex` in the arterial mask's JSON sidecar
+3. `steady_state_auto_method`, automatic detection
+
+Where none is set, automatic detection uses the total variation method.
+
+**`steady_state_start`, `steady_state_end`** pin the baseline window explicitly. These are
+applied to the analysed series, after any trimming by `start_t` and `end_t`.
+
+**AIF JSON sidecar.** A `.json` sidecar placed alongside `aif_files[0]`, following the same
+naming convention as the DCE metadata sidecar, may carry a one-based
+`SteadyStateEndTimeIndex` field, for example `{"SteadyStateEndTimeIndex": 3}`. This is the
+recommended way to fix a reproducible baseline for a particular dataset, since the setting
+travels with the data rather than with the run configuration.
+
+The index counts acquired frames, before any trimming, so the pinned frame remains the same
+physical timepoint however the analysis window is set; the pipeline accounts for the trim
+internally. Where `start_t` advances beyond the pinned frame the run stops, since the window
+has removed the entire baseline.
+
+**`steady_state_auto_method`** selects the automatic detector, used only when neither of the
+above is set.
+
+| Method | Description |
+| --- | --- |
+| `tv` | Total variation denoising followed by detection of the first significant upward step. The default |
+| `legacy_sobel` | Sobel edge and line-fit heuristic applied to the global signal |
+| `piecewise_constant` | Brute-force two-constant split with local minimum backtracking |
+| `glr` | One-sided generalised likelihood ratio change-in-mean detector |
+| `biexp_fit` | Six-parameter biexponential fit to the mean arterial signal curve, seeded by `tv` |
+
+The `biexp_fit` method differs from the shape heuristics in also reporting where the upslope
+ends, which then defines the end of the injection and the starting point for the Stage B fit.
+It falls back to its `tv` seed where the fit does not converge. On evaluation against expert
+ratings it is less accurate than `tv`, and is not the default.
+
+The following aliases are also accepted: `legacy`, `dce_auto_aif`, `sobel`, `piecewise`,
+`find_end_ss`, `edge`, `find_end_ss_edge`, `find_end_ss_tv`, `biexp`, `find_end_ss_biexp`.
+
+**`end_injection_min`** sets the end of the injection, in minutes. There is no corresponding
+`start_injection_min`, because the start of the injection is defined as the resolved end of
+the baseline; change it through the baseline settings above. Supplying `start_injection_min`
+or `start_injection` raises an error directing you to those settings.
+
+### Analysis window
+
+| Option | Description |
+| --- | --- |
+| `restrict_fit_start_min` | Start of the fitted window, in minutes on the time axis |
+| `restrict_fit_end_min` | End of the fitted window, in minutes on the time axis |
+
+Unlike `start_t` and `end_t`, these discard no data and leave the baseline intact, which makes
+them the appropriate way to fit only a late phase of the curve.
+
+### Concentration conversion
+
+| Option | Description |
+| --- | --- |
+| `relaxivity` | Contrast agent relaxivity. Per-scan; no default; required |
+| `hematocrit` | Haematocrit. Per-scan; default 0.45 |
+| `blood_t1_ms` | Fixed pre-contrast arterial \(T_1\), in milliseconds |
+| `noise_pixsize` | Size of the corner square used for noise estimation |
+| `snr_filter` | Minimum signal to noise ratio for arterial voxels |
+
+`blood_t1_ms` is read in milliseconds and range checked between 50 and 20000. It is not
+rescaled according to magnitude, so a value supplied in seconds raises an error rather than
+being silently converted.
+
+The conversion these options control is documented in
+[Signal to Concentration](reference/signal-to-concentration.md).
+
+### Arterial input function fit
+
+The curve mode is the top-level `aif_mode` field rather than a stage override.
+
+| Option | Description |
+| --- | --- |
+| `import_aif_path` | Override for the imported curve path |
+| `aif_initial_values` | Initial values, as `[A, B, c, d]` |
+| `aif_lower_limits` | Lower bounds, as `[A, B, c, d]` |
+| `aif_upper_limits` | Upper bounds, as `[A, B, c, d]` |
+| `aif_TolFun` | Function tolerance |
+| `aif_TolX` | Parameter tolerance |
+| `aif_MaxIter` | Maximum iterations |
+| `aif_MaxFunEvals` | Maximum function evaluations |
+| `aif_Robust` | `off`, `Bisquare` or `LAR` |
+| `aif_Robust_timing` | As `aif_Robust`, applied to the Stage A timing pass. Defaults to `aif_Robust` |
+| `aif_peak_weight_exponent` | Exponent for shape-based de-weighting of the peak sample. Default 2; 0 disables |
+| `save_aif_figure` | Write the fit figure `dceAIF_fitting.png`. Default `true` |
+
+`aif_Robust` selects a residual-based robust estimator: `off` is ordinary least squares,
+`Bisquare` is Tukey biweight iteratively reweighted least squares, and `LAR` is a soft L1
+loss. The default is `off`.
+
+`aif_Robust_timing` is separated from `aif_Robust` because the timing pass estimates the
+position of the peak, and rejecting the peak as an outlier removes the pass's primary
+evidence.
+
+`aif_peak_weight_exponent` de-weights the peak sample using the shape of the curve rather than
+its residuals, because the peak has full leverage in this model and a residual-based estimator
+cannot detect an inflated value there.
+
+The fitted form and these mechanisms are described in the
+[Arterial Input Function reference](reference/models/aif.md).
+
+### Model fitting
+
+| Option | Description |
+| --- | --- |
+| `time_smoothing` | Temporal smoothing mode |
+| `time_smoothing_window` | Temporal smoothing window length |
+| `fxr_fw` | Tissue water fraction for the FXR model. Default 0.8 |
+| `fit_voxels` | Fit every voxel. Default `true` |
+| `time_unit` / `timer_unit` | `minutes` or `seconds`, an optional hint for the direct fit path |
+
+Setting `fit_voxels` to `false` selects region-only mode: the per-voxel fit is skipped and
+only each region's averaged concentration curve is fitted. This is considerably faster, and
+for nonlinear models the averaging before fitting reduces noise. It requires `roi_files`, and
+parameter maps are not written. Each region is averaged over its intersection with the primary
+fit region, so `roi_files[0]` should be the encompassing region, such as a whole-brain mask.
+
+Fitting for the tissue uptake and two-compartment exchange models is always carried out
+internally in minutes with rate constants per minute. Bounds and initial values are
+interpreted in the same units as the supplied time vector and converted internally, and
+returned rate parameters are converted back to match.
+
+### Parameter bounds and initial values
+
+Each fitted parameter has a lower limit, an upper limit and an initial value:
+
+```
+voxel_lower_limit_<param>
+voxel_upper_limit_<param>
+voxel_initial_value_<param>
+```
+
+where `<param>` is one of `ktrans`, `ve`, `vp`, `fp`, `tp`, `tau` or `ktrans_RR`. The
+reference region model additionally uses `voxel_value_ve_RR`, a fixed rather than fitted
+value.
+
+Several models have their own settings, distinguished by a suffix, for example
+`voxel_lower_limit_ve_2cxm` or `voxel_initial_value_fp_tissue_uptake`. Where a model-specific
+setting exists it takes precedence over the general one for that model. Current defaults for
+each parameter and model are listed on the individual
+[model reference pages](reference/models/index.md).
+
+Convergence is controlled by `voxel_TolFun`, `voxel_TolX`, `voxel_MaxIter`,
+`voxel_MaxFunEvals` and `voxel_Robust`, which also accept model-specific suffixes.
+
+### Acceleration
+
+| Option | Description |
+| --- | --- |
+| `gpu_tolerance` | Solver tolerance for the accelerated path. Default 10⁻⁶ |
+| `gpu_max_n_iterations` | Maximum solver iterations per voxel |
+| `gpu_initial_value_ktrans` | Initial \(K^{trans}\) for the accelerated path |
+| `gpu_initial_value_ve` | Initial \(v_e\) for the accelerated path |
+| `gpu_initial_value_vp` | Initial \(v_p\) for the accelerated path |
+| `gpu_initial_value_fp` | Initial \(F_p\) for the accelerated path |
+
+Accelerated fitting is available for the Tofts, extended Tofts, Patlak, tissue uptake and
+two-compartment exchange models. `gpu_tolerance` applies to both the GPU and CPU acceleration
+paths.
+
+!!! warning "Tightening the tolerance reduces voxel yield"
+    A tighter `gpu_tolerance` does not improve accuracy. Below approximately 10⁻¹⁰ the
+    accelerated solvers begin marking voxels as non-converged and the pipeline excludes them.
+    Leave this at its default unless you have a specific reason to change it. Further detail
+    is in [GPU and CPU Acceleration](wiki/enable-gpu-acceleration.md).
+
+The Part D stage summary records `selected_backend`, `acceleration_backend`, `backend_reason`
+and `backend_used`.
+
+---
 
 ## Notes
-- MATLAB-style numeric expressions (for example `10^-7`) are accepted in
-  `python/dce_defaults.json` string values, so a preference can be transcribed from
-  `dce_preferences.txt` unchanged.
-- `dce/dce_preferences.txt` and `script_preferences.txt` configure the **MATLAB** pipeline
-  only. The Python port no longer reads them; the two sets of numbers are kept in step by
-  hand, and each intentional divergence is commented in the MATLAB file that carries it.
-- GUI v1 provides `Browse...` dialogs for all path/file input widgets currently shown in the form.
-- `import_aif_path` exists at the config level, but current GUI form does not expose a dedicated field yet; set it via JSON config when using imported AIF mode.
-- Not all MATLAB-era options are fully consumed by current Python runtime yet; see active backlog:
-  - `~/code/ROCKETSHIP/docs/project-management/TODO.md`
+
+- MATLAB-style numeric expressions such as `10^-7` are accepted in string values within
+  `python/dce_defaults.json`.
+- `dce/dce_preferences.txt` and `script_preferences.txt` configure the MATLAB pipeline only.
+  The Python implementation does not read them.
+- The graphical interface provides file browsers for all path inputs shown on the form.
+  `import_aif_path` has no dedicated field and should be set through the run configuration
+  when using imported arterial input function mode.

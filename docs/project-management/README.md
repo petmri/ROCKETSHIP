@@ -14,8 +14,6 @@ between reads, which is worse than having nothing.
 
 ## Project Folders
 
-- `projects/osipi-verification/`
-  - `osipi_summary.md`: OSIPI accuracy summary and peer-comparison snapshot.
 - `projects/phantom-gt/`
   - `PHANTOM_GT_QUALIFICATION_STATUS.md`: synthetic phantom GT qualification status.
 - `projects/large-data-distribution/`

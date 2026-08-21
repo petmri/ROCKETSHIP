@@ -2,52 +2,107 @@
 
 ![ROCKETSHIP Banner](assets/rocketship_banner2.png)
 
-ROCKETSHIP is a toolbox for processing and analyzing parametric MRI and DCE-MRI data. It was developed at the Biological Imaging Center at the California Institute of Technology and Loma Linda University.
+ROCKETSHIP is an open source toolbox for the processing and analysis of dynamic
+contrast-enhanced (DCE) and parametric MRI data. It provides quantitative pharmacokinetic
+modelling, parametric mapping of T<sub>1</sub>, T<sub>2</sub>, T<sub>2</sub><sup>*</sup> and
+the apparent diffusion coefficient, and the supporting workflow required to take a study from
+acquired images to parameter maps.
+
+It was developed at the Biological Imaging Center at the California Institute of Technology
+and at Loma Linda University, and is used in clinical and preclinical imaging research
+worldwide.
+
+## DCEasy
+
+ROCKETSHIP is part of the [**DCEasy** family of software](https://petmri.github.io) for quantitative dynamic
+contrast-enhanced MRI, 
+DCEasy provides an integrated set of tools covering the full path from scanner output to
+quantitative results:
+
+- **DICOM to BIDS conversion**, preparing acquired studies into a standard organised layout
+  with the acquisition metadata that quantitative analysis requires.
+- **Automatic and manual arterial input function selection**, addressing the largest single
+  source of systematic error in quantitative DCE-MRI.
+- **Batch processing**, applying a validated analysis consistently across entire studies
+  rather than one session at a time.
+- **Pharmacokinetic modelling and parametric mapping**, provided by ROCKETSHIP itself.
+
+The components are designed to work together, so a study prepared with the DCEasy conversion
+and input function tools can be processed by ROCKETSHIP without further preparation. Each is
+also usable independently. See [petmri.github.io](https://petmri.github.io) for a complete list of 
+available tools.
+
 
 ## Citation
 
-If you use ROCKETSHIP in your project, please cite:
+If you use ROCKETSHIP in your work, please cite:
 
-Ng, T.S.C., et al. [ROCKETSHIP: a flexible and modular software tool for the planning, processing and analysis of dynamic MRI studies](https://doi.org/10.1186/s12880-015-0062-3). *BMC Medical Imaging*, 15, 19 (2015). PMID: 26076957
+Ng, T.S.C., et al. [ROCKETSHIP: a flexible and modular software tool for the planning,
+processing and analysis of dynamic MRI studies](https://doi.org/10.1186/s12880-015-0062-3).
+*BMC Medical Imaging*, 15, 19 (2015). PMID: 26076957
 
-## Start Here
+## Start here
 
- 
-- [Python Walkthrough](wiki/python-walkthrough.md)
-- [MATLAB, DCE Walkthrough](wiki/dce-walkthrough.md)
-- [MATLAB, DSC Walkthrough](wiki/dsc-walkthrough.md)
-- [MATLAB, Parametric Walkthrough](wiki/parametric-walkthrough.md)
-- [Enable GPU Acceleration](wiki/enable-gpu-acceleration.md)
-- [DCE Options Reference](dce_options.md)
+- [Python Walkthrough](wiki/python-walkthrough.md) — the recommended interface for new work
+- [MATLAB DCE Walkthrough](wiki/dce-walkthrough.md)
+- [MATLAB DSC Walkthrough](wiki/dsc-walkthrough.md)
+- [MATLAB Parametric Walkthrough](wiki/parametric-walkthrough.md)
+- [GPU and CPU Acceleration](wiki/enable-gpu-acceleration.md)
 
-## Python (Recommended) Quick Start
+Technical reference:
+
+- [DCE Options](dce_options.md) — every configuration option
+- [Signal to Concentration](reference/signal-to-concentration.md) — the conversion math and its assumptions
+- [Pharmacokinetic Models](reference/models/index.md) — equations, parameters and model selection
+
+## Python quick start
+
+The Python implementation is the recommended interface and is under active development.
 
 ```bash
 git clone https://github.com/petmri/ROCKETSHIP.git
-cd ROCKETSHIP
-python3 install_python_acceleration.py
+```
+
+```bash
+cd ROCKETSHIP && python3 install_python_acceleration.py
+```
+
+```bash
 source .venv/bin/activate
-python run_dce_python_cli.py
+```
+
+```bash
 python run_parametric_python_cli.py
 ```
 
-For advanced Python usage and configuration details, see:
-- [Python README (repository)](https://github.com/petmri/ROCKETSHIP/blob/dev/python/README.md)
-- [Project Management Docs (repository)](https://github.com/petmri/ROCKETSHIP/blob/dev/docs/project-management/README.md)
-- [Transition TODO (repository)](https://github.com/petmri/ROCKETSHIP/blob/dev/docs/project-management/TODO.md)
-- [Python Roadmap (repository)](https://github.com/petmri/ROCKETSHIP/blob/dev/docs/project-management/ROADMAP.md)
+```bash
+python run_dce_python_cli.py
+```
 
-## MATLAB (Legacy) Quick Start
+Parametric T<sub>1</sub> mapping comes first, since DCE analysis requires a pre-contrast T<sub>1</sub> map
+as input. Graphical interfaces are available for both steps through
+`run_dce_python_gui.py` and `run_parametric_python_gui.py`.
 
-1. Clone ROCKETSHIP: `git clone --recursive https://github.com/petmri/ROCKETSHIP.git`
-2. Add the ROCKETSHIP folder to the MATLAB path
-3. Calculate T1 maps with `run_parametric.m`
-4. Check T1 maps with `run_analysis.m`
-5. Calculate DCE maps with `run_dce.m`
+See the [Python Walkthrough](wiki/python-walkthrough.md) for the full procedure.
 
-## Selected Publications Using ROCKETSHIP
+## MATLAB quick start (legacy)
 
-For a more complete list, see [Google Scholar](https://scholar.google.com/scholar?cites=17209875609254734596&as_sdt=2005&sciodt=0,5&hl=en).
+The MATLAB implementation is the original version and will be maintained, but new features will only be 
+implemented in python.
+
+```bash
+git clone https://github.com/petmri/ROCKETSHIP.git
+```
+
+1. Add the ROCKETSHIP folder to your MATLAB path.
+2. Calculate T<sub>1</sub> maps with `run_parametric.m`.
+3. Check the T<sub>1</sub> maps with `run_analysis.m`.
+4. Calculate DCE maps with `run_dce.m`.
+
+## Selected publications
+
+A more complete list is available on
+[Google Scholar](https://scholar.google.com/scholar?cites=17209875609254734596&as_sdt=2005&sciodt=0,5&hl=en).
 
 - Pan, H., et al. [Liganded magnetic nanoparticles for magnetic resonance imaging of α-synuclein](https://doi.org/10.1038/s41531-025-00918-z). *npj Parkinson's Disease*, 11(1), 88 (2025). PMID: 40268938
 - Llull, B., et al. [Blood-Brain Barrier Disruption Predicts Poor Outcome in Subarachnoid Hemorrhage: A Dynamic Contrast-Enhanced MRI Study](https://doi.org/10.1161/STROKEAHA.125.051455). *Stroke*, 56(9), 2633-2643 (2025). PMID: 40557536
@@ -62,4 +117,11 @@ For a more complete list, see [Google Scholar](https://scholar.google.com/schola
 
 ## Support
 
-If you need help and cannot find it in the docs yet, contact Sam Barnes (`sabarnes@llu.edu`).
+Questions not answered by this documentation may be directed to Sam Barnes at
+`sabarnes@llu.edu`. Bug reports and feature requests are best raised as
+[issues on GitHub](https://github.com/petmri/ROCKETSHIP/issues).
+
+## License
+
+ROCKETSHIP is released under the terms described in the
+[LICENSE](https://github.com/petmri/ROCKETSHIP/blob/master/LICENSE) file.

@@ -1,118 +1,233 @@
-# Launch ROCKETSHIP
-The main rocketship folder should be added to your matlab path. Then launch the DCE processing one of three ways:
+# MATLAB DCE Walkthrough
 
-\>>rocketship
+This guide covers DCE-MRI analysis using the MATLAB interface. For new work, the
+[Python implementation](python-walkthrough.md) is recommended.
 
-This launches a GUI where you can selection DCE
+## Launching
 
-\>>run_dce
+Add the main ROCKETSHIP folder to your MATLAB path, then start the DCE interface in one of
+three ways:
 
-This adds the required subfolders to your path the launches the DCE processing
+| Command | Effect |
+| --- | --- |
+| `rocketship` | Launch the main interface, from which DCE analysis can be selected |
+| `run_dce` | Add the required subfolders to the path, then launch DCE analysis |
+| `dce` | Launch DCE analysis directly, assuming the subfolders are already on the path |
 
-\>>dce
+## Analysis stages
 
-This launches the DCE processing directly, only use if you have added the appropariate subfolders to your path. 
+DCE analysis proceeds in four stages, named A, B, D and E. There is no Part C. Each stage
+takes the saved output of the previous one, so a stage can be repeated with different settings
+without recomputing those before it.
 
-The DCE processing is broken into four steps: A, B, D, and E.
+| Stage | Purpose |
+| --- | --- |
+| A | Load images and regions of interest, convert signal to concentration |
+| B | Define analysis timing and derive the arterial input function |
+| D | Fit the pharmacokinetic models and produce parameter maps |
+| E | Analyse the fitted curves and compare models |
 
-## Run A
-This section loads all of the input images and ROI files, it then calculates the concentration vs. time curves. 
+---
+
+## Part A: Image loading and concentration conversion
+
+Loads the input images and region of interest files, then calculates concentration versus time
+curves. The mathematics of this conversion is documented in
+[Signal to Concentration](../reference/signal-to-concentration.md).
 
 ### Input dynamic datasets
-Load the dynamic MRI images, usually a series of T1-weighted images. DICOM and NIFTI files are supported. "File Order" selects what order the "Z" dimension and time "t" dimension are.
 
-### Select T1 and ROI files ...
-* Select AIF/RR: defines what region to get the arterial input function (AIF) or reference region (RR) from the dynamic series. This can be a simple binary mask, with 1 in the AIF/RR region and zero elsewhere; or a T1 map, where the AIF/RR region contains valid T1 values (in ms), and all other regions are zero.
-* Select ROI: defines the region where analysis can be performed, is used to mask out uninteresting anatomy and noise regions to save on processing time. This can be a simple binary mask, with 1 in the AIF/RR region and zero elsewhere; or a T1 map, where the AIF/RR region contains valid T1 values (in ms), and all other regions are zero.
-* Select T1 map: if "Mask" was chosen for either of the above steps it is necessary to input a T1 map to define the T1 values for the tissues and AIF/RR. Units of ms, if in sec will attempt to auto detect and convert to ms.
-* Select Drift ROI: optional, defines a region of the image to use for drift correction. This must have constant signal intensity over the entirety of the scan (i.e. a vial of water with Gd), any tissue will not work as there is always some uptake of contrast agent. Scanner drift correction will be applied. All signal intensities are normalized in time based on the visible phantom.
-  * Global drift correction: Calculate a single drift correction factor to be applied to the entire image. Otherwise a different correction factor will be calculated and applied for each slice (if a slice doesn't have any visible drift phantom it will search for the nearest slice that does and use that).
+Load the dynamic series, normally a set of \(T_1\)-weighted images. DICOM and NIfTI formats
+are both supported. The **File Order** setting specifies the arrangement of the slice and time
+dimensions within the data.
 
-Noise handling used for SNR calculation to exclude noisy AIF voxels from analysis. 
-* Pick noise file: select binary mask image that defines a region of air that contains only noise.
-* Derive noise from corner square: derive noise from top left region of image in a square of defined size.
+### Region of interest and \(T_1\) files
 
-### Image Parameters
-* TR: dynamic series repetition time TR (in ms)
-* FA: dynamic series flip angle (in degrees)
-* Hematocrit: subject hematocit level, used for converting from blood concentrations to plasma concentrations
-* SNR for AIF filter: all AIF voxels with SNR lower than this will be removed
-* End Baseline, image num: the image number of the last baseline image before contrast arrival. if -1 will be asked to select from AIF plot, if -2 will be automatically determined
-* Contrast agent r1: relaxivity on contrast agent used see [Shen et al.](http://www.ncbi.nlm.nih.gov/pubmed/25658049)
-* Injection Duration (number images): how long the injection lasted in number of images, used for auto AIF selection
+**Select AIF/RR** defines the region from which the arterial input function or reference region
+is taken. This may be either a binary mask, with ones inside the region and zeros elsewhere,
+or a \(T_1\) map in which the region carries valid \(T_1\) values in milliseconds and all other
+voxels are zero.
 
-### AIF Selection
-* ROI defined: AIF defined by user input ROI, T1 value taken from T1 map or AIF ROI file
-* ROI w/ Static T1: AIF defined by user input ROI, T1 value defined here
-* Auto: automatically finds voxels that look most like a typical AIF (fast rise, slow decay), T1 value taken from T1 map
-* Auto: automatically finds voxels that look most like a typical AIF (fast rise, slow decay), T1 value defined here
-* Blood T1: defines a static pre T1 value to use for the AIF, in ms
+**Select ROI** defines the region over which analysis is performed, excluding background and
+anatomy of no interest to reduce processing time. It accepts the same two forms.
 
-## Run B
-This defines the timing parameters for analysis, and derives the AIF curve to be used. Requires output from Part A.
+**Select T1 map** supplies \(T_1\) values for tissue and for the arterial region. It is
+required whenever a binary mask was chosen for either of the selections above. Values are
+expected in milliseconds; values supplied in seconds are detected and converted.
+
+**Select Drift ROI** is optional and defines a region used to correct for scanner signal
+drift. The region must have constant signal intensity throughout the acquisition, so an
+external reference such as a vial of contrast-doped water is required. Tissue cannot be used,
+because tissue always takes up some contrast agent. All signal intensities are then normalised
+in time against this reference.
+
+**Global drift correction** calculates a single correction factor for the whole image. When
+disabled, a separate factor is calculated for each slice; slices in which the reference is not
+visible use the factor from the nearest slice in which it is.
+
+### Noise handling
+
+Noise is estimated to allow low signal to noise ratio voxels to be excluded from the arterial
+input function. Choose one of:
+
+- **Pick noise file** — a binary mask selecting a region of air containing only noise.
+- **Derive noise from corner square** — a square of the given size in the corner of the image.
+
+### Image parameters
+
+| Parameter | Description |
+| --- | --- |
+| TR | Repetition time of the dynamic series, in milliseconds |
+| FA | Flip angle of the dynamic series, in degrees |
+| Hematocrit | Subject haematocrit, used to convert whole blood to plasma concentration |
+| SNR for AIF filter | Arterial voxels below this signal to noise ratio are excluded |
+| End Baseline, image num | Index of the last baseline image before contrast arrival. Use −1 to select it interactively from the arterial curve, or −2 to determine it automatically |
+| Contrast agent r1 | Longitudinal relaxivity of the contrast agent |
+| Injection Duration | Duration of the injection in number of images, used for automatic arterial selection |
+
+Published relaxivity values for common contrast agents are tabulated in
+[Shen et al. (2015)](https://pubmed.ncbi.nlm.nih.gov/25658049/).
+
+### Arterial input function selection
+
+| Option | Behaviour |
+| --- | --- |
+| ROI defined | Region supplied by the user; \(T_1\) taken from the \(T_1\) map or the region file |
+| ROI w/ Static T1 | Region supplied by the user; \(T_1\) fixed to the value given here |
+| Auto | Voxels selected automatically by their resemblance to a typical arterial curve, that is a fast rise followed by a slow decay; \(T_1\) taken from the \(T_1\) map |
+| Auto w/ Static T1 | Automatic selection as above, with \(T_1\) fixed to the value given here |
+
+**Blood T1** sets the fixed pre-contrast arterial \(T_1\), in milliseconds, for the static
+options. A fixed value is often more stable than a measured one, because arterial voxels are
+susceptible to inflow and partial volume effects.
+
+---
+
+## Part B: Timing and the arterial input function
+
+Defines the timing parameters for the analysis and derives the arterial input function curve.
+Requires the output of Part A.
 
 ### Results of A
-Select the *.mat file saved from Part A
 
-### AIF
-* Raw AIF: uses the raw datapoints
-* Fitted AIF: fits the raw datapoints to a linear upslope and bi-exponential decay model, uses the fitted values for DCE calculation, can reduce noise, can reduce accuracy.
-* Import AIF: import a saved AIF from a *.mat file. Can use results from a previously run Part B, if defined manually must contain the variables:
-  - Cp_use - contains the AIF concentration dynamic curve in mM
-  - Stlv_use - contains the AIF signal intensity dynamic curve in a.u., only used for AUC calculations
-  - import_timer - contains the time vector specifying the time, in minutes, of each data point
-  - import_start - specifies the end of the baseline / the start of the bolus arrival, in minutes
-* Create average AIF: reads the AIF from multiple *.mat files (take from multiple subjects), and averages them together to create a single average AIF to use.
-* Analysis Interval: restrict the DCE analysis to specified time interval, in min. For no restriction use 0 for start and end.
-* Injection Duration: specify start and end of _BOLUS ARRIVAL_ in minutes. Use -1 for either field to automatically determine start/end (takes start as the end of steady state, end as the maximum data point). Used for AIF fitting only.
-* Time resolution: temporal resolution of dynamic series, in seconds
-* Manual time vector: load time vector from specified *.mat file. Useful for defining dynamic series with unequally spaced time points. *.mat file must contain variable "timer" with is the time vector, in minutes.
+Select the `.mat` file saved by Part A.
 
-## Run D
-There is no Part C (historical reasons). Part D calculates the DCE maps, it requires as input the results of Part B. 
+### Input function
+
+| Option | Behaviour |
+| --- | --- |
+| Raw AIF | Use the measured samples unmodified |
+| Fitted AIF | Fit the measured samples to a linear upslope and biexponential decay, and use the fitted curve. Reduces noise; may reduce accuracy |
+| Import AIF | Load a curve saved from a previous Part B run, or supplied manually |
+| Create average AIF | Average curves from several saved runs, typically across subjects, into a single population input function |
+
+The fitted form and its parameters are documented in the
+[Arterial Input Function reference](../reference/models/aif.md).
+
+A manually supplied import file must contain the following variables:
+
+| Variable | Contents |
+| --- | --- |
+| `Cp_use` | Arterial concentration curve, in mM |
+| `Stlv_use` | Arterial signal intensity curve, in arbitrary units, used only for area under the curve calculations |
+| `import_timer` | Time of each data point, in minutes |
+| `import_start` | End of the baseline and start of bolus arrival, in minutes |
+
+### Timing parameters
+
+| Parameter | Description |
+| --- | --- |
+| Analysis Interval | Restrict the analysis to a time interval, in minutes. Use 0 for both fields to apply no restriction |
+| Injection Duration | Start and end of bolus arrival, in minutes. Use −1 in either field to determine it automatically. Used for the input function fit only |
+| Time resolution | Temporal resolution of the dynamic series, in seconds |
+| Manual time vector | Load a time vector from a `.mat` file containing the variable `timer`, in minutes. Required for series with unequally spaced timepoints |
+
+---
+
+## Part D: Model fitting
+
+Calculates the parameter maps. Requires the output of Part B.
 
 ### Results of B
-Select the *.mat file saved from part B
 
-### Select DCE models
-For details on each model, formulas, and references see [Ng et al.](https://doi.org/10.1186/s12880-015-0062-3) Multiple models can be selected, an output file will be generated for each model.
-* Tofts: Ktrans, Ve
-* Patlak: Ktrans, Vp
-* FXR: Shutter speed model see [Zhou et al.](http://www.ncbi.nlm.nih.gov/pubmed/15282806)
-* Tofts w/ Vp: Ktrans, Ve, Vp
-* Nested Model: Variable
-* Tissue Uptake: Ktrans, Fp
-* 2CXM: Ktrans, Ve, Vp, Fp
-* Area under curve
+Select the `.mat` file saved by Part B.
+
+### Model selection
+
+Any number of models may be selected; a separate output file is produced for each. Full
+equations, parameters and selection guidance are in the
+[pharmacokinetic models reference](../reference/models/index.md).
+
+| Model | Parameters |
+| --- | --- |
+| [Tofts](../reference/models/tofts.md) | \(K^{trans}\), \(v_e\) |
+| [Tofts w/ Vp](../reference/models/extended-tofts.md) | \(K^{trans}\), \(v_e\), \(v_p\) |
+| [Patlak](../reference/models/patlak.md) | \(K^{trans}\), \(v_p\) |
+| [Tissue Uptake](../reference/models/tissue-uptake.md) | \(K^{trans}\), \(F_p\), \(T_p\) |
+| [2CXM](../reference/models/two-compartment-exchange.md) | \(K^{trans}\), \(v_e\), \(v_p\), \(F_p\) |
+| [FXR](../reference/models/fxr.md) | \(K^{trans}\), \(v_e\), \(\tau_i\) |
+| [Area under curve](../reference/models/auc.md) | AUC, normalised AUC |
+| Nested Model | Variable |
 
 ### Smoothing
-Smoothing can be performed in time, or in plane (XY directions). 
-* Time smoothing is not typically recommended as the DCE fittings effectively smooths in the time dimension. Robust Local Regression time smoothing can be useful for removing outlier points in the time curve (from motion, artifact, etc.) to keep them from influencing the fit.
-* XY smooth size: specify the standard deviation (in voxels) of a kernel for Gaussian smoothing in XY.
+
+Smoothing may be applied in time or in the imaging plane.
+
+- **Time smoothing** is not generally recommended, since model fitting already smooths
+  effectively in the time dimension. Robust local regression is useful for suppressing
+  isolated outlying timepoints arising from motion or artefact, preventing them from
+  influencing the fit.
+- **XY smooth size** sets the standard deviation, in voxels, of a Gaussian kernel applied in
+  the imaging plane.
 
 ### Fitting
-* ROIs to fit: specify an ROI to perform a single fit on. All voxels in the ROI will be averaged together at each time point, then a single DCE fit will be performed on the resulting time curve. ROI can be defined as an ImageJ ROI file (*.roi), or a NIFTI file, treated as a binary mask.
-* Fit all voxels: perform a DCE fit on every voxel, time intensive.
 
-### Number CPUs
-Specify the number of workers to use in the DCE fitting. 0 will automatically set to max number allowed (number of available cores), -1 will set to max-1 (available cores - 1). -1 is useful for long processing when you still need to use the computer while processing.
+**ROIs to fit** performs a single fit per region. All voxels within the region are averaged at
+each timepoint, and one fit is performed on the resulting curve. Regions may be supplied as
+ImageJ region files (`.roi`) or as NIfTI binary masks. Averaging before fitting improves the
+signal to noise ratio of the curve substantially, at the cost of any within-region detail.
 
-## Run E
-Runs the `fitting_analysis.m` script. This is used to analyze the time curves and DCE fits.
+**Fit all voxels** performs an independent fit at every voxel, producing full parameter maps.
+This is considerably more time consuming; see
+[GPU and CPU Acceleration](enable-gpu-acceleration.md).
 
-### Fitting Results
-* Models to Analyze: Input the *.mat files that were saved from Part D
-* Voxel Selection Image: for voxel analysis, image that will be displayed to allow selection of which voxel to analysis, usually one of the DCE parametric maps (such as Ktrans), or the T1 map.
+### Number of CPUs
 
-### Fitting Analysis
-* ROI List: List of ROI results, if no ROIs were processed in Part D this will be empty. Click on a ROI here to launch the results analysis.
-* Show original unsmoothed data: show unsmoothed time curve if time smoothing was used.
-* Show 95% confidence interval curves: shows 95% confidence interval fit curve
-* Run Voxel Analysis: launches voxel analysis tool
+Sets the number of MATLAB workers used for fitting. Use 0 for the number of available cores,
+or −1 for one fewer than that. The latter leaves a core free, which keeps the machine usable
+during a long run.
 
-### Statistical Model Comparison
-* Run Akaike: compare models using Akaike information criteria see [Glatting et al.](http://www.ncbi.nlm.nih.gov/pubmed/18072493)
-* Run F Test: compare models using F test see [Glatting et al.](http://www.ncbi.nlm.nih.gov/pubmed/18072493)
-* Run FMI/FRI compare models using FMI/FRI see [Balvay et al.](http://www.ncbi.nlm.nih.gov/pubmed/16155897)
-* Perform ROI Comparison: run stats on ROI results
-* Perform Voxel Comparison: run stats on voxel results
+---
+
+## Part E: Curve analysis and model comparison
+
+Runs `fitting_analysis.m` to examine the fitted curves and compare models.
+
+### Fitting results
+
+- **Models to Analyze** — the `.mat` files saved by Part D.
+- **Voxel Selection Image** — the image displayed for interactive voxel selection, usually a
+  parameter map such as \(K^{trans}\), or the \(T_1\) map.
+
+### Fitting analysis
+
+- **ROI List** — regions processed in Part D. Selecting one opens the results for that region.
+  Empty if no regions were processed.
+- **Show original unsmoothed data** — overlay the unsmoothed curve where time smoothing was
+  applied.
+- **Show 95% confidence interval curves** — overlay the confidence bounds on the fitted curve.
+- **Run Voxel Analysis** — open the interactive voxel analysis tool.
+
+### Statistical model comparison
+
+Where several models have been fitted to the same data, these tests indicate which is best
+supported.
+
+| Test | Applies |
+| --- | --- |
+| Akaike | Akaike information criterion, penalising additional parameters ([Glatting et al.](https://pubmed.ncbi.nlm.nih.gov/18072493/)) |
+| F Test | F test between nested models ([Glatting et al.](https://pubmed.ncbi.nlm.nih.gov/18072493/)) |
+| FMI/FRI | Fit micro and macro indices ([Balvay et al.](https://pubmed.ncbi.nlm.nih.gov/16155897/)) |
+
+**Perform ROI Comparison** and **Perform Voxel Comparison** apply the selected tests to region
+and voxel results respectively.

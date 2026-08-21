@@ -259,7 +259,7 @@ The MATLAB scripts are the original implementation of ROCKETSHIP and are still a
 
 ### MATLAB Quick Start
 
-1. Clone ROCKETSHIP: `git clone --recursive https://github.com/petmri/ROCKETSHIP.git`
+1. Clone ROCKETSHIP: `git clone https://github.com/petmri/ROCKETSHIP.git`
 2. Add the ROCKETSHIP folder to the MATLAB path
 3. Calculate T1 maps with script run_parametric.m
 4. Check T1 maps with script run_analysis.m

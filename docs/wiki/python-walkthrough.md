@@ -1,148 +1,161 @@
 # Python Walkthrough
 
-This walkthrough is derived from the Python usage guide in `/path/to/ROCKETSHIP/python/README.md` and focuses on practical run steps.
+This guide covers running the Python implementation of ROCKETSHIP, which is the recommended
+interface for new work. It describes environment setup, the command line and graphical
+interfaces for DCE and parametric analysis, and the outputs each produces.
 
-## Scope
+All commands are run from the repository root.
 
-Python entrypoints in this repo:
+## Available interfaces
 
-- DCE CLI: `/path/to/ROCKETSHIP/run_dce_python_cli.py`
-- Parametric T1 CLI: `/path/to/ROCKETSHIP/run_parametric_python_cli.py`
-- DCE GUI: `/path/to/ROCKETSHIP/run_dce_python_gui.py`
-- Parametric GUI: `/path/to/ROCKETSHIP/run_parametric_python_gui.py`
-- BIDS discovery: `/path/to/ROCKETSHIP/run_bids_discovery.py`
+| Interface | Entry point |
+| --- | --- |
+| DCE command line | `run_dce_python_cli.py` |
+| DCE graphical interface | `run_dce_python_gui.py` |
+| Parametric \(T_1\) command line | `run_parametric_python_cli.py` |
+| Parametric \(T_1\) graphical interface | `run_parametric_python_gui.py` |
+| BIDS dataset discovery | `run_bids_discovery.py` |
+| BIDS batch processing | `run_dce_bids_batch.py` |
 
-Current workflow emphasis:
+## 1. Environment setup
 
-- DCE A->B->D pipeline
-- Parametric VFA T1 mapping
-- Reliability and parity testing while porting from MATLAB
-
-## 1. Environment Setup
-
-Recommended setup:
+The installer creates a virtual environment, installs dependencies, and adds the optional
+acceleration libraries for your platform:
 
 ```bash
-cd /path/to/ROCKETSHIP
 python3 install_python_acceleration.py
 ```
 
-This creates `.venv`, installs dependencies, and attempts to install acceleration packages (`pyCpufit`, `pyGpufit`).
+See [GPU and CPU Acceleration](enable-gpu-acceleration.md) for platform support and installer
+options.
 
-Manual setup alternative:
+To set up the environment manually, without acceleration:
 
 ```bash
-cd /path/to/ROCKETSHIP
 python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip setuptools wheel
 .venv/bin/python -m pip install -r requirements.txt
 .venv/bin/python -m pip install -r requirements_gui.txt
 ```
 
-## 2. Run DCE CLI
+The `requirements_gui.txt` file is needed only for the graphical interfaces.
 
-Default run (uses `/path/to/ROCKETSHIP/python/dce_run_example.json`):
+## 2. DCE analysis from the command line
+
+Run with the built-in example configuration:
 
 ```bash
-cd /path/to/ROCKETSHIP
 .venv/bin/python run_dce_python_cli.py
 ```
 
-Run with explicit config:
+Run with your own configuration file:
 
 ```bash
-cd /path/to/ROCKETSHIP
-.venv/bin/python run_dce_python_cli.py --config tests/python/dce_cli_config.example.json
+.venv/bin/python run_dce_python_cli.py --config my_study_config.json
 ```
 
-Run with runtime overrides:
+Individual settings can be overridden at run time without editing the configuration file.
+Each `--set` argument takes one `key=value` pair:
 
 ```bash
-cd /path/to/ROCKETSHIP
-.venv/bin/python run_dce_python_cli.py \
-  --config tests/python/dce_cli_config.example.json \
-  --set voxel_MaxFunEvals=100 \
-  --set blood_t1_ms=1600
+.venv/bin/python run_dce_python_cli.py --config my_study_config.json --set blood_t1_ms=1600
 ```
 
-Typical outputs:
+Every available option is documented in the [DCE Options reference](../dce_options.md).
 
-- `dce_pipeline_run.json`
-- `dce_pipeline_events.jsonl`
-- Stage checkpoints (`a_out.json`, `b_out.json`, `d_out.json`) when enabled
-- DCE parameter maps
-- ROI spreadsheet output for ROI-enabled runs
+### Outputs
 
-## 3. Run Parametric T1 CLI
+| Output | Contents |
+| --- | --- |
+| `dce_pipeline_run.json` | Complete record of the run, including resolved settings and stage summaries |
+| `dce_pipeline_events.jsonl` | Chronological event log |
+| Parameter maps | One NIfTI per fitted parameter, per enabled model |
+| `dceAIF_fitting.png` | Arterial input function fit, for quality control |
+| `dce_timecurves.png` | Relaxation rate and concentration curves, for quality control |
+| Spreadsheet output | Region of interest results, when `write_xls` is enabled |
 
-Default run (uses `/path/to/ROCKETSHIP/python/parametric_default.json`):
+Stage checkpoint files are written when a checkpoint directory is configured, allowing a run
+to be resumed or a later stage to be repeated without recomputing the earlier ones.
+
+!!! tip "Inspect the quality control figures"
+    Check the arterial input function figure before interpreting any parameter map. A
+    misplaced baseline or a poorly fitted input function invalidates every fitted value in the
+    run, and both are immediately visible in that figure.
+
+## 3. Parametric \(T_1\) mapping from the command line
 
 ```bash
-cd /path/to/ROCKETSHIP
 .venv/bin/python run_parametric_python_cli.py
 ```
 
-Typical outputs:
+Outputs are a run record (`parametric_t1_run.json`), an event log
+(`parametric_t1_events.jsonl`), the \(T_1\) map, and a map of the coefficient of determination
+for the fit at each voxel.
 
-- `parametric_t1_run.json`
-- `parametric_t1_events.jsonl`
-- T1 map outputs
-- R-squared map outputs
+A \(T_1\) map is required input for DCE analysis, so this step normally comes first.
 
-## 4. Discover BIDS Sessions
+## 4. Graphical interfaces
 
-```bash
-cd /path/to/ROCKETSHIP
-.venv/bin/python run_bids_discovery.py \
-  --bids-root tests/data/BIDS_test \
-  --output-json out/bids_manifest.json \
-  --print-json
-```
-
-## 5. Run Python GUI
-
-DCE GUI:
+Activate the environment, then launch either interface:
 
 ```bash
-cd /path/to/ROCKETSHIP
 source .venv/bin/activate
 python run_dce_python_gui.py
 ```
 
-Parametric GUI:
-
 ```bash
-cd /path/to/ROCKETSHIP
 source .venv/bin/activate
 python run_parametric_python_gui.py
 ```
 
-## 6. Run Tests
+The DCE interface is organised into four tabs:
 
-All Python tests:
+- **Inputs** — select images, masks and maps, and set acquisition and fitting options.
+- **CLI Output** — the run log as it is produced.
+- **QC Figures** — the quality control figures described above.
+- **Results** — a slice viewer for the resulting parameter maps and dynamic series.
+
+Configurations built in the interface can be saved and reused from the command line, which is
+the usual route from exploratory analysis to batch processing.
+
+## 5. Working with BIDS datasets
+
+To enumerate the sessions available in a BIDS dataset and write a manifest:
 
 ```bash
-cd /path/to/ROCKETSHIP
+.venv/bin/python run_bids_discovery.py \
+  --bids-root /path/to/bids_dataset \
+  --output-json out/bids_manifest.json \
+  --print-json
+```
+
+The manifest can then be used to drive batch processing across the dataset with
+`run_dce_bids_batch.py`.
+
+## 6. Acquisition metadata
+
+DCE analysis requires the repetition time, flip angle and temporal resolution of the dynamic
+series. These are read from the JSON sidecar accompanying the images wherever one is present,
+which is the recommended arrangement.
+
+Where no sidecar is available, all three must be supplied manually, through the `tr_ms`,
+`fa_deg` and `time_resolution_sec` options. Supplying only some of them alongside a sidecar is
+rejected: set all three, or none.
+
+Contrast agent relaxivity and haematocrit follow the opposite precedence, since they describe
+the scan rather than the analysis. A value in the image sidecar takes priority over the run
+configuration. Relaxivity has no default and must be supplied; see
+[Signal to Concentration](../reference/signal-to-concentration.md).
+
+## 7. Running the test suite
+
+```bash
 .venv/bin/python -m pytest tests/python -q
 ```
 
-Contract parity tools:
+## Further reading
 
-```bash
-cd /path/to/ROCKETSHIP
-.venv/bin/python tests/contracts/generate_python_results.py --output /tmp/python_results.json
-.venv/bin/python tests/contracts/compare_with_matlab_baseline.py --python-results /tmp/python_results.json --require-all
-```
-
-## 7. Important Runtime Notes
-
-- DCE real Stage-A metadata (TR, FA, frame spacing) must be explicit from sidecar JSON or complete manual override tuple.
-- Backend values are `auto`, `cpu`, `gpufit`.
-- Stage-D accelerated fit behavior and options are documented in:
-  - `/path/to/ROCKETSHIP/docs/dce_options.md`
-
-## 8. Related Project Docs
-
-- `/path/to/ROCKETSHIP/python/README.md`
-- `/path/to/ROCKETSHIP/docs/project-management/TODO.md`
-- `/path/to/ROCKETSHIP/docs/project-management/ROADMAP.md`
+- [DCE Options reference](../dce_options.md) — every configuration option
+- [Pharmacokinetic models](../reference/models/index.md) — model equations and selection
+- [Signal to Concentration](../reference/signal-to-concentration.md) — the conversion and its inputs
+- [GPU and CPU Acceleration](enable-gpu-acceleration.md) — installation and backend selection

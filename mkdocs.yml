@@ -1,42 +1,63 @@
 site_name: ROCKETSHIP Documentation
+site_description: Processing and analysis of dynamic contrast-enhanced and parametric MRI data.
 site_url: https://petmri.github.io/ROCKETSHIP/
 repo_url: https://github.com/petmri/ROCKETSHIP
 repo_name: petmri/ROCKETSHIP
 docs_dir: docs
-# Archived project notes are kept for reference, not publication. They link freely to source
-# files outside `docs/`, which `mkdocs build --strict` rejects as broken -- the CI failure
-# these caused was in retired notes nobody reads on the site. Excluding the directory keeps
-# the strict build honest about the pages that are actually published, and means archiving a
-# project no longer means fixing up its links first.
+
+# Project-management notes and archived project records are working documents for the
+# development team, not user documentation. They stay in the repository and are excluded
+# from the published site.
 exclude_docs: |
-  project-management/projects/archived/
+  project-management/
+
 theme:
   name: material
   features:
     - navigation.sections
     - navigation.top
+    - navigation.indexes
     - search.suggest
     - search.highlight
     - content.code.copy
+
 markdown_extensions:
   - admonition
   - tables
+  - attr_list
   - toc:
       permalink: true
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.superfences
+  - pymdownx.details
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
 nav:
   - Home: index.md
   - Walkthroughs:
-      - DCE Walkthrough: wiki/dce-walkthrough.md
-      - DSC Walkthrough: wiki/dsc-walkthrough.md
-      - Parametric Walkthrough: wiki/parametric-walkthrough.md
       - Python Walkthrough: wiki/python-walkthrough.md
+      - MATLAB DCE Walkthrough: wiki/dce-walkthrough.md
+      - MATLAB DSC Walkthrough: wiki/dsc-walkthrough.md
+      - MATLAB Parametric Walkthrough: wiki/parametric-walkthrough.md
   - Setup:
-      - Enable GPU Acceleration: wiki/enable-gpu-acceleration.md
+      - GPU and CPU Acceleration: wiki/enable-gpu-acceleration.md
   - Technical Reference:
       - DCE Options: dce_options.md
-  - Project Management:
-      - Overview: project-management/README.md
-      - TODO: project-management/TODO.md
-      - Completed: project-management/COMPLETED.md
-      - Roadmap: project-management/ROADMAP.md
-      - Phantom GT Status: project-management/projects/phantom-gt/PHANTOM_GT_QUALIFICATION_STATUS.md
+      - Signal to Concentration: reference/signal-to-concentration.md
+      - Pharmacokinetic Models:
+          - Overview: reference/models/index.md
+          - Tofts: reference/models/tofts.md
+          - Extended Tofts: reference/models/extended-tofts.md
+          - Patlak: reference/models/patlak.md
+          - Tissue Uptake: reference/models/tissue-uptake.md
+          - Two-Compartment Exchange: reference/models/two-compartment-exchange.md
+          - FXR (Shutter Speed): reference/models/fxr.md
+          - Area Under the Curve: reference/models/auc.md
+          - Arterial Input Function: reference/models/aif.md
+  - Testing:
+      - Overview: testing.md
+      - OSIPI Verification: osipi-verification.md

@@ -37,17 +37,18 @@ each verified against OSIPI, where available on the machine running the tests:
   and for variable-flip-angle T1 mapping and signal-to-concentration conversion — all
   within OSIPI's official pass/fail tolerances. This is evidence the ported code has no
   gross errors, unit mistakes, or model-implementation defects.
-- **The accelerated backends agree with python on the simpler models** (Tofts, extended
-  Tofts, Patlak) but **diverge on the stiff multi-compartment 2CXM/2CUM fits** — the
-  fixed-iteration accelerated solver does not reliably converge there, so those models
-  should be fit with the python backend. The per-backend accuracy table and figures make
-  this explicit.
+- **The accelerated backends pass the same gate**, on all five accelerated models. They
+  match python to three significant figures on Tofts, extended Tofts, Patlak and 2CXM, and
+  are slightly more accurate than python on 2CUM. The stiff 2CXM/2CUM fits reach this by
+  fitting the extraction fraction `E = Ktrans/Fp` with analytic Jacobians and a shared
+  multi-start that picks the flow basin. The per-backend accuracy table and figures show
+  the margins.
 - **How ROCKETSHIP compares to the field.** Beyond pass/fail, the accuracy summary places
   ROCKETSHIP's error next to the spread of the published community implementations, so you
   can see where it sits relative to established software.
 
 See the generated report at
-`docs/project-management/projects/osipi-verification/osipi_summary.md`. Everything below is
+`tests/data/osipi/reference/osipi_summary.md`. Everything below is
 committed so the verification is fully reproducible.
 
 ## The reference data
@@ -124,7 +125,7 @@ ground-truth-vs-fit tables) plus comparison figures:
 ```bash
 cd /path/to/ROCKETSHIP
 .venv/bin/python tests/data/osipi/reference/generate_osipi_summary.py
-# -> docs/project-management/projects/osipi-verification/osipi_summary.md
+# -> tests/data/osipi/reference/osipi_summary.md
 # -> tests/data/osipi/reference/figures/*.png
 ```
 

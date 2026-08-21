@@ -2,7 +2,7 @@
 
 What this produces
 ------------------
-- ``docs/project-management/projects/osipi-verification/osipi_summary.md`` -- a plain
+- ``tests/data/osipi/reference/osipi_summary.md`` -- a plain
   markdown report: data provenance, a per-backend accuracy table (ROCKETSHIP error vs
   the OSIPI gate and the peer spread), and per-case ground-truth-vs-fit tables.
 - ``tests/data/osipi/reference/figures/*.png`` -- comparison figures.
@@ -72,9 +72,10 @@ REFERENCE_DIR = OSIPI_ROOT / "reference"
 FIG_DIR = REFERENCE_DIR / "figures"
 PEER_SUMMARY_JSON = REFERENCE_DIR / "osipi_peer_error_summary.json"
 OFFICIAL_TOL_JSON = REFERENCE_DIR / "osipi_official_tolerances.json"
-SUMMARY_MD = (
-    REPO_ROOT / "docs" / "project-management" / "projects" / "osipi-verification" / "osipi_summary.md"
-)
+# Written beside the data it describes and the ``figures/`` this script also writes, next to
+# the sibling ``peer_accuracy_summary.md``. It is a generated artifact of the test data, not a
+# project-management note, so it does not live under ``docs/``.
+SUMMARY_MD = REFERENCE_DIR / "osipi_summary.md"
 
 SOURCE_COMMIT = "23d3714797045d8103d5b5fa4f4c016840094dc0"
 SOURCE_REPO = "https://github.com/OSIPI/DCE-DSC-MRI_TestResults"
@@ -372,26 +373,47 @@ def _compute_t1(peer: Dict[str, Any]) -> Dict[str, Any]:
 # figures
 # --------------------------------------------------------------------------- #
 def _plot_backends(res: Dict[str, Any], keys: List[str], *, title: str, outfile: Path) -> None:
-    """Per DCE parameter, plot each backend's max error vs the OSIPI a_tol."""
+    """Per DCE parameter, plot each backend's worst-case error as a fraction of the OSIPI gate.
+
+    Plotted as a *fraction of tolerance* rather than as an absolute error against ``a_tol``.
+    The gate each case is actually judged on is ``a_tol + r_tol*|ref|`` (see ``_gate_rows``),
+    so drawing the bare ``a_tol`` puts the bar below the real threshold and makes passing
+    parameters -- 2cxm ps most visibly -- read as failures. Normalising also puts every
+    parameter on one axis despite their differing units, and turns the gate into a single
+    line at 1.0.
+
+    Backends are dodged slightly on x. They agree to several significant figures on most
+    parameters, so plotted at the same x the later marker completely hides the earlier one
+    and the figure looks like it is missing data.
+    """
     idx = [(r["model"], r["param"]) for r in res["gated"]
            if r["backend"] == "python" and r["model"] in keys]
     labels = [f"{m}\n{p}" for m, p in idx]
     x = np.arange(len(idx), dtype=float)
     by = {(r["backend"], r["model"], r["param"]): r for r in res["gated"]}
 
-    fig, ax = plt.subplots(figsize=(max(7.0, 1.5 * len(idx)), 5.0))
+    fig, ax = plt.subplots(figsize=(max(9.0, 1.5 * len(idx)), 5.0))
     markers = {"python": ("o", "#1f77b4"), "cpufit": ("s", "#d62728"), "gpufit": ("^", "#9467bd")}
-    for be in res["backends"]:
-        ys = [by.get((be, m, p), {}).get("our_max", np.nan) for m, p in idx]
+    backends = list(res["backends"])
+    n_be = max(len(backends), 1)
+    # Spread the backends across a fixed fraction of the category slot, centred on the tick.
+    span = 0.26
+    offsets = (np.arange(n_be, dtype=float) - (n_be - 1) / 2.0) * (span / max(n_be - 1, 1))
+
+    for off, be in zip(offsets, backends):
+        ys = [by.get((be, m, p), {}).get("official_worst_frac", np.nan) for m, p in idx]
         m_, c_ = markers.get(be, ("x", "#333333"))
-        ax.scatter(x, ys, marker=m_, color=c_, s=55, label=f"{be} max", zorder=3)
-    official = [by[("python", m, p)].get("a_tol", np.nan) for m, p in idx]
-    ax.scatter(x, official, marker="_", color="#2ca02c", s=340, linewidths=2.2, label="OSIPI a_tol (gate)")
+        ax.scatter(x + off, ys, marker=m_, color=c_, s=55, label=f"{be}", zorder=3)
+
+    ax.axhline(1.0, color="#2ca02c", linewidth=2.0, zorder=2,
+               label="OSIPI gate (a_tol + r_tol·|ref|)")
+    ax.axhspan(1.0, 1e9, color="#d62728", alpha=0.06, zorder=0)
 
     ax.set_yscale("log")
+    ax.set_ylim(top=2.0)
     ax.set_xticks(x)
     ax.set_xticklabels(labels, fontsize=8)
-    ax.set_ylabel("Max absolute error (log scale)")
+    ax.set_ylabel("Worst-case error ÷ OSIPI tolerance\n(log scale; below 1.0 passes)")
     ax.set_title(title)
     ax.grid(axis="y", alpha=0.25)
     ax.set_axisbelow(True)
@@ -430,11 +452,11 @@ def _plot_single(rows: List[Dict[str, Any]], *, title: str, outfile: Path) -> No
 def _write_figures(res: Dict[str, Any]) -> List[Path]:
     out = []
     _plot_backends(res, ["tofts", "etofts", "2cxm", "2cum"],
-                   title="OSIPI DROs: max fit error by backend vs OSIPI gate",
+                   title="OSIPI DROs: worst-case fit error vs the OSIPI gate",
                    outfile=FIG_DIR / "osipi_accuracy_dros.png")
     out.append(FIG_DIR / "osipi_accuracy_dros.png")
     _plot_backends(res, ["patlak"],
-                   title="OSIPI Patlak (delay 0): max fit error by backend vs OSIPI gate",
+                   title="OSIPI Patlak (delay 0): worst-case fit error vs the OSIPI gate",
                    outfile=FIG_DIR / "osipi_accuracy_patlak_delay.png")
     out.append(FIG_DIR / "osipi_accuracy_patlak_delay.png")
     _plot_single([res["t1"]], title="OSIPI T1 linear (python): error vs peer spread",
@@ -461,11 +483,11 @@ def _provenance_lines(res: Dict[str, Any]) -> List[str]:
         "- **python** — the pure-CPU scipy fit (`model_*_fit`), the DCE reference the reliability "
         "tests gate on, and the only backend for T1 mapping.",
         "- **cpufit / gpufit** — the accelerated (float32) Stage-D fit for the five DCE models. "
-        "Reliable for `tofts`/`etofts`/`patlak` and, via a backend-agnostic random multi-start that "
-        "escapes the wrong-Fp-basin degenerate minimum, for `2cum`. The stiff `2cxm` fit still misses "
-        "a few low-flow (Fp=5) cases where vp is weakly identifiable (see the FAIL cells below) -- not "
-        "a precision issue; the float64 python backend, which fits the extraction fraction E=Ktrans/Fp, "
-        "is the reference for `2cxm`.",
+        "All five pass the full OSIPI sweep. `2cum`/`2cxm` fit the extraction fraction E=Ktrans/Fp "
+        "with an O(N) exponential-recurrence convolution and analytic Jacobians (the Ktrans=Fp pole "
+        "becomes the bound E->1), and use the shared candidate-assembly/multi-start machinery in "
+        "`dce_fit_backends.py` to pick the flow basin. The low-flow (Fp=5) `2cxm` cases that "
+        "previously missed now pass, once the lowered `lower_limit_fp` lets Fp reach that regime.",
         "",
         "## Where these numbers come from",
         "",
