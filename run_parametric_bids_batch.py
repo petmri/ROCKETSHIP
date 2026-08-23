@@ -14,6 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(REPO_ROOT / "python"))
 
 from bids_discovery import BidsSession, discover_bids_sessions  # noqa: E402
+from cli_overrides import parse_set_overrides  # noqa: E402
 from parametric_pipeline import ParametricT1Config, run_parametric_t1_pipeline  # noqa: E402
 
 
@@ -22,35 +23,6 @@ def _load_config_template(path: Path) -> Dict[str, Any]:
     if not path.exists():
         raise FileNotFoundError(f"Config template not found: {path}")
     return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _coerce_value(raw: str) -> Any:
-    text = raw.strip()
-    lower = text.lower()
-    if lower in {"true", "false"}:
-        return lower == "true"
-    if lower in {"none", "null"}:
-        return None
-    try:
-        if "." in text or "e" in lower:
-            return float(text)
-        return int(text)
-    except ValueError:
-        return text
-
-
-def _parse_set_overrides(values: List[str]) -> Dict[str, Any]:
-    """Parse KEY=VALUE overrides."""
-    overrides: Dict[str, Any] = {}
-    for raw in values:
-        if "=" not in raw:
-            raise ValueError(f"Invalid --set entry '{raw}'. Expected KEY=VALUE")
-        key, value = raw.split("=", 1)
-        key = key.strip()
-        if not key:
-            raise ValueError(f"Invalid --set entry '{raw}'. Empty KEY")
-        overrides[key] = _coerce_value(value)
-    return overrides
 
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
@@ -361,7 +333,7 @@ def main(argv: List[str] | None = None) -> int:
             return 2
 
     try:
-        set_overrides = _parse_set_overrides(args.set_overrides)
+        set_overrides = parse_set_overrides(args.set_overrides)
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2

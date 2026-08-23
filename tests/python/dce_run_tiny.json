@@ -7,7 +7,10 @@
     "and its masks lack the space-DCEref_ prefix -- so every input is named explicitly here",
     "and auto-discovery does not apply. See docs/bids_fixture_naming_alignment_plan.md.",
     "",
-    "Settings not listed under stage_overrides resolve from python/dce_defaults.json."
+    "Settings not listed under stage_overrides resolve from python/dce_defaults.json.",
+    "",
+    "'relaxivity' comes from the desc-tinymeta.json sidecar named below, which outranks this",
+    "file for per-scan values -- restating it here would have had no effect."
   ],
   "subject_source_path": "./tests/data/BIDS_test/rawdata/sub-11tiny/ses-01",
   "subject_tp_path": "./tests/data/BIDS_test/derivatives/sub-11tiny/ses-01",
@@ -47,7 +50,6 @@
     "stage_b_mode": "real",
     "stage_d_mode": "real",
     "rootname": "Dyn-1",
-    "relaxivity": 3.6,
     "dce_metadata_path": "./tests/data/BIDS_test/derivatives/sub-11tiny/ses-01/dce/sub-11tiny_ses-01_desc-tinymeta.json"
   }
 }

@@ -9,6 +9,7 @@ import sys
 from typing import Any, Dict, IO, Optional
 
 from banner import print_banner
+from cli_overrides import parse_set_overrides
 from dce_pipeline import DcePipelineConfig, run_dce_pipeline
 
 
@@ -23,19 +24,6 @@ def _load_config(path: Path) -> Dict[str, Any]:
     if not path.exists():
         raise FileNotFoundError(f"Config file not found: {path}")
     return json.loads(path.read_text())
-
-
-def _parse_set_overrides(values: list[str]) -> Dict[str, Any]:
-    overrides: Dict[str, Any] = {}
-    for raw in values:
-        if "=" not in raw:
-            raise ValueError(f"Invalid --set entry '{raw}'. Expected KEY=VALUE")
-        key, value = raw.split("=", 1)
-        key = key.strip()
-        if not key:
-            raise ValueError(f"Invalid --set entry '{raw}'. Empty KEY")
-        overrides[key] = value.strip()
-    return overrides
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -78,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
         payload["backend"] = args.backend
 
     stage_overrides = dict(payload.get("stage_overrides", {}))
-    stage_overrides.update(_parse_set_overrides(args.set_overrides))
+    stage_overrides.update(parse_set_overrides(args.set_overrides))
     if stage_overrides:
         payload["stage_overrides"] = stage_overrides
 

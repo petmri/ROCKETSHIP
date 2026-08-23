@@ -13,6 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(REPO_ROOT / "python"))
 
 from bids_discovery import BidsSession, discover_bids_sessions  # noqa: E402
+from cli_overrides import parse_set_overrides  # noqa: E402
 from dce_file_discovery import discover_dce_inputs  # noqa: E402
 from dce_pipeline import DcePipelineConfig, run_dce_pipeline  # noqa: E402
 
@@ -22,20 +23,6 @@ def _load_config_template(path: Path) -> Dict[str, Any]:
     if not path.exists():
         raise FileNotFoundError(f"Config template not found: {path}")
     return json.loads(path.read_text())
-
-
-def _parse_set_overrides(values: list[str]) -> Dict[str, Any]:
-    """Parse KEY=VALUE overrides."""
-    overrides: Dict[str, Any] = {}
-    for raw in values:
-        if "=" not in raw:
-            raise ValueError(f"Invalid --set entry '{raw}'. Expected KEY=VALUE")
-        key, value = raw.split("=", 1)
-        key = key.strip()
-        if not key:
-            raise ValueError(f"Invalid --set entry '{raw}'. Empty KEY")
-        overrides[key] = value.strip()
-    return overrides
 
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
@@ -198,7 +185,6 @@ def _build_session_config(
             "stage_a_mode": "real",
             "stage_b_mode": "real",
             "stage_d_mode": "real",
-            "aif_curve_mode": "raw",
             "write_param_maps": True,
         },
     }
@@ -422,7 +408,7 @@ def main(argv: List[str] | None = None) -> int:
     # Parse models and overrides (models is empty list if --dce-models not provided)
     models = [m.strip().lower() for m in args.dce_models.split(",") if m.strip()] if args.dce_models else []
     try:
-        set_overrides = _parse_set_overrides(args.set_overrides)
+        set_overrides = parse_set_overrides(args.set_overrides)
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2

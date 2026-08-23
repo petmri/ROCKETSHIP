@@ -180,6 +180,26 @@ def resolve_optional(
     return table.default_for(key, fallback)
 
 
+def resolve_scan_value_with_source(
+    config: Any,
+    key: str,
+    sidecar: Optional[Mapping[str, Any]] = None,
+    *,
+    defaults: Optional[DceDefaults] = None,
+) -> tuple[Any, str]:
+    """Resolve a per-scan value and report where it came from.
+
+    The source is `"sidecar"`, `"run_config"` or `"defaults_file"`. Callers log it: this is
+    the one place the run config can be outranked, so a value set there and then ignored is
+    otherwise invisible.
+    """
+    if sidecar:
+        found = _override(sidecar, key)
+        if found is not _UNSET and found is not None:
+            return found, "sidecar"
+    return resolve_with_source(config, key, defaults=defaults)
+
+
 def resolve_scan_value(
     config: Any,
     key: str,
@@ -193,11 +213,7 @@ def resolve_scan_value(
     values legitimately differ between scans and the sidecar is the per-scan record.
     `dce2bids` writes them there.
     """
-    if sidecar:
-        found = _override(sidecar, key)
-        if found is not _UNSET and found is not None:
-            return found
-    return resolve(config, key, defaults=defaults)
+    return resolve_scan_value_with_source(config, key, sidecar, defaults=defaults)[0]
 
 
 # --- Stage-D fit settings -------------------------------------------------------------

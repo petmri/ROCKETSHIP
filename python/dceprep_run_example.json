@@ -6,7 +6,12 @@
     "",
     "Every knob not listed under stage_overrides resolves from python/dce_defaults.json,",
     "the single source for defaults, limits and preferences. See dce_run_example.json for",
-    "the literal-path form the CLI and GUI use."
+    "the literal-path form the CLI and GUI use.",
+    "",
+    "This is the one example that sets 'relaxivity' in stage_overrides, as a study-wide",
+    "fallback: a batch sweeps many sessions, and any whose sidecar omits it would otherwise",
+    "stop the run. Sessions that do carry it in their sidecar use that instead -- the sidecar",
+    "outranks this file for per-scan values."
   ],
   "subject_source_path": "./tests/data/BIDS_test/rawdata/sub-02downsample/ses-01",
   "subject_tp_path": "./tests/data/BIDS_test/derivatives/sub-02downsample/ses-01",

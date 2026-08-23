@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 
 
 import dce_config
+from cli_overrides import coerce_override_value
 from bids_discovery import BidsSession
 from dce_file_discovery import discover_dce_input_paths, missing_required_inputs
 from dce_volume_viewer import Volume, VolumeViewer, discover_result_volumes
@@ -139,13 +140,8 @@ def _value_to_text(value: Any) -> str:
 
 
 def _text_to_value(text: str) -> Any:
-    raw = text.strip()
-    if raw == "":
-        return ""
-    try:
-        return json.loads(raw)
-    except Exception:
-        return raw
+    """Read an override-table cell exactly as `--set KEY=VALUE` reads its value."""
+    return coerce_override_value(text)
 
 
 def _paths_to_text(values: List[str]) -> str:

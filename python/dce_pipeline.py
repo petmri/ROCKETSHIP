@@ -553,6 +553,54 @@ def _scan_override(config: DcePipelineConfig, key: str, sidecar: Optional[Dict[s
     return dce_config.resolve_scan_value(config, key, sidecar)
 
 
+# How each per-scan source reads in the Stage-A log line.
+_SCAN_SOURCE_LABELS = {
+    "sidecar": "image sidecar",
+    "run_config": "run config",
+    "defaults_file": "dce_defaults.json",
+}
+
+
+def _run_config_value(config: DcePipelineConfig, key: str) -> Any:
+    """The run config's own value for `key`, case-insensitively; `None` when it sets none."""
+    overrides = config.stage_overrides or {}
+    lowered = str(key).strip().lower()
+    for candidate, value in overrides.items():
+        if str(candidate).strip().lower() == lowered:
+            return value
+    return None
+
+
+def _log_scan_value_sources(
+    config: DcePipelineConfig, resolved: Dict[str, Tuple[Any, str]]
+) -> Dict[str, str]:
+    """Report where each per-scan value came from, and say so when the sidecar outranked
+    the run config.
+
+    These two keys are the only ones a run config can lose, so a `relaxivity` set there and
+    then ignored is otherwise indistinguishable from one that was honoured.
+    """
+    summary = ", ".join(
+        f"{key}={float(value):g} ({_SCAN_SOURCE_LABELS.get(source, source)})"
+        for key, (value, source) in resolved.items()
+    )
+    print(f"[DCE] Stage-A per-scan values: {summary}", flush=True)
+
+    for key, (value, source) in resolved.items():
+        if source != "sidecar":
+            continue
+        requested = _run_config_value(config, key)
+        if requested is None:
+            continue
+        print(
+            f"[DCE] {key}: run config set {float(requested):g}, not used. "
+            f"The image sidecar's {float(value):g} wins for per-scan values.",
+            flush=True,
+        )
+
+    return {f"{key}_source": source for key, (_, source) in resolved.items()}
+
+
 def _override_value_is_set(value: Any) -> bool:
     if value is None:
         return False
@@ -1873,8 +1921,13 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     # every other key. They legitimately differ between scans and the sidecar is the per-scan
     # record -- `dce2bids` writes them there. `timing` already carries what the sidecar said.
     # `relaxivity` has no default anywhere, so a run with none configured stops here.
-    relaxivity = float(_scan_override(config, "relaxivity", timing))
-    hematocrit = float(_scan_override(config, "hematocrit", timing))
+    relaxivity_resolved = dce_config.resolve_scan_value_with_source(config, "relaxivity", timing)
+    hematocrit_resolved = dce_config.resolve_scan_value_with_source(config, "hematocrit", timing)
+    scan_value_sources = _log_scan_value_sources(
+        config, {"relaxivity": relaxivity_resolved, "hematocrit": hematocrit_resolved}
+    )
+    relaxivity = float(relaxivity_resolved[0])
+    hematocrit = float(hematocrit_resolved[0])
     if relaxivity <= 0.0:
         raise ValueError(f"relaxivity must be positive, got {relaxivity}")
     if not (0.0 <= hematocrit < 1.0):
@@ -1972,6 +2025,7 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
         "time_resolution_min": time_resolution_min,
         "relaxivity": relaxivity,
         "hematocrit": hematocrit,
+        **scan_value_sources,
         "aif_concentration_kind": timing.get("aif_concentration_kind"),
         "metadata_source_path": timing.get("metadata_source_path"),
         "metadata_sources": timing.get("metadata_sources"),
@@ -3329,7 +3383,7 @@ def _write_param_maps(
     spatial_shape: Optional[Tuple[int, int, int]],
     reference: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, str]:
-    write_maps = bool(_stage_override(config, "write_param_maps"))
+    write_maps = _to_bool(_stage_override(config, "write_param_maps"), True)
     if not write_maps or spatial_shape is None:
         return {}
 
@@ -3920,7 +3974,13 @@ def _run_stage_d_real(
     if sttum is not None:
         sttum = _smooth_time_matrix(sttum, time_smoothing, time_smoothing_window)
 
-    relaxivity = float(stage_a.get("relaxivity", _stage_override(config, "relaxivity")))
+    # Resolve the fallback only when Stage A genuinely did not report one: `dict.get`
+    # evaluates its default eagerly, so spelling this as `stage_a.get(key, _stage_override(...))`
+    # raised for a sidecar-supplied relaxivity that Stage A had already used successfully.
+    relaxivity_from_stage_a = stage_a.get("relaxivity")
+    if relaxivity_from_stage_a is None:
+        relaxivity_from_stage_a = _stage_override(config, "relaxivity")
+    relaxivity = float(relaxivity_from_stage_a)
     prefs = _stage_d_fit_prefs(config)
     fw = float(prefs["fxr_fw"])
 

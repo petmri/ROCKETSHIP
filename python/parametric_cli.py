@@ -9,6 +9,7 @@ import sys
 from typing import Any, Dict, IO, Optional
 
 from banner import print_banner
+from cli_overrides import parse_set_overrides
 from parametric_pipeline import ParametricT1Config, run_parametric_t1_pipeline
 
 
@@ -23,32 +24,6 @@ def _load_config(path: Path) -> Dict[str, Any]:
     if not path.exists():
         raise FileNotFoundError(f"Config file not found: {path}")
     return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _coerce_value(raw: str) -> Any:
-    text = raw.strip()
-    lower = text.lower()
-    if lower in {"true", "false"}:
-        return lower == "true"
-    try:
-        if "." in text or "e" in lower:
-            return float(text)
-        return int(text)
-    except ValueError:
-        return text
-
-
-def _parse_set_overrides(values: list[str]) -> Dict[str, Any]:
-    overrides: Dict[str, Any] = {}
-    for raw in values:
-        if "=" not in raw:
-            raise ValueError(f"Invalid --set entry '{raw}'. Expected KEY=VALUE")
-        key, value = raw.split("=", 1)
-        key = key.strip()
-        if not key:
-            raise ValueError(f"Invalid --set entry '{raw}'. Empty KEY")
-        overrides[key] = _coerce_value(value)
-    return overrides
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -115,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.rsquared_threshold is not None:
         payload["rsquared_threshold"] = float(args.rsquared_threshold)
 
-    payload.update(_parse_set_overrides(args.set_overrides))
+    payload.update(parse_set_overrides(args.set_overrides))
 
     config = ParametricT1Config.from_dict(payload, base_dir=config_path.parent)
     resolved_output_dir = config.output_dir

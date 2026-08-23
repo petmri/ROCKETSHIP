@@ -26,7 +26,13 @@ from dce_pipeline import DcePipelineConfig  # noqa: E402
 PREFERENCE_MODULES = ("dce_pipeline.py", "dce_fit_backends.py", "dce_models.py")
 
 # Reader functions whose second positional argument is a preference key.
-KEY_READERS = ("_stage_override", "resolve", "resolve_optional", "resolve_scan_value")
+KEY_READERS = (
+    "_stage_override",
+    "resolve",
+    "resolve_optional",
+    "resolve_scan_value",
+    "resolve_scan_value_with_source",
+)
 
 # Resolution calls -> index of the first argument acting as a fallback. A literal there is
 # a default living in source, which is what this migration exists to remove.
@@ -35,6 +41,7 @@ FALLBACK_ARG = {
     "resolve_with_source": 2,
     "resolve_optional": 2,
     "resolve_scan_value": 3,  # (config, key, sidecar)
+    "resolve_scan_value_with_source": 3,  # (config, key, sidecar)
     "_stage_override": 2,
     "_stage_override_optional": 2,
     "_scan_override": 3,
@@ -311,6 +318,28 @@ class TestResolution:
         # With no sidecar value the run config still wins over the defaults file.
         assert dce_config.resolve_scan_value(config, "relaxivity", {}) == 3.6
         assert dce_config.resolve_scan_value(config, "hematocrit", None) == 0.40
+
+    def test_per_scan_resolution_reports_which_source_won(self, tmp_path) -> None:
+        """A run-config value losing to the sidecar is normal, so Stage A logs which won.
+
+        Without the reported source that outcome is invisible: the run config names a
+        relaxivity, the sidecar quietly supplies a different one, and nothing says so.
+        """
+
+        config = self._config(tmp_path, relaxivity=3.6, hematocrit=0.40)
+
+        assert dce_config.resolve_scan_value_with_source(
+            config, "relaxivity", {"relaxivity": 4.5}
+        ) == (4.5, "sidecar")
+        assert dce_config.resolve_scan_value_with_source(config, "relaxivity", {}) == (
+            3.6,
+            "run_config",
+        )
+
+        bare = self._config(tmp_path)
+        value, source = dce_config.resolve_scan_value_with_source(bare, "hematocrit", {})
+        assert source == "defaults_file"
+        assert value == pytest.approx(0.45)
 
     def test_hematocrit_falls_through_to_the_defaults_file(self, tmp_path) -> None:
 

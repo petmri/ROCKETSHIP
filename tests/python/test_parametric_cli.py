@@ -15,6 +15,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "python"))
 
+import cli_overrides  # noqa: E402
 import parametric_cli  # noqa: E402
 
 
@@ -67,4 +68,4 @@ def test_main_applies_overrides_and_set_values() -> None:
 @pytest.mark.unit
 def test_parse_set_overrides_rejects_invalid_entries() -> None:
     with pytest.raises(ValueError, match="Expected KEY=VALUE"):
-        parametric_cli._parse_set_overrides(["bad_entry"])  # pylint: disable=protected-access
+        cli_overrides.parse_set_overrides(["bad_entry"])

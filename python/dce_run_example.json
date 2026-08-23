@@ -7,8 +7,9 @@
     "for defaults, limits and preferences. Restating a default here would fork it, so keys",
     "whose value matches the defaults file are deliberately absent.",
     "",
-    "'relaxivity' has no default anywhere and must be supplied per run -- here, or (better)",
-    "in the DCE image's JSON sidecar, which wins over this file."
+    "'relaxivity' has no default anywhere and must be supplied per run. This example uses the",
+    "preferred route: it lives in the DCE image's JSON sidecar, which wins over this file, so",
+    "no 'relaxivity' key appears below. See dceprep_run_example.json for the run-config route."
   ],
   "subject_source_path": "./tests/data/BIDS_test/rawdata/sub-02downsample/ses-01",
   "subject_tp_path": "./tests/data/BIDS_test/derivatives/sub-02downsample/ses-01",
@@ -47,7 +48,6 @@
     "stage_d_mode": "real",
     "rootname": "Dyn-1",
     "start_t": 3,
-    "relaxivity": 5.7,
     "dce_metadata_path": "./tests/data/BIDS_test/rawdata/sub-02downsample/ses-01/dce/sub-02downsample_ses-01_DCE.json"
   }
 }

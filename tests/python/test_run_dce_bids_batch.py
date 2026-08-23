@@ -62,6 +62,10 @@ def test_batch_config_strips_template_injection_windows_by_default() -> None:
             set_overrides={},
         )
 
+        # Building a config is not enough: the retired-key guard lives in validate(), so a
+        # batch default that drifts out of dce_defaults.json only surfaces here.
+        config.validate()
+
         keys = {str(k).strip().lower() for k in config.stage_overrides}
         assert "start_injection_min" not in keys
         assert "end_injection_min" not in keys
@@ -87,7 +91,30 @@ def test_batch_config_keeps_injection_windows_when_explicitly_set() -> None:
             },
         )
 
+        config.validate()
+
         # start_injection_min is no longer a pipeline option (the injection start is always the
         # resolved baseline end), so the template hard-code is dropped rather than carried.
         assert "start_injection_min" not in config.stage_overrides
         assert str(config.stage_overrides["end_injection_min"]) == "1.05"
+
+
+def test_batch_default_config_validates_without_a_template() -> None:
+    """The no-template invocation is the one users reach for first.
+
+    Its stage_overrides are hardcoded in run_dce_bids_batch rather than resolved from
+    dce_defaults.json, so they can drift out of the defaults file unnoticed. A retired key
+    left in that block once made every batch session fail while these tests stayed green.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        session = _make_session(Path(tmp))
+        config = _build_session_config(
+            session=session,
+            output_dir=Path(tmp) / "out",
+            backend="auto",
+            models=[],
+            config_template=None,
+            set_overrides={},
+        )
+
+        config.validate()

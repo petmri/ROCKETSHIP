@@ -14,6 +14,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "python"))
 
+import cli_overrides  # noqa: E402
 import dce_cli  # noqa: E402
 
 
@@ -46,6 +47,10 @@ def test_main_applies_set_overrides() -> None:
                             "voxel_MaxFunEvals=123",
                             "--set",
                             "blood_t1_ms=1600",
+                            "--set",
+                            "write_param_maps=false",
+                            "--set",
+                            "rootname=Dyn-1",
                         ]
                     )
 
@@ -53,11 +58,16 @@ def test_main_applies_set_overrides() -> None:
         payload = from_dict_mock.call_args.args[0]
         assert "stage_overrides" in payload
         assert payload["stage_overrides"]["existing_key"] == "existing_value"
-        assert payload["stage_overrides"]["voxel_MaxFunEvals"] == "123"
-        assert payload["stage_overrides"]["blood_t1_ms"] == "1600"
+        assert payload["stage_overrides"]["voxel_MaxFunEvals"] == 123
+        assert payload["stage_overrides"]["blood_t1_ms"] == 1600
+        # A --set boolean has to arrive as a real bool. Kept as the string "false" it is
+        # truthy, so asking for no parameter maps used to write them anyway.
+        assert payload["stage_overrides"]["write_param_maps"] is False
+        # Bare words are not JSON and must survive as the text they were typed as.
+        assert payload["stage_overrides"]["rootname"] == "Dyn-1"
 
 
 @pytest.mark.unit
 def test_parse_set_overrides_rejects_invalid_entries() -> None:
     with pytest.raises(ValueError, match="Expected KEY=VALUE"):
-        dce_cli._parse_set_overrides(["bad_entry"])  # pylint: disable=protected-access
+        cli_overrides.parse_set_overrides(["bad_entry"])
