@@ -58,6 +58,33 @@ Larger feature requests should be logged in `docs/project-management/projects/fe
       (`desc-AIF_T1map`, `space-DCEref_desc-brain_mask`); the fixture still uses `rawdata/`
       and the older `label-` names, so the default invocation fails until it is converted.
       Old-layout compatibility was deliberately not kept.
+- [ ] Fix the parametric batch on `sub-02downsample`: it pairs a preprocessed VFA image with
+      the raw flip sidecars and they disagree on how many flips there are.
+
+          .venv/bin/python run_parametric_bids_batch.py \
+            --bids-root tests/data/BIDS_test --subject sub-02downsample
+
+      fails with `flip_angles_deg length 3 does not match number of flip frames 2`
+      (`python/parametric_pipeline.py:240`). `_discover_parametric_inputs` selects
+      `derivatives/.../space-DCEref_desc-bfczunified_VFA.nii`, which is 4-D with **2** flip
+      frames, but takes the angles from the three `rawdata/.../flip-0{1,2,3}_VFA.json`
+      sidecars, giving **3** (2, 5, 10 deg). Not a regression -- it fails identically at
+      c0d27d1 -- and `BIDS_example/sub-01` still succeeds, so only this subject is affected.
+
+      Two things to settle, and they are separable:
+
+      1. Whether the fixture is wrong. The unified file may have been built from two of the
+         three flips, or be stale relative to the sidecars. If so, regenerate it.
+      2. Whether the code should be able to make this mistake at all. The flip angles must
+         describe the frames of the image actually selected, but `raw_sidecars` is discovered
+         independently of which VFA file wins, so a preprocessed image with a different frame
+         count is silently mispaired and only caught by the length check downstream. Pairing
+         the angles to the selected image would turn this into a discovery-time error naming
+         both files, rather than a bare count mismatch.
+
+      No test covers it: `tests/python/test_run_parametric_bids_batch.py` builds synthetic
+      session trees in tmp dirs, so the committed fixture is never exercised end to end.
+      Found during the merge-readiness review of the CLI/batch interfaces (2026-08-23).
 - [ ] Port MATLAB's contrast-agent relaxivity auto-selection to Python. `run_dce_cli.m:110-127`
       reads `InstitutionName`/`ManufacturersModelName` and `AcquisitionDateTime` from the DCE JSON
       and picks 5.7 (MultiHance, USC pre-2017-10-01) or 3.4 (Dotarem) unless

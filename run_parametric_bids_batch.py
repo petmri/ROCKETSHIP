@@ -195,6 +195,7 @@ def _build_session_config(
     fit_type: str,
     config_template: Optional[Dict[str, Any]],
     set_overrides: Dict[str, Any],
+    template_dir: Optional[Path] = None,
 ) -> ParametricT1Config:
     """Build parametric config for a single session.
 
@@ -273,7 +274,9 @@ def _build_session_config(
     payload.update(set_overrides)
     payload["fit_type"] = fit_type
 
-    return ParametricT1Config.from_dict(payload)
+    # Session inputs are already absolute -- they come from discovery or from the per-session
+    # glob resolution above. The anchor is for whatever the template supplied verbatim.
+    return ParametricT1Config.from_dict(payload, base_dir=template_dir)
 
 
 def main(argv: List[str] | None = None) -> int:
@@ -323,8 +326,10 @@ def main(argv: List[str] | None = None) -> int:
         summary_json_path = reports_dir / f"batch_summary_{timestamp}.json"
 
     config_template: Optional[Dict[str, Any]] = None
+    template_dir: Optional[Path] = None
     if args.config_template:
         template_path = args.config_template.expanduser().resolve()
+        template_dir = template_path.parent
         try:
             config_template = _load_config_template(template_path)
             print(f"Loaded config template: {template_path}", flush=True)
@@ -388,6 +393,7 @@ def main(argv: List[str] | None = None) -> int:
                 fit_type=args.fit_type,
                 config_template=config_template,
                 set_overrides=set_overrides,
+                template_dir=template_dir,
             )
             config.validate()
 

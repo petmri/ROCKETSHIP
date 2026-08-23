@@ -14,6 +14,7 @@ sys.path.insert(0, str(REPO_ROOT / "python"))
 
 from bids_discovery import BidsSession, discover_bids_sessions  # noqa: E402
 from cli_overrides import parse_set_overrides  # noqa: E402
+import dce_config  # noqa: E402
 from dce_file_discovery import discover_dce_inputs  # noqa: E402
 from dce_pipeline import DcePipelineConfig, run_dce_pipeline  # noqa: E402
 
@@ -149,6 +150,7 @@ def _build_session_config(
     config_template: Optional[Dict[str, Any]],
     set_overrides: Dict[str, Any],
     enable_checkpoints: bool = True,
+    template_dir: Optional[Path] = None,
 ) -> DcePipelineConfig:
     """Build DCE config for a single session.
     
@@ -342,7 +344,11 @@ def _build_session_config(
         }
         base_config["model_flags"] = model_flags
     
-    return DcePipelineConfig.from_dict(base_config)
+    # Everything a session actually runs on is already absolute: the session paths come from
+    # discovery and template file lists resolve per session in _resolve_file_list above. The
+    # anchor is for what is left -- a template's drift_files or a path-valued override, which
+    # belong to the template file rather than to any one session.
+    return DcePipelineConfig.from_dict(base_config, base_dir=template_dir)
 
 
 def main(argv: List[str] | None = None) -> int:
@@ -396,8 +402,10 @@ def main(argv: List[str] | None = None) -> int:
 
     # Load config template if provided
     config_template: Optional[Dict[str, Any]] = None
+    template_dir: Optional[Path] = None
     if args.config_template:
         template_path = args.config_template.expanduser().resolve()
+        template_dir = template_path.parent
         try:
             config_template = _load_config_template(template_path)
             print(f"Loaded config template: {template_path}", flush=True)
@@ -408,7 +416,10 @@ def main(argv: List[str] | None = None) -> int:
     # Parse models and overrides (models is empty list if --dce-models not provided)
     models = [m.strip().lower() for m in args.dce_models.split(",") if m.strip()] if args.dce_models else []
     try:
-        set_overrides = parse_set_overrides(args.set_overrides)
+        # As in dce_cli: a path typed on the command line is relative to the cwd.
+        set_overrides = dce_config.resolve_override_paths(
+            parse_set_overrides(args.set_overrides), Path.cwd()
+        )
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
@@ -475,6 +486,7 @@ def main(argv: List[str] | None = None) -> int:
                 config_template,
                 set_overrides,
                 enable_checkpoints=not args.no_checkpoints,
+                template_dir=template_dir,
             )
             config.validate()
 

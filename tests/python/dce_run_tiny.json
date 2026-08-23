@@ -12,27 +12,27 @@
     "'relaxivity' comes from the desc-tinymeta.json sidecar named below, which outranks this",
     "file for per-scan values -- restating it here would have had no effect."
   ],
-  "subject_source_path": "./tests/data/BIDS_test/rawdata/sub-11tiny/ses-01",
-  "subject_tp_path": "./tests/data/BIDS_test/derivatives/sub-11tiny/ses-01",
-  "output_dir": "./out/dce_run_tiny",
-  "checkpoint_dir": "./out/dce_run_tiny/checkpoints",
+  "subject_source_path": "../../tests/data/BIDS_test/rawdata/sub-11tiny/ses-01",
+  "subject_tp_path": "../../tests/data/BIDS_test/derivatives/sub-11tiny/ses-01",
+  "output_dir": "../../out/dce_run_tiny",
+  "checkpoint_dir": "../../out/dce_run_tiny/checkpoints",
   "backend": "cpu",
   "write_xls": true,
   "aif_mode": "fitted",
   "dynamic_files": [
-    "./tests/data/BIDS_test/rawdata/sub-11tiny/ses-01/dce/sub-11tiny_ses-01_DCE.nii"
+    "../../tests/data/BIDS_test/rawdata/sub-11tiny/ses-01/dce/sub-11tiny_ses-01_DCE.nii"
   ],
   "aif_files": [
-    "./tests/data/BIDS_test/derivatives/sub-11tiny/ses-01/dce/sub-11tiny_ses-01_label-AIF_mask.nii"
+    "../../tests/data/BIDS_test/derivatives/sub-11tiny/ses-01/dce/sub-11tiny_ses-01_label-AIF_mask.nii"
   ],
   "roi_files": [
-    "./tests/data/BIDS_test/derivatives/sub-11tiny/ses-01/anat/sub-11tiny_ses-01_label-brain_mask.nii"
+    "../../tests/data/BIDS_test/derivatives/sub-11tiny/ses-01/anat/sub-11tiny_ses-01_label-brain_mask.nii"
   ],
   "t1map_files": [
-    "./tests/data/BIDS_test/derivatives/sub-11tiny/ses-01/dce/sub-11tiny_ses-01_space-DCEref_T1map.nii"
+    "../../tests/data/BIDS_test/derivatives/sub-11tiny/ses-01/dce/sub-11tiny_ses-01_space-DCEref_T1map.nii"
   ],
   "noise_files": [
-    "./tests/data/BIDS_test/derivatives/sub-11tiny/ses-01/anat/sub-11tiny_ses-01_label-noise_mask.nii"
+    "../../tests/data/BIDS_test/derivatives/sub-11tiny/ses-01/anat/sub-11tiny_ses-01_label-noise_mask.nii"
   ],
   "drift_files": [],
   "model_flags": {
@@ -50,6 +50,6 @@
     "stage_b_mode": "real",
     "stage_d_mode": "real",
     "rootname": "Dyn-1",
-    "dce_metadata_path": "./tests/data/BIDS_test/derivatives/sub-11tiny/ses-01/dce/sub-11tiny_ses-01_desc-tinymeta.json"
+    "dce_metadata_path": "../../tests/data/BIDS_test/derivatives/sub-11tiny/ses-01/dce/sub-11tiny_ses-01_desc-tinymeta.json"
   }
 }

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -36,7 +37,9 @@ def test_main_applies_set_overrides() -> None:
                 }
             )
         )
-        with patch("dce_cli.DcePipelineConfig.from_dict", return_value=object()) as from_dict_mock:
+        # The CLI validates before it creates anything, so the stub needs validate() too.
+        stub_config = SimpleNamespace(output_dir=(tmp / "out").resolve(), validate=lambda: None)
+        with patch("dce_cli.DcePipelineConfig.from_dict", return_value=stub_config) as from_dict_mock:
             with patch("dce_cli.run_dce_pipeline", return_value={"meta": {"status": "ok"}}):
                 with patch("builtins.print"):
                     rc = dce_cli.main(

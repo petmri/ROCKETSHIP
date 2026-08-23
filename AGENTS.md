@@ -136,6 +136,22 @@ agent, so a run without one stops rather than guessing. (MATLAB keeps its
 the metadata sidecar when present; partial manual override alongside a sidecar is rejected
 (all three or none — no silent per-field fallback).
 
+A run config names its inputs in `dynamic_files`/`aif_files`/`roi_files`/`t1map_files`, but
+any of those left empty is filled from the dceprep naming convention under `subject_tp_path`
+when one is set (`dce_file_discovery.DISCOVERABLE_FILE_LISTS`, applied in
+`DcePipelineConfig.from_dict`, logged as `[DCE] Found by BIDS convention: ...`). Naming a
+file wins; only empty lists are filled, and `drift_files` is never discovered. The batch
+driver and the GUI's auto-find use the same discovery, so all three interfaces select the
+same files. `subject_source_path`/`subject_tp_path` are optional -- omitting them is the
+non-BIDS case, where every input must be named and TR/FA/time-resolution/relaxivity stated.
+
+Relative paths in a run config are anchored to **the directory holding that config file**,
+not the process cwd, so a config runs the same from anywhere. Paths given on the command
+line (`--output-dir`, `--set dce_metadata_path=...`) are anchored to the cwd, where they
+were typed. Entry points pass the anchor as `from_dict(..., base_dir=...)`; the path-valued
+preference keys are listed in `dce_config.PATH_VALUED_KEYS` and resolved by
+`dce_config.resolve_override_paths`. The parametric side follows the same rule.
+
 The steady-state/baseline window follows its own precedence in `_resolve_baseline_window`
 (`python/dce_pipeline.py`): explicit `stage_overrides.steady_state_end` → a
 `SteadyStateEndTimeIndex` field in the AIF file's JSON sidecar (the documented mechanism

@@ -13,12 +13,75 @@ file to edit to change how the software behaves across all runs. It is intended 
 user-editable; changing a default should never require editing source code.
 
 **A run configuration** specifies which data to process, together with only those settings the
-run overrides. Keys that match the defaults file are omitted, which keeps run
-configurations short and makes the differences between them visible. `python/dce_run_example.json`
-is a worked example, and is the template loaded by the graphical interface and by the command
-line interface when invoked without arguments. `python/dceprep_run_example.json` is the
-equivalent using glob patterns for file lists, which is the form expected by
-`run_dce_bids_batch.py --config-template`.
+run overrides. Keys that match the defaults file are omitted, which keeps run configurations
+short and makes the differences between them visible.
+
+Two worked examples ship, one per layout. Both run as they stand against the test data:
+
+| File | Data | Use it when |
+| --- | --- | --- |
+| `python/dce_run_example_bids.json` | `tests/data/BIDS_test`, subject `sub-02downsample` | Your data is in BIDS layout. Names two folders and no files at all. Loaded by the graphical interface, and by the command line interface when invoked without arguments. |
+| `python/dce_run_example_nonbids.json` | `tests/data/BBB data p19`, a flat folder of NIfTIs | Your data is anything else. |
+
+`python/dceprep_run_example.json` is a third form: the BIDS example with glob patterns
+instead of literal file lists, which is what `run_dce_bids_batch.py --config-template`
+expects for sweeping many sessions.
+
+### BIDS and non-BIDS data
+
+The pipeline does not require BIDS. Every input is named outright by `dynamic_files`,
+`aif_files`, `roi_files` and `t1map_files`, so the layout on disk is irrelevant and the
+folders may be named anything.
+
+BIDS layout buys two conveniences, both driven by the session folders.
+
+**Input files.** With `subject_tp_path` set, any file list left empty is filled from the
+dceprep naming convention under that folder:
+
+| Config key | Found at |
+| --- | --- |
+| `dynamic_files` | `dce/*desc-bfcz_DCE.nii*`, or `dce/*DCE.nii*` |
+| `aif_files` | `dce/*label-AIF_T1map.nii*` |
+| `roi_files` | `anat/*space-DCEref_label-brain_mask.nii*` |
+| `t1map_files` | `anat/*space-DCEref_T1map.nii*` |
+| `noise_files` | `anat/*label-noise_mask.nii*` (optional) |
+
+Each file found is named in the run log, so a config that lists nothing still leaves a record
+of what it ran on. Naming a file always wins: only empty lists are filled, so a config can
+take the convention for most inputs and override one. `drift_files` is never discovered, as
+it has no naming convention. The same discovery backs `run_dce_bids_batch.py` and the
+graphical interface's *Auto find BIDS files*, so all three select identically.
+
+**Acquisition metadata.** With `subject_source_path` set, Stage A finds the sidecar at
+`<subject_source_path>/dce/*DCE.json` and reads the repetition time, flip angle, temporal
+resolution and relaxivity from it.
+
+Without the session folders, the same information has to reach the run another way. Inputs
+must be named outright in the file lists. For the metadata, in order of preference:
+
+1. Place the JSON beside the dynamic image with a matching name (`dyn.nii.gz` and
+   `dyn.json`), which is found automatically.
+2. Name the JSON with `stage_overrides.dce_metadata_path`.
+3. State the values directly as `stage_overrides.tr_ms`, `fa_deg` and `time_resolution_sec`,
+   as `dce_run_example_nonbids.json` does.
+
+`relaxivity` is subject to the same routes and has no default anywhere, so a run that
+supplies it by none of them stops rather than guessing.
+
+### File paths
+
+A path in a run configuration may be written relative. It is resolved against **the directory
+containing the configuration file**, not the directory the command happens to be run from, so
+a configuration stored beside its data keeps working wherever it is launched. This applies to
+the image and mask lists, to `output_dir` and `checkpoint_dir`, and to the path-valued
+settings inside `stage_overrides` (`dce_metadata_path`, `import_aif_path`,
+`time_vector_path`).
+
+Paths given on the command line are resolved against the current working directory instead,
+which is where they were typed. This covers `--output-dir`, `--checkpoint-dir` and a
+`--set` that names a file.
+
+Absolute paths are used exactly as given. The parametric T1 interface follows the same rule.
 
 ## Precedence
 
@@ -61,9 +124,9 @@ option:
 
 | Key | Description |
 | --- | --- |
-| `subject_source_path` | Source BIDS path |
-| `subject_tp_path` | Derivatives path for this timepoint |
-| `output_dir` | Destination for maps, logs, figures and summaries |
+| `subject_source_path` | Optional. BIDS session rawdata folder; enables metadata sidecar discovery at `<path>/dce/*DCE.json`. Omit for non-BIDS data |
+| `subject_tp_path` | Optional. BIDS session derivatives folder; empty file lists are discovered beneath it. Omit for non-BIDS data |
+| `output_dir` | Destination for maps, logs, figures and summaries. The only required key |
 | `checkpoint_dir` | Optional folder for stage checkpoints |
 | `backend` | `auto`, `cpu` or `gpufit`; see [GPU and CPU Acceleration](wiki/enable-gpu-acceleration.md) |
 | `write_xls` | Write region of interest results to a spreadsheet |

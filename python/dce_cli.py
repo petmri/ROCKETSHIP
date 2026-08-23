@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 from typing import Any, Dict, IO, Optional
 
+import dce_config
 from banner import print_banner
 from cli_overrides import parse_set_overrides
 from dce_pipeline import DcePipelineConfig, run_dce_pipeline
@@ -17,7 +18,7 @@ EVENT_PREFIX = "ROCKETSHIP_EVENT "
 
 
 def _default_config_path() -> Path:
-    return Path(__file__).resolve().parent / "dce_run_example.json"
+    return Path(__file__).resolve().parent / "dce_run_example_bids.json"
 
 
 def _load_config(path: Path) -> Dict[str, Any]:
@@ -26,9 +27,27 @@ def _load_config(path: Path) -> Dict[str, Any]:
     return json.loads(path.read_text())
 
 
+EXAMPLES_EPILOG = """\
+Example run configs, one per data layout -- copy one and edit it:
+
+  python/dce_run_example_bids.json     data in BIDS layout (this is the default config)
+  python/dce_run_example_nonbids.json  data in any other layout, e.g. a flat folder
+
+BIDS is not required. The BIDS example names two session folders and no files: images and
+masks are found by the dceprep naming convention, and TR, flip angle, temporal resolution
+and relaxivity are read from the acquisition sidecar. The non-BIDS example names every
+file outright and gives those values under stage_overrides. Naming a file always wins over
+the convention. Full reference: docs/dce_options.md.
+"""
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, default=_default_config_path(), help="Path to JSON pipeline config (default: python/dce_run_example.json)")
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        epilog=EXAMPLES_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--config", type=Path, default=_default_config_path(), help="Path to JSON pipeline config (default: python/dce_run_example_bids.json)")
     parser.add_argument("--output-dir", type=Path, help="Optional override for output_dir in config")
     parser.add_argument("--checkpoint-dir", type=Path, help="Optional override for checkpoint_dir in config")
     parser.add_argument("--backend", choices=["auto", "cpu", "gpufit"], help="Optional override for backend in config")
@@ -66,12 +85,24 @@ def main(argv: list[str] | None = None) -> int:
         payload["backend"] = args.backend
 
     stage_overrides = dict(payload.get("stage_overrides", {}))
-    stage_overrides.update(parse_set_overrides(args.set_overrides))
+    # A path typed on the command line is relative to where it was typed, so --set anchors
+    # to the cwd while the config file's own paths anchor to the config (below).
+    stage_overrides.update(
+        dce_config.resolve_override_paths(parse_set_overrides(args.set_overrides), Path.cwd())
+    )
     if stage_overrides:
         payload["stage_overrides"] = stage_overrides
 
-    config = DcePipelineConfig.from_dict(payload)
-    resolved_output_dir = Path(str(payload["output_dir"])).expanduser().resolve()
+    # Relative paths in a config are anchored to that config's own directory, so the same
+    # file works from any working directory. `parametric_cli` resolves the same way.
+    try:
+        config = DcePipelineConfig.from_dict(payload, base_dir=config_path.parent)
+        config.validate()
+    except (ValueError, KeyError) as exc:
+        # A malformed run config is a user error, not a crash: say what is wrong and stop.
+        print(f"Error in {config_path}: {exc}", file=sys.stderr)
+        return 2
+    resolved_output_dir = config.output_dir
     event_log_path = args.event_log.expanduser().resolve() if args.event_log else (resolved_output_dir / "dce_pipeline_events.jsonl")
     event_log_handle, emit_event = _build_event_logger(event_log_path, emit_stdout=(args.events == "on"))
     try:

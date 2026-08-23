@@ -14,19 +14,32 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "python"))
 
 import dce_cli  # noqa: E402
+import dce_config  # noqa: E402
+
+
+TINY_CONFIG = REPO_ROOT / "tests" / "python" / "dce_run_tiny.json"
 
 
 def _abs_path(path_text: str) -> str:
+    """Anchor to the tiny config's own directory, the way the CLI would anchor it.
+
+    This copy is rewritten into a temp directory, so every relative path has to be made
+    absolute against where it was authored before it moves -- including the one inside
+    stage_overrides, which the cwd used to resolve by accident.
+    """
     path = Path(path_text)
     if not path.is_absolute():
-        path = (REPO_ROOT / path).resolve()
+        path = (TINY_CONFIG.parent / path).resolve()
     return str(path)
 
 
 def _make_temp_config(tmp_dir: Path) -> Path:
-    payload = json.loads((REPO_ROOT / "tests" / "python" / "dce_run_tiny.json").read_text(encoding="utf-8"))
+    payload = json.loads(TINY_CONFIG.read_text(encoding="utf-8"))
     payload["subject_source_path"] = _abs_path(str(payload["subject_source_path"]))
     payload["subject_tp_path"] = _abs_path(str(payload["subject_tp_path"]))
+    payload["stage_overrides"] = dce_config.resolve_override_paths(
+        payload.get("stage_overrides", {}), TINY_CONFIG.parent
+    )
     payload["output_dir"] = str((tmp_dir / "out").resolve())
     payload["checkpoint_dir"] = str((tmp_dir / "checkpoints").resolve())
     payload["backend"] = "cpu"

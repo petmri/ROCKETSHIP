@@ -105,14 +105,29 @@ cd /path/to/ROCKETSHIP
 
 ### Run the Python DCE CLI
 
-Use the example config, fromt the ROCKETSHIP root:
+Two example configs ship, one per data layout. Both run as they stand, from the ROCKETSHIP
+root:
 
 ```bash
 source .venv/bin/activate
-python run_dce_python_cli.py --config tests/python/dce_cli_config.example.json
+
+# BIDS layout (tests/data/BIDS_test, subject sub-02downsample)
+python run_dce_python_cli.py --config python/dce_run_example_bids.json
+
+# Not BIDS -- a flat folder of NIfTIs (tests/data/BBB data p19)
+python run_dce_python_cli.py --config python/dce_run_example_nonbids.json
 ```
 
-Run with built-in default config template:
+BIDS is not required, and the two examples show the difference. The BIDS one names two
+folders and no files: the images and masks are found by the dceprep naming convention, and
+the acquisition parameters come from the sidecar. The non-BIDS one names every file outright
+and states `tr_ms`, `fa_deg`, `time_resolution_sec` and `relaxivity` in `stage_overrides`,
+because there is no convention to read them from.
+
+Naming a file always wins over the convention, so a BIDS config can discover most of its
+inputs and override one. See `docs/dce_options.md` for the full comparison.
+
+Run with the built-in default config template:
 
 ```bash
 source .venv/bin/activate
@@ -121,10 +136,10 @@ python run_dce_python_cli.py
 
 Default template location:
 
-- `/path/to/ROCKETSHIP/python/dce_run_example.json`
+- `/path/to/ROCKETSHIP/python/dce_run_example_bids.json`
 - This default is prewired to a conforming example session:
   - `/path/to/ROCKETSHIP/tests/data/BIDS_test` (subject `sub-02downsample`, session `ses-01`)
-  - outputs to `/path/to/ROCKETSHIP/out/dce_run_example`
+  - outputs to `/path/to/ROCKETSHIP/out/dce_run_example_bids`
 
 Optional runtime overrides:
 
@@ -249,7 +264,7 @@ python run_parametric_python_gui.py
 One-click test run:
 
 - Launch the GUI and click `Run DCE` without changing fields.
-- It uses `/path/to/ROCKETSHIP/python/dce_run_example.json` (subject `sub-02downsample`) by default.
+- It uses `/path/to/ROCKETSHIP/python/dce_run_example_bids.json` (subject `sub-02downsample`) by default.
 
 Parametric GUI v1 behavior:
 

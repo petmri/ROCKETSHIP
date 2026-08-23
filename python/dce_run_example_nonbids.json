@@ -1,0 +1,66 @@
+{
+  "_doc": [
+    "Example DCE run config for data that is NOT in BIDS layout. Copy it, point the paths at",
+    "your own files, and edit. See dce_run_example_bids.json for the BIDS form.",
+    "",
+    "The data here is tests/data/BBB data p19: one folder of NIfTIs with no BIDS entities, no",
+    "sub-/ses- hierarchy and no JSON sidecars -- the shape most studies arrive in. Nothing",
+    "about the pipeline requires BIDS. Every input is named outright in the file lists below,",
+    "so the layout on disk is irrelevant: the folders could be named anything.",
+    "",
+    "Compared to BIDS, all file names have to be given explicitly, and the",
+    "acquisition parameters have to be stated. 'tr_ms', 'fa_deg' and 'time_resolution_sec'",
+    "would otherwise come from <subject_source_path>/dce/*DCE.json, and 'relaxivity' has no",
+    "default anywhere, so it must be given here or the run stops. ",
+    "",
+    "If you do have a metadata JSON but not the BIDS folder layout, name it with",
+    "stage_overrides.dce_metadata_path instead of restating the values, or put it beside the",
+    "dynamic image with a matching name and it will be read and the values will be used.",
+    "",
+    "The values below are the ones this study was actually processed with in MATLAB, recorded",
+    "in 'tests/data/BBB data p19/processed/User Inputs Log.txt'."
+  ],
+  "output_dir": "../out/dce_run_example_nonbids",
+  "checkpoint_dir": "../out/dce_run_example_nonbids/checkpoints",
+  "backend": "cpu",
+  "write_xls": true,
+  "aif_mode": "fitted",
+  "dynamic_files": [
+    "../tests/data/BBB data p19/Dynamic_t1w.nii"
+  ],
+  "aif_files": [
+    "../tests/data/BBB data p19/processed/T1_AIF_roi.nii"
+  ],
+  "roi_files": [
+    "../tests/data/BBB data p19/processed/T1_brain_roi.nii"
+  ],
+  "t1map_files": [
+    "../tests/data/BBB data p19/processed/T1_map_t1_fa_fit_fa10.nii"
+  ],
+  "noise_files": [
+    "../tests/data/BBB data p19/processed/T1_noise_roi.nii"
+  ],
+  "drift_files": [],
+  "model_flags": {
+    "tofts": 1,
+    "ex_tofts": 0,
+    "patlak": 0,
+    "tissue_uptake": 0,
+    "two_cxm": 0,
+    "fxr": 0,
+    "auc": 0,
+    "nested": 0,
+    "FXL_rr": 0
+  },
+  "stage_overrides": {
+    "stage_b_mode": "real",
+    "stage_d_mode": "real",
+    "rootname": "Dyn-1",
+    "tr_ms": 8.29,
+    "fa_deg": 15.0,
+    "time_resolution_sec": 15.84,
+    "relaxivity": 3.6,
+    "hematocrit": 0.42,
+    "snr_filter": 5.0
+  }
+}

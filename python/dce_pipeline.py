@@ -18,6 +18,7 @@ import numpy as np
 
 import dce_config
 from dce_config import DceConfigError
+import dce_file_discovery
 
 from dce_fit_backends import (
     fit_2cxm_stage_d,
@@ -325,10 +326,23 @@ def _json_sidecar_payload(config: "DcePipelineConfig") -> Dict[str, Any]:
     return {}
 
 
-def _to_path_list(values: Optional[List[str]]) -> List[Path]:
+def _resolve_path(raw: Any, base_dir: Optional[Path]) -> Path:
+    """Resolve one config path against `base_dir`, or the process cwd when there is none.
+
+    Entry points pass the directory of the config file they read, so a relative path means
+    the same thing wherever the run is launched from. `parametric_pipeline._resolve_path`
+    is the same function for the T1 side; the two interfaces are meant to agree.
+    """
+    path = Path(raw).expanduser()
+    if not path.is_absolute() and base_dir is not None:
+        path = base_dir / path
+    return path.resolve()
+
+
+def _to_path_list(values: Optional[List[str]], base_dir: Optional[Path] = None) -> List[Path]:
     if not values:
         return []
-    return [Path(v).expanduser().resolve() for v in values]
+    return [_resolve_path(v, base_dir) for v in values]
 
 
 def _json_sidecar_for(path: Path) -> Optional[Path]:
@@ -386,13 +400,60 @@ def _resolve_stage_d_backend(config: "DcePipelineConfig") -> Dict[str, str]:
     return _resolve_backend_selection(requested_backend)
 
 
+def _discover_missing_file_lists(
+    data: Dict[str, Any], base_dir: Optional[Path]
+) -> Dict[str, List[str]]:
+    """Fill empty file lists from the BIDS session folders, using the dceprep convention.
+
+    Only empty lists are filled, so naming a file always wins over the convention. Without a
+    `subject_tp_path` there is nothing to search and the lists stay as they are -- which is
+    what makes this safe for non-BIDS runs, where the convention does not apply.
+
+    The same discovery already backs `run_dce_bids_batch.py` and the GUI's auto-find; doing
+    it here is what lets one BIDS config mean the same thing to all three.
+    """
+    filled: Dict[str, List[str]] = {}
+    if not data.get("subject_tp_path"):
+        return filled
+    if all(data.get(key) for key, _ in dce_file_discovery.DISCOVERABLE_FILE_LISTS):
+        return filled
+
+    derivatives = _resolve_path(data["subject_tp_path"], base_dir)
+    if not derivatives.is_dir():
+        return filled
+    rawdata = (
+        _resolve_path(data["subject_source_path"], base_dir)
+        if data.get("subject_source_path")
+        else None
+    )
+    found = dce_file_discovery.discover_dce_input_paths(
+        dce_file_discovery.session_from_paths(derivatives, rawdata)
+    )
+
+    for key, kind in dce_file_discovery.DISCOVERABLE_FILE_LISTS:
+        if data.get(key):
+            continue
+        path = found.get(kind)
+        if path is None:
+            continue
+        filled[key] = [str(path)]
+    return filled
+
+
 @dataclass
 class DcePipelineConfig:
-    """Configuration for a single end-to-end DCE CLI run."""
+    """Configuration for a single end-to-end DCE CLI run.
 
-    subject_source_path: Path
-    subject_tp_path: Path
+    Every input is named explicitly by `dynamic_files`, `aif_files`, `roi_files` and
+    `t1map_files`, so the pipeline never needs to know how a study is laid out on disk.
+    `subject_source_path` and `subject_tp_path` describe a BIDS session and are optional:
+    the first lets Stage A find a `dce/*DCE.json` sidecar by convention, the second is
+    recorded in the run summary. Data that is not in BIDS layout simply omits both.
+    """
+
     output_dir: Path
+    subject_source_path: Optional[Path] = None
+    subject_tp_path: Optional[Path] = None
     backend: str = "auto"
     checkpoint_dir: Optional[Path] = None
     write_xls: bool = True
@@ -408,28 +469,52 @@ class DcePipelineConfig:
     stage_overrides: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "DcePipelineConfig":
+    def from_dict(cls, data: Dict[str, Any], base_dir: Optional[Path] = None) -> "DcePipelineConfig":
+        """Build a config, resolving relative paths against `base_dir`.
+
+        Callers that read a config file pass that file's own directory, so relative paths in
+        it keep their meaning wherever the run is launched from. Callers that build the
+        payload themselves already hold absolute paths and pass nothing, which leaves the
+        cwd as the anchor.
+        """
+        if "output_dir" not in data:
+            raise dce_config.DceConfigError(
+                "Run config is missing the required key 'output_dir' (where results are "
+                "written). See python/dce_run_example_bids.json for a worked example."
+            )
+        discovered = _discover_missing_file_lists(data, base_dir)
+        if discovered:
+            data = {**data, **discovered}
+            summary = ", ".join(f"{key}={Path(v[0]).name}" for key, v in sorted(discovered.items()))
+            print(f"[DCE] Found by BIDS convention: {summary}", flush=True)
+
         return cls(
-            subject_source_path=Path(data["subject_source_path"]).expanduser().resolve(),
-            subject_tp_path=Path(data["subject_tp_path"]).expanduser().resolve(),
-            output_dir=Path(data["output_dir"]).expanduser().resolve(),
+            output_dir=_resolve_path(data["output_dir"], base_dir),
+            subject_source_path=_resolve_path(data["subject_source_path"], base_dir)
+            if data.get("subject_source_path")
+            else None,
+            subject_tp_path=_resolve_path(data["subject_tp_path"], base_dir)
+            if data.get("subject_tp_path")
+            else None,
             backend=str(data.get("backend", "auto")),
-            checkpoint_dir=Path(data["checkpoint_dir"]).expanduser().resolve()
+            checkpoint_dir=_resolve_path(data["checkpoint_dir"], base_dir)
             if data.get("checkpoint_dir")
             else None,
             write_xls=bool(data.get("write_xls", True)),
             aif_mode=str(data.get("aif_mode", "fitted")),
-            imported_aif_path=Path(data["imported_aif_path"]).expanduser().resolve()
+            imported_aif_path=_resolve_path(data["imported_aif_path"], base_dir)
             if data.get("imported_aif_path")
             else None,
-            dynamic_files=_to_path_list(data.get("dynamic_files")),
-            aif_files=_to_path_list(data.get("aif_files")),
-            roi_files=_to_path_list(data.get("roi_files")),
-            t1map_files=_to_path_list(data.get("t1map_files")),
-            noise_files=_to_path_list(data.get("noise_files")),
-            drift_files=_to_path_list(data.get("drift_files")),
+            dynamic_files=_to_path_list(data.get("dynamic_files"), base_dir),
+            aif_files=_to_path_list(data.get("aif_files"), base_dir),
+            roi_files=_to_path_list(data.get("roi_files"), base_dir),
+            t1map_files=_to_path_list(data.get("t1map_files"), base_dir),
+            noise_files=_to_path_list(data.get("noise_files"), base_dir),
+            drift_files=_to_path_list(data.get("drift_files"), base_dir),
             model_flags=dict(data.get("model_flags", {})),
-            stage_overrides=dict(data.get("stage_overrides", {})),
+            stage_overrides=dce_config.resolve_override_paths(
+                data.get("stage_overrides", {}), base_dir
+            ),
         )
 
     def validate(self) -> None:
@@ -489,8 +574,9 @@ class DcePipelineConfig:
             raise ValueError("dynamic_files is required (non-empty)")
         if not self.aif_files:
             raise ValueError(
-                "aif_files is required (non-empty). Automatic AIF discovery is not available in the Python DCE pipeline yet; "
-                "provide a dedicated AIF ROI mask."
+                "aif_files is required (non-empty). Name a dedicated vascular ROI mask, or set "
+                "subject_tp_path to a BIDS session so it can be found by convention "
+                f"(dce/{dce_file_discovery.AIF_MASK_PATTERN})."
             )
         if self.roi_files:
             roi_set = {Path(p).expanduser().resolve() for p in self.roi_files}
@@ -654,7 +740,10 @@ def _resolve_dynamic_metadata(
         if sidecar is not None:
             candidates.append(sidecar)
 
-    candidates.extend(sorted((config.subject_source_path / "dce").glob("*DCE.json")))
+    # BIDS convenience: with a session folder given, Stage A finds the sidecar by layout.
+    # Non-BIDS runs name it with stage_overrides.dce_metadata_path, or put it beside the image.
+    if config.subject_source_path is not None:
+        candidates.extend(sorted((config.subject_source_path / "dce").glob("*DCE.json")))
 
     payload: Dict[str, Any] = {}
     metadata_source_path: Optional[str] = None
@@ -4220,7 +4309,9 @@ class HybridStageRunner:
                 "t1map_file_count": len(config.t1map_files),
                 "noise_file_count": len(config.noise_files),
                 "drift_file_count": len(config.drift_files),
-                "subject_tp_path": str(config.subject_tp_path),
+                "subject_tp_path": (
+                    str(config.subject_tp_path) if config.subject_tp_path is not None else None
+                ),
             }
         return _run_stage_a_real(config)
 

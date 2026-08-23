@@ -1,8 +1,8 @@
 {
   "subject_source_path": "/ABS/PATH/TO/BIDS_example/rawdata/sub-01/ses-01",
   "subject_tp_path": "/ABS/PATH/TO/BIDS_example/derivatives/sub-01/ses-01",
-  "output_dir": "./out/dce_cli",
-  "checkpoint_dir": "./out/dce_cli/checkpoints",
+  "output_dir": "../../out/dce_cli",
+  "checkpoint_dir": "../../out/dce_cli/checkpoints",
   "backend": "auto",
   "write_xls": true,
   "aif_mode": "fitted",

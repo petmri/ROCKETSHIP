@@ -36,7 +36,7 @@ from dce_pipeline import (  # noqa: E402
 )
 
 
-DEFAULT_CONFIG_TEMPLATE = REPO_ROOT / "python" / "dce_run_example.json"
+DEFAULT_CONFIG_TEMPLATE = REPO_ROOT / "python" / "dce_run_example_bids.json"
 
 
 def load_biexp_config(config_template: Optional[Path] = None) -> DcePipelineConfig:
@@ -54,7 +54,9 @@ def load_biexp_config(config_template: Optional[Path] = None) -> DcePipelineConf
     """
     template = Path(config_template) if config_template is not None else DEFAULT_CONFIG_TEMPLATE
     try:
-        return DcePipelineConfig.from_dict(json.loads(template.read_text(encoding="utf-8")))
+        return DcePipelineConfig.from_dict(
+            json.loads(template.read_text(encoding="utf-8")), base_dir=template.parent
+        )
     except Exception as exc:
         print(
             f"WARNING: could not load config template {template} ({exc}); using built-in aif_* defaults",

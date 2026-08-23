@@ -27,6 +27,17 @@ DEFAULTS_PATH = Path(__file__).resolve().parent / DEFAULTS_FILENAME
 # Keys that may be set per scan in the image's JSON sidecar, which outranks the run config.
 SCAN_LEVEL_KEYS = ("relaxivity", "hematocrit")
 
+# Keys whose value is a filesystem path. A relative one is resolved against the directory of
+# the config file that supplied it, the same anchor the top-level path fields use, so a
+# config keeps meaning what it meant wherever it is run from.
+PATH_VALUED_KEYS = (
+    "dce_metadata_path",
+    "import_aif_path",
+    "time_vector_path",
+    "timer_path",
+    "timevectpath",
+)
+
 # Override spellings that were retired, mapped to the surviving key and its units. Each of
 # these was a second name for a setting that already had one; carrying both meant the
 # resolution order decided which won, and that order was not something a user could infer
@@ -52,6 +63,32 @@ REMOVED_OVERRIDE_ALIASES: Dict[str, str] = {
     "blood_t1_sec": "blood_t1_ms (milliseconds)",
     "time_resolution_min": "time_resolution_sec (seconds)",
 }
+
+def resolve_override_paths(
+    overrides: Mapping[str, Any], base_dir: Optional[Path]
+) -> Dict[str, Any]:
+    """Anchor the path-valued preferences in `overrides` to `base_dir`.
+
+    Three callers need the identical rule and each anchors to a different directory: a
+    config file's paths are relative to that file, a `--set` typed at a shell prompt is
+    relative to the cwd, and the GUI's override table is relative to the config it loaded.
+    Only the anchor differs, so only the anchor is a parameter.
+    """
+    resolved: Dict[str, Any] = dict(overrides)
+    if base_dir is None:
+        return resolved
+    path_keys = {key.lower() for key in PATH_VALUED_KEYS}
+    for key, value in resolved.items():
+        if str(key).strip().lower() not in path_keys:
+            continue
+        if not isinstance(value, str) or not value.strip():
+            continue
+        candidate = Path(value).expanduser()
+        if not candidate.is_absolute():
+            candidate = base_dir / candidate
+        resolved[key] = str(candidate.resolve())
+    return resolved
+
 
 _UNSET = object()
 

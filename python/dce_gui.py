@@ -40,8 +40,12 @@ from PySide6.QtWidgets import (
 
 import dce_config
 from cli_overrides import coerce_override_value
-from bids_discovery import BidsSession
-from dce_file_discovery import discover_dce_input_paths, missing_required_inputs
+from dce_file_discovery import (
+    DISCOVERABLE_FILE_LISTS,
+    discover_dce_input_paths,
+    missing_required_inputs,
+    session_from_paths,
+)
 from dce_volume_viewer import Volume, VolumeViewer, discover_result_volumes
 
 
@@ -128,7 +132,7 @@ REQUIRED_ROLE = Qt.UserRole + 2
 # minimal by design, so an absent key means "the defaults file decides" -- not "off".
 DEFAULT_BASELINE_METHOD = str(dce_config.load_defaults().default_for("steady_state_auto_method"))
 DEFAULT_AIF_MODE = "fitted"
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent / "dce_run_example.json"
+DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent / "dce_run_example_bids.json"
 CLI_ENTRYPOINT = REPO_ROOT / "run_dce_python_cli.py"
 OPTIONS_DOC_PATH = REPO_ROOT / "docs" / "dce_options.md"
 
@@ -152,20 +156,26 @@ def _text_to_paths(text: str) -> List[str]:
     return [line.strip() for line in text.splitlines() if line.strip()]
 
 
-def _resolve_repo_path(text: str) -> str:
-    """Resolve a possibly-relative path against REPO_ROOT (matches the CLI's cwd,
-    which the GUI always sets to REPO_ROOT for the subprocess it launches)."""
+def _resolve_path(text: str, base_dir: Path) -> str:
+    """Resolve a possibly-relative path against base_dir.
+
+    dce_cli.py resolves relative paths in a config against that config file's own directory
+    (`DcePipelineConfig.from_dict(..., base_dir=config_path.parent)`), not the process cwd.
+    base_dir must track wherever the currently-loaded config lives so relative paths keep
+    meaning what they meant when authored, even after the GUI re-serializes the payload into
+    a different directory (typically output_dir) to run it.
+    """
     stripped = text.strip()
     if not stripped:
         return ""
     candidate = Path(stripped).expanduser()
     if not candidate.is_absolute():
-        candidate = (REPO_ROOT / candidate).resolve()
+        candidate = (base_dir / candidate).resolve()
     return str(candidate)
 
 
-def _resolve_repo_paths(values: List[str]) -> List[str]:
-    return [_resolve_repo_path(v) for v in values if str(v).strip()]
+def _resolve_paths(values: List[str], base_dir: Path) -> List[str]:
+    return [_resolve_path(v, base_dir) for v in values if str(v).strip()]
 
 
 def _form_label(text: str, config_key: str, hint: str = "") -> QLabel:
@@ -252,10 +262,12 @@ class DceGuiWindow(QMainWindow):
 
         form.addRow(
             _form_label(
-                "BIDS Raw Data Folder",
+                "BIDS Raw Data Folder (optional)",
                 "subject_source_path",
                 "This session's rawdata folder, e.g. <bids_root>/rawdata/sub-01/ses-01.\n"
-                "Used as the fallback source for DCE metadata (<source>/dce/*DCE.json).",
+                "Used as the fallback source for DCE metadata (<source>/dce/*DCE.json).\n"
+                "Leave blank for data that is not in BIDS layout, and give TR, flip angle\n"
+                "and temporal resolution in the settings table instead.",
             ),
             self._line_edit_with_browse(
                 self.subject_source_edit,
@@ -264,11 +276,12 @@ class DceGuiWindow(QMainWindow):
         )
         form.addRow(
             _form_label(
-                "BIDS Derivatives Folder",
+                "BIDS Derivatives Folder (optional)",
                 "subject_tp_path",
                 "This session's derivatives folder, e.g.\n"
                 "<bids_root>/derivatives/<pipeline>/sub-01/ses-01.\n"
-                "Recorded in the run summary; input files are given explicitly below.",
+                "Recorded in the run summary; input files are given explicitly below.\n"
+                "Leave blank for data that is not in BIDS layout.",
             ),
             self._line_edit_with_browse(
                 self.subject_tp_edit,
@@ -500,22 +513,12 @@ class DceGuiWindow(QMainWindow):
         self.auto_find_status.setText(text)
         self.auto_find_status.setStyleSheet("color: #b00020;" if missing else "")
 
-    def _session_for_discovery(self, derivatives_path: Path, rawdata_path: Path) -> BidsSession:
-        is_session_dir = derivatives_path.name.startswith("ses-")
-        return BidsSession(
-            bids_root=derivatives_path,
-            subject=derivatives_path.parent.name if is_session_dir else derivatives_path.name,
-            session=derivatives_path.name if is_session_dir else None,
-            rawdata_path=rawdata_path,
-            derivatives_path=derivatives_path,
-        )
-
     def _auto_fill_input_files(self) -> None:
         """Refill the file lists from the BIDS folders using the dceprep convention."""
         if not self.auto_find_check.isChecked():
             return
 
-        derivatives_text = _resolve_repo_path(self.subject_tp_edit.text())
+        derivatives_text = _resolve_path(self.subject_tp_edit.text(), self._base_dir())
         if not derivatives_text:
             self._set_auto_find_status("Set the BIDS Derivatives Folder", missing=True)
             return
@@ -524,9 +527,9 @@ class DceGuiWindow(QMainWindow):
             self._set_auto_find_status(f"No such folder: {derivatives_path}", missing=True)
             return
 
-        rawdata_text = _resolve_repo_path(self.subject_source_edit.text())
-        session = self._session_for_discovery(
-            derivatives_path, Path(rawdata_text) if rawdata_text else derivatives_path
+        rawdata_text = _resolve_path(self.subject_source_edit.text(), self._base_dir())
+        session = session_from_paths(
+            derivatives_path, Path(rawdata_text) if rawdata_text else None
         )
         found = discover_dce_input_paths(session)
 
@@ -542,17 +545,28 @@ class DceGuiWindow(QMainWindow):
             optional_note = "" if found.get("noise_mask") else " (no noise mask)"
             self._set_auto_find_status(f"All required inputs found{optional_note}", missing=False)
 
+    def _base_dir(self) -> Path:
+        """Directory relative paths in the current config are anchored to.
+
+        Mirrors dce_cli.py's `base_dir=config_path.parent` semantics, so a relative path
+        shown in the GUI (as loaded verbatim from JSON) keeps resolving the way the CLI
+        would resolve it, regardless of where the GUI later writes the run config it
+        launches.
+        """
+        config_path = getattr(self, "_config_path", None)
+        return config_path.parent if config_path is not None else REPO_ROOT
+
     def _dialog_start_dir(self, current_text: str) -> str:
         text = current_text.strip()
         if text:
             candidate = Path(text).expanduser()
             if not candidate.is_absolute():
-                candidate = (REPO_ROOT / candidate).resolve()
+                candidate = (self._base_dir() / candidate).resolve()
             if candidate.is_file():
                 return str(candidate.parent)
             if candidate.exists():
                 return str(candidate)
-        return str(REPO_ROOT)
+        return str(self._base_dir())
 
     def _choose_directory_for(self, edit: QLineEdit, title: str) -> None:
         start_dir = self._dialog_start_dir(edit.text())
@@ -723,7 +737,9 @@ class DceGuiWindow(QMainWindow):
         that produced numbers is still a successful run even if one file will not open.
         """
         try:
-            volumes = discover_result_volumes(Path(_resolve_repo_path(self.output_dir_edit.text())))
+            volumes = discover_result_volumes(
+                Path(_resolve_path(self.output_dir_edit.text(), self._base_dir()))
+            )
             known = {v.path for v in volumes}
             for label, path in self._last_run_input_volumes():
                 if path not in known:
@@ -738,6 +754,9 @@ class DceGuiWindow(QMainWindow):
         if self._last_run_config_path is None or not self._last_run_config_path.exists():
             return []
         payload = json.loads(self._last_run_config_path.read_text())
+        # Anchored to the run config the GUI wrote, not the config it was loaded from --
+        # that file is what these paths were serialized next to.
+        base_dir = self._last_run_config_path.parent
         found: List[tuple] = []
         for key, suffix in (
             ("dynamic_files", "dynamic"),
@@ -746,7 +765,7 @@ class DceGuiWindow(QMainWindow):
             ("roi_files", "ROI mask"),
         ):
             for text in payload.get(key, []) or []:
-                path = Path(_resolve_repo_path(str(text)))
+                path = Path(_resolve_path(str(text), base_dir))
                 if path.is_file():
                     found.append((f"{path.name}  ({suffix})", path.resolve()))
         return found
@@ -905,7 +924,7 @@ class DceGuiWindow(QMainWindow):
         notice = ""
         aif_paths = _text_to_paths(self.aif_edit.toPlainText())
         if aif_paths:
-            sidecar = Path(_resolve_repo_path(aif_paths[0]))
+            sidecar = Path(_resolve_path(aif_paths[0], self._base_dir()))
             for suffix in (".nii.gz", ".nii"):
                 if sidecar.name.endswith(suffix):
                     sidecar = sidecar.with_name(sidecar.name[: -len(suffix)] + ".json")
@@ -1040,33 +1059,53 @@ class DceGuiWindow(QMainWindow):
         self._set_baseline_method(configured_method)
         self._set_overrides_from_dict(stage_overrides)
 
+        # Let the config decide whether auto-find owns the file lists. A config that names
+        # its files is being explicit and must be honoured; one that names only the session
+        # folders is asking for the convention, which is how the shipped BIDS example is
+        # written. Non-BIDS configs land on "off", so their fields stay editable instead of
+        # being locked behind a BIDS warning they can do nothing about.
+        self.auto_find_check.setChecked(self._config_wants_auto_find(payload))
+
         # The BIDS folders may be unchanged by this load, so re-derive explicitly rather
         # than relying on their textChanged signal to schedule it.
         self._schedule_auto_fill()
 
+    @staticmethod
+    def _config_wants_auto_find(payload: Dict[str, Any]) -> bool:
+        """True when the config names session folders but leaves the file lists to the
+        convention -- the only case where discovering files is what the author asked for."""
+        if not str(payload.get("subject_tp_path") or "").strip():
+            return False
+        return not any(
+            payload.get(key) for key, _ in DISCOVERABLE_FILE_LISTS
+        )
+
     def _collect_config_payload(self) -> Dict[str, Any]:
         model_flags = {name: (1 if cb.isChecked() else 0) for name, cb in self.model_checks.items()}
+        base_dir = self._base_dir()
         output_dir_text = self.output_dir_edit.text().strip()
         if output_dir_text in {"", "."}:
             output_dir = str(REPO_ROOT / "out" / "dce_gui")
         else:
-            output_dir = _resolve_repo_path(output_dir_text)
+            output_dir = _resolve_path(output_dir_text, base_dir)
         payload = {
-            "subject_source_path": _resolve_repo_path(self.subject_source_edit.text()),
-            "subject_tp_path": _resolve_repo_path(self.subject_tp_edit.text()),
+            "subject_source_path": _resolve_path(self.subject_source_edit.text(), base_dir),
+            "subject_tp_path": _resolve_path(self.subject_tp_edit.text(), base_dir),
             "output_dir": output_dir,
-            "checkpoint_dir": _resolve_repo_path(self.checkpoint_dir_edit.text()),
+            "checkpoint_dir": _resolve_path(self.checkpoint_dir_edit.text(), base_dir),
             "backend": self.backend_combo.currentText(),
             "write_xls": self.write_xls_check.isChecked(),
             "aif_mode": self.aif_mode_combo.currentText(),
-            "dynamic_files": _resolve_repo_paths(_text_to_paths(self.dynamic_edit.toPlainText())),
-            "aif_files": _resolve_repo_paths(_text_to_paths(self.aif_edit.toPlainText())),
-            "roi_files": _resolve_repo_paths(_text_to_paths(self.roi_edit.toPlainText())),
-            "t1map_files": _resolve_repo_paths(_text_to_paths(self.t1map_edit.toPlainText())),
-            "noise_files": _resolve_repo_paths(_text_to_paths(self.noise_edit.toPlainText())),
-            "drift_files": _resolve_repo_paths(_text_to_paths(self.drift_edit.toPlainText())),
+            "dynamic_files": _resolve_paths(_text_to_paths(self.dynamic_edit.toPlainText()), base_dir),
+            "aif_files": _resolve_paths(_text_to_paths(self.aif_edit.toPlainText()), base_dir),
+            "roi_files": _resolve_paths(_text_to_paths(self.roi_edit.toPlainText()), base_dir),
+            "t1map_files": _resolve_paths(_text_to_paths(self.t1map_edit.toPlainText()), base_dir),
+            "noise_files": _resolve_paths(_text_to_paths(self.noise_edit.toPlainText()), base_dir),
+            "drift_files": _resolve_paths(_text_to_paths(self.drift_edit.toPlainText()), base_dir),
             "model_flags": model_flags,
-            "stage_overrides": self._stage_overrides_to_dict(),
+            "stage_overrides": dce_config.resolve_override_paths(
+                self._stage_overrides_to_dict(), base_dir
+            ),
         }
         return payload
 

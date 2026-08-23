@@ -46,6 +46,18 @@ METADATA_PATTERN = "*DCE.json"
 # Inputs the pipeline cannot run without; the rest are optional.
 REQUIRED_INPUT_KINDS = ("dynamic", "aif_mask", "roi_mask", "t1_map")
 
+# Run-config file lists that discovery can fill, paired with the kind that fills each.
+# `drift_files` is absent deliberately: it has no naming convention, so there is nothing to
+# look for. The pipeline uses this to fill empty lists; the GUI uses it to decide whether a
+# config is asking for the convention at all.
+DISCOVERABLE_FILE_LISTS = (
+    ("dynamic_files", "dynamic"),
+    ("aif_files", "aif_mask"),
+    ("roi_files", "roi_mask"),
+    ("t1map_files", "t1_map"),
+    ("noise_files", "noise_mask"),
+)
+
 _PATTERN_HINTS = {
     "dynamic": f"{DYNAMIC_PATTERN} or {DYNAMIC_FALLBACK_PATTERN}",
     "aif_mask": AIF_MASK_PATTERN,
@@ -84,6 +96,24 @@ def discover_dce_input_paths(session: BidsSession) -> Dict[str, Optional[Path]]:
         "noise_mask": _find_one(anat_deriv, NOISE_MASK_PATTERN),
         "metadata_json": _find_one(dce_deriv, METADATA_PATTERN),
     }
+
+
+def session_from_paths(derivatives_path: Path, rawdata_path: Optional[Path] = None) -> BidsSession:
+    """Build a session from the two folders a run config names.
+
+    A run config carries `subject_tp_path` and `subject_source_path`, not a parsed session,
+    so every caller that wants to discover files from a config has to bridge the two. Shared
+    rather than copied: the pipeline, the GUI and the reliability harness all need the same
+    bridge, and a private copy that drifts would silently select different files.
+    """
+    is_session_dir = derivatives_path.name.startswith("ses-")
+    return BidsSession(
+        bids_root=derivatives_path,
+        subject=derivatives_path.parent.name if is_session_dir else derivatives_path.name,
+        session=derivatives_path.name if is_session_dir else None,
+        rawdata_path=rawdata_path if rawdata_path is not None else derivatives_path,
+        derivatives_path=derivatives_path,
+    )
 
 
 def missing_required_inputs(found: Dict[str, Optional[Path]]) -> List[str]:

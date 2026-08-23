@@ -334,7 +334,7 @@ python tests/python/run_baseline_end_reliability.py \
 
 `run_baseline_end_reliability.py` compares five detectors: `piecewise_constant`, `legacy_sobel`,
 `glr`, `tv`, and `biexp_fit` (the production default). `biexp_fit` reads its `aif_*` settings from
-`--config-template` (default `python/dce_run_example.json`) so the harness measures the configuration
+`--config-template` (default `python/dce_run_example_bids.json`) so the harness measures the configuration
 that actually ships; the other four are pure functions of the signal curve and ignore it. Because
 it is a model fit rather than a shape heuristic it also reports a fractional injection end
 (`t0_exp`) and a fitted curve — both drawn on the per-session figures, with the extra diagnostics
