@@ -127,6 +127,14 @@ config → `dce_defaults.json` → **error**. A key missing everywhere raises `D
 naming the key and the file; a key in the run config that the defaults file does not
 declare is rejected as a typo. `python/dce_config.py` is the resolver.
 
+Parametric T1 follows the same rule with its own pair: **`python/parametric_defaults.json`**
+holds the defaults and `python/parametric_config.py` resolves against it, with the same
+`required`/`optional`/`defaults` sections and the same typo guard. Its config is flat -- there
+is no `stage_overrides` block -- so a run config's own top-level keys are the overrides. Input
+paths (`output_dir`, `vfa_files`, `mask_file`, `b1_map_file`) describe one study rather than
+how the software behaves, so they belong in a run config and never in the defaults file;
+`python/parametric_run_example.json` is the runnable example.
+
 `relaxivity` and `hematocrit` are per-scan values, so for those two the DCE image's JSON
 sidecar wins over the run config: sidecar → run config → defaults file → error.
 `relaxivity` deliberately has **no default** — the right value depends on the contrast
@@ -202,6 +210,21 @@ discovery, per-scan value provenance, Stage-D backend choice). They call
 event stream; with no sink installed it prints, so the pipeline stays usable as a library.
 Do not add bare `print` calls to the pipelines -- they bypass verbosity and reach every
 interface.
+
+### GUI structure
+
+Both GUIs are one interface over two pipelines. `python/gui_common.py` holds everything that
+is the same by nature -- the window palette and `WINDOW_QSS`, path resolution against the
+config that holds a path, browse dialogs, the collapsible section, the log view and its
+reporter, the run bar, the figures panel, and the `QProcess` lifecycle including the event
+demux -- exposed as `GuiCommonMixin` plus a few builders. Each window keeps only what differs:
+which settings exist, how a config payload is assembled, and what an event means for the
+progress bar.
+
+Do not re-add a local copy of a mixin method to a window. Two copies of "how a GUI drives a
+CLI" is what produced four different `--set` parsers; `tests/python/test_gui_common.py` fails
+if one comes back. Both windows show the same four tabs (Inputs, CLI Output, QC Figures,
+Results) and share `dce_volume_viewer.py`, which is pipeline-agnostic despite its name.
 
 ### Backend selection (Stage D acceleration)
 
@@ -285,6 +308,7 @@ When asked to plan or estimate a new initiative, also write it up under `docs/pr
 
 Other reference docs:
 - `docs/dce_options.md` — full `stage_overrides` field reference (shared by CLI + GUI).
+- `docs/parametric_options.md` — parametric T1 field reference (shared by CLI + GUI + batch).
 - `python/README.md` — Python usage guide (CLIs, batch processing, GUI, output formats).
 - `tests/README.md` — full test-suite reference.
 

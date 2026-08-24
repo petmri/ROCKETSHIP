@@ -7,6 +7,71 @@ Do not track open items in this file; active work belongs in `docs/project-manag
 
 Completed items moved from `TODO.md` on 2026-03-05 to keep the active backlog short.
 
+## Completed Recent Updates (2026-08-24) — parametric T1 parity
+
+### Parametric GUI brought in line with the DCE GUI (from TODO Blocking Items)
+- [x] **`python/gui_common.py` holds the front end both GUIs share.** The two windows had
+      grown 20 methods with the same names, about half already identical -- `_on_process_output`
+      differed by one token, `_stop_run_hard` by one call, `_base_dir` only in its docstring.
+      The palette and `WINDOW_QSS`, path resolution, browse dialogs, the collapsible section,
+      the log view and its reporter, the run bar, the figures panel and the `QProcess`
+      lifecycle now live in one module as `GuiCommonMixin` plus builders. `dce_gui.py` was
+      refactored onto it first and verified before the parametric window was rebuilt, so a
+      regression bisects to one commit; it lost 268 lines.
+- [x] **The parametric window is now the same interface over a different pipeline.** Four
+      tabs (Inputs, CLI Output, QC Figures, Results) in place of a two-pane splitter with a
+      plain log box. Results reuses `dce_volume_viewer.py` unchanged -- `discover_result_volumes`
+      was already pipeline-agnostic despite its docstring -- so a finished run shows its T1
+      and R-squared maps beside the VFA images that produced them.
+- [x] **`backend` is reachable from a GUI at last.** It was a validated config field with no
+      control in any interface, JSON only, flagged in the merge-readiness review's
+      reachability matrix. `fit_type` became a drop-down of the three values `validate()`
+      accepts, instead of free text that turned a typo into a `ValueError` seconds into a run.
+- [x] **Resolved Settings replaces the DCE override table.** With 15 flat keys a second
+      editable grid would just be the form again, so this is a read-only view of what the run
+      will use and where each value came from (run config / defaults file / edited here /
+      unset). That is the `source` column, which is the part of the DCE table a flat config
+      benefits from -- and it only became possible once the defaults moved out of source.
+- [x] Coverage: `tests/python/test_gui_common.py` -- there were no GUI tests at all before
+      this, which is how a cross-file refactor kills a code path quietly. Covers path
+      resolution, the shared widgets, both windows building, and a guard that a shared method
+      has not been copied back into a window.
+
+### Parametric T1 defaults are single-source (from TODO Modeling and Workflow Follow-Ups)
+- [x] **`parametric_default.json` was two files wearing one name** -- the defaults the
+      pipeline fell back to, and a runnable config pointing at fixtures in `tests/data`.
+      Editing it to change a default also edited an example run, so in practice nobody edited
+      it and the real defaults lived in `parametric_pipeline.py` as 10 dataclass field values
+      and 11 `.get()` fallbacks.
+- [x] `python/parametric_defaults.json` now holds preferences only, in the same shape as
+      `dce_defaults.json`; `python/parametric_config.py` resolves against it with the
+      `dce_config` API. A value in neither the run config nor the file raises; a misspelled
+      key stops the run. `python/parametric_run_example.json` is what remains of the old file,
+      and a test asserts it never restates a defaults-file value.
+- [x] Two parity tests built `ParametricT1Config` by hand and so resolved defaults from
+      source -- exactly the disease the item described. Both go through `from_dict` now.
+
+### QC figures for a parametric T1 run
+- [x] The pipeline emitted no figures at all, only the three NIfTI maps, so there was nothing
+      for a QC tab to show. `python/parametric_qc.py` writes a T1 histogram, an R-squared
+      histogram against the threshold, and a T1 slice montage on one shared window, emitted as
+      `artifact_type=figure` -- the type the DCE stages already use, so no reader needs a
+      parametric special case. `write_qc_figures` turns them off.
+- [x] Figures degrade rather than fail: no matplotlib, nothing fitted, or one plot raising all
+      yield "no figure" instead of failing a run that produced numbers.
+- [x] The R-squared plot needed care. R-squared is negative wherever the fit is worse than a
+      flat line and reaches -267 on the example data, so cropping the axis to [0,1] drew a
+      plot claiming to reject 5,479 voxels while showing almost nothing below the threshold.
+      Values below zero are clipped into a labelled first bin so the caption and bars agree.
+
+### Documentation
+- [x] `docs/parametric_options.md` is the field reference the parametric side never had,
+      matching `dce_options.md` in structure, and is wired into the site nav and the GUI's
+      *Open Options Doc* button. Writing it turned up two errors in what had just been built:
+      an unset `b1_map_file` does not mean nominal flip angles -- the pipeline auto-detects
+      `B1_scaled_FAreg.nii` beside the VFA images -- and the mask threshold is `> 0`, not
+      non-zero. The doc and a GUI tooltip were corrected.
+
 ## Completed Recent Updates (2026-08-24)
 
 ### Readable run output across the CLIs, batch drivers and GUI (from TODO Primary Items)

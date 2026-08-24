@@ -47,6 +47,7 @@ nav:
       - GPU and CPU Acceleration: wiki/enable-gpu-acceleration.md
   - Technical Reference:
       - DCE Options: dce_options.md
+      - Parametric T1 Options: parametric_options.md
       - Signal to Concentration: reference/signal-to-concentration.md
       - Pharmacokinetic Models:
           - Overview: reference/models/index.md

@@ -291,7 +291,11 @@ class ParametricGuiWindow(GuiCommonMixin, QMainWindow):
             self.tr_ms_edit,
         )
         form.addRow(
-            _form_label("B1 map", "b1_map_file", "Empty uses the nominal flip angles."),
+            _form_label(
+                "B1 map", "b1_map_file",
+                "Empty looks for B1_scaled_FAreg.nii beside the VFA images, and uses\n"
+                "the nominal flip angles only if none is found.",
+            ),
             self._line_edit_with_browse(
                 self.b1_map_file_edit,
                 lambda: self._choose_file_for(self.b1_map_file_edit, "Select B1 map"),

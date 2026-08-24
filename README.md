@@ -271,11 +271,18 @@ One-click test run:
 - Launch the GUI and click `Run DCE` without changing fields.
 - It uses `/path/to/ROCKETSHIP/python/dce_run_example_bids.json` (subject `sub-02downsample`) by default.
 
-Parametric GUI v1 behavior:
+Parametric T1 GUI:
 
-- Edits the parametric T1 config (`vfa_files`, flip angles, TR, thresholds, B1 map, script-preferences path, output controls).
-- Runs `run_parametric_python_cli.py` in a subprocess and streams event progress.
-- Shows summary metrics from `parametric_t1_run.json` and lists output artifact paths.
+- Four tabs matching the DCE GUI: **Inputs**, **CLI Output**, **QC Figures**, **Results**.
+- Edits the run config (VFA files, flip angles, TR, fit method, backend, thresholds, mask,
+  B1 map, output controls). Fit method and backend are drop-downs of the values the
+  pipeline accepts, so an unsupported choice cannot be typed.
+- **Resolved Settings** shows every key with the value the run will use and where it came
+  from -- your config, `python/parametric_defaults.json`, or an edit made in the form.
+- Runs `run_parametric_python_cli.py` in a subprocess and renders its event stream through
+  the same reporter the CLIs use, so the log reads like a terminal run.
+- **QC Figures** previews the T1 histogram, R-squared histogram and T1 slice montage the run
+  writes; **Results** is a slice viewer over the fitted maps and the VFA images behind them.
 
 ## ROCKETSHIP MATLAB, Legacy
 The MATLAB scripts are the original implementation of ROCKETSHIP and are still available in this repository for users who prefer that environment or have existing workflows built around it. However, the Python module is the recommended path forward for new users and projects, as it offers more flexible configuration, and automation options. New features and updates will primarily be developed in the Python module, while the MATLAB scripts will be maintained for compatibility but may not receive all new features or optimizations.

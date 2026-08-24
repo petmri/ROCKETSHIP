@@ -606,8 +606,15 @@ GUI v1 behavior:
 - Provides `Browse...` dialogs for all path/file input fields in the form.
 - If `aif_mode=imported` is needed, set `imported_aif_path` in JSON config (current GUI form does not expose it yet).
 
-Parametric GUI v1 behavior:
+Parametric T1 GUI:
 
-- Edits the parametric T1 config (`vfa_files`, flip angles, TR, thresholds, B1 map, script-preferences path, output controls).
-- Runs `run_parametric_python_cli.py` in a subprocess and streams event progress.
-- Shows summary metrics from `parametric_t1_run.json` and lists output artifact paths.
+- Four tabs matching the DCE GUI: **Inputs**, **CLI Output**, **QC Figures**, **Results**.
+- Edits the run config (VFA files, flip angles, TR, fit method, backend, thresholds, mask,
+  B1 map, output controls). Fit method and backend are drop-downs of the values the
+  pipeline accepts, so an unsupported choice cannot be typed.
+- **Resolved Settings** shows every key with the value the run will use and where it came
+  from -- your config, `python/parametric_defaults.json`, or an edit made in the form.
+- Runs `run_parametric_python_cli.py` in a subprocess and renders its event stream through
+  the same reporter the CLIs use, so the log reads like a terminal run.
+- **QC Figures** previews the T1 histogram, R-squared histogram and T1 slice montage the run
+  writes; **Results** is a slice viewer over the fitted maps and the VFA images behind them.
