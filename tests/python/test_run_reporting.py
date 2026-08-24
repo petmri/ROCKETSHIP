@@ -395,7 +395,7 @@ def test_the_gui_log_renders_events_instead_of_dumping_them() -> None:
     pytest.importorskip("PySide6")
     from types import SimpleNamespace
 
-    import dce_gui
+    import gui_common
 
     class _Chunk:
         def __init__(self, text: str) -> None:
@@ -405,7 +405,7 @@ def test_the_gui_log_renders_events_instead_of_dumping_them() -> None:
             return self._data
 
     payload = "".join(
-        f"{dce_gui.EVENT_PREFIX}{json.dumps(event)}\n" for event in RUN
+        f"{gui_common.EVENT_PREFIX}{json.dumps(event)}\n" for event in RUN
     )
     shown: list[str] = []
     handled: list[dict] = []
@@ -421,7 +421,7 @@ def test_the_gui_log_renders_events_instead_of_dumping_them() -> None:
         _append_log_line=shown.append,
         _handle_event=handled.append,
     )
-    dce_gui.DceGuiWindow._on_process_output(window)
+    gui_common.GuiCommonMixin._on_process_output(window)
 
     log = "\n".join(shown)
     assert "ROCKETSHIP_EVENT" not in log

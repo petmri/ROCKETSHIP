@@ -8,12 +8,11 @@ import sys
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QProcess, Qt, QTimer, QUrl
-from PySide6.QtGui import QDesktopServices, QFontDatabase, QPalette, QPixmap
+from PySide6.QtGui import QDesktopServices, QPalette
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
-    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -21,14 +20,11 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
-    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
-    QProgressBar,
     QPushButton,
     QScrollArea,
-    QSizePolicy,
     QTableWidget,
     QTabWidget,
     QTableWidgetItem,
@@ -47,12 +43,23 @@ from dce_file_discovery import (
     session_from_paths,
 )
 from dce_volume_viewer import Volume, VolumeViewer, discover_result_volumes
-import run_reporting
-from run_reporting import CallbackStream, Reporter
+import gui_common
+from gui_common import (
+    GuiCommonMixin,
+    WINDOW_QSS,
+    build_figures_panel,
+    build_log_view,
+    build_run_bar,
+    form_label as _form_label,
+    paths_to_text as _paths_to_text,
+    resolve_path as _resolve_path,
+    resolve_paths as _resolve_paths,
+    text_to_paths as _text_to_paths,
+)
+from run_reporting import Reporter
 from version import __version__
 
 
-EVENT_PREFIX = "ROCKETSHIP_EVENT "
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Main-window tab order. Named because the run follows the user through them: starting a run
@@ -62,46 +69,6 @@ TAB_LOG = 1
 TAB_FIGURES = 2
 TAB_RESULTS = 3
 
-# Window-wide palette. The default group-box grey sits within a few percent of the white of
-# the fields inside it, which on some displays made the edge of a text box invisible. These
-# darken the panel and give every white field a border, so "editable" reads at a glance.
-# Set once on the window and inherited by every child; widgets that carry their own
-# stylesheet (the log view, the progress bar) keep it, since a widget's own sheet wins.
-PANEL_BG = "#F0F0F0"
-PANEL_BORDER = "#b4b4bb"
-FIELD_BG = "#ffffff"
-FIELD_BORDER = "#9a9aa2"
-WINDOW_QSS = f"""
-QGroupBox {{
-    background-color: {PANEL_BG};
-    border: 1px solid {PANEL_BORDER};
-    border-radius: 4px;
-    /* Tall enough that the title clears the frame: with a shorter margin the top border is
-       drawn through the middle of the text. */
-    margin-top: 20px;
-    padding: 3px 8px 5px 8px;
-}}
-QGroupBox::title {{
-    subcontrol-origin: margin;
-    subcontrol-position: top left;
-    left: 8px;
-    padding: 0 4px;
-}}
-/* The collapsible sections are group boxes with no title, so they need no room above. */
-QGroupBox[titleless="true"] {{
-    margin-top: 0;
-    padding: 4px 8px;
-}}
-QLineEdit, QPlainTextEdit, QListWidget, QTableWidget {{
-    background-color: {FIELD_BG};
-    border: 1px solid {FIELD_BORDER};
-    border-radius: 3px;
-}}
-QLineEdit:disabled, QPlainTextEdit:disabled {{
-    background-color: #f0f0f2;
-    color: #6a6a70;
-}}
-"""
 
 # Widest text each run-bar label has to hold, used to reserve width up front. Without this
 # the labels resize as a run progresses and the progress bar's left edge jumps with them.
@@ -151,47 +118,7 @@ def _text_to_value(text: str) -> Any:
     return coerce_override_value(text)
 
 
-def _paths_to_text(values: List[str]) -> str:
-    return "\n".join(values)
-
-
-def _text_to_paths(text: str) -> List[str]:
-    return [line.strip() for line in text.splitlines() if line.strip()]
-
-
-def _resolve_path(text: str, base_dir: Path) -> str:
-    """Resolve a possibly-relative path against base_dir.
-
-    dce_cli.py resolves relative paths in a config against that config file's own directory
-    (`DcePipelineConfig.from_dict(..., base_dir=config_path.parent)`), not the process cwd.
-    base_dir must track wherever the currently-loaded config lives so relative paths keep
-    meaning what they meant when authored, even after the GUI re-serializes the payload into
-    a different directory (typically output_dir) to run it.
-    """
-    stripped = text.strip()
-    if not stripped:
-        return ""
-    candidate = Path(stripped).expanduser()
-    if not candidate.is_absolute():
-        candidate = (base_dir / candidate).resolve()
-    return str(candidate)
-
-
-def _resolve_paths(values: List[str], base_dir: Path) -> List[str]:
-    return [_resolve_path(v, base_dir) for v in values if str(v).strip()]
-
-
-def _form_label(text: str, config_key: str, hint: str = "") -> QLabel:
-    """Friendly field label that still exposes the underlying config key on hover."""
-    label = QLabel(text)
-    tooltip = f"config key: {config_key}"
-    if hint:
-        tooltip = f"{hint}\n\n{tooltip}"
-    label.setToolTip(tooltip)
-    return label
-
-
-class DceGuiWindow(QMainWindow):
+class DceGuiWindow(GuiCommonMixin, QMainWindow):
     """Main window for configuring and running DCE CLI."""
 
     def __init__(self) -> None:
@@ -445,16 +372,6 @@ class DceGuiWindow(QMainWindow):
 
         parent_layout.addWidget(group)
 
-    def _line_edit_with_browse(self, edit: QLineEdit, on_browse: Any) -> QWidget:
-        row = QWidget()
-        layout = QHBoxLayout(row)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(edit, 1)
-        browse = QPushButton("Browse...")
-        browse.clicked.connect(on_browse)
-        layout.addWidget(browse)
-        return row
-
     def _file_list_with_browse(self, edit: QPlainTextEdit, on_browse: Any) -> QWidget:
         """One-line path list plus an inline Browse button, matching the Core Settings rows.
 
@@ -549,43 +466,6 @@ class DceGuiWindow(QMainWindow):
             optional_note = "" if found.get("noise_mask") else " (no noise mask)"
             self._set_auto_find_status(f"All required inputs found{optional_note}", missing=False)
 
-    def _base_dir(self) -> Path:
-        """Directory relative paths in the current config are anchored to.
-
-        Mirrors dce_cli.py's `base_dir=config_path.parent` semantics, so a relative path
-        shown in the GUI (as loaded verbatim from JSON) keeps resolving the way the CLI
-        would resolve it, regardless of where the GUI later writes the run config it
-        launches.
-        """
-        config_path = getattr(self, "_config_path", None)
-        return config_path.parent if config_path is not None else REPO_ROOT
-
-    def _dialog_start_dir(self, current_text: str) -> str:
-        text = current_text.strip()
-        if text:
-            candidate = Path(text).expanduser()
-            if not candidate.is_absolute():
-                candidate = (self._base_dir() / candidate).resolve()
-            if candidate.is_file():
-                return str(candidate.parent)
-            if candidate.exists():
-                return str(candidate)
-        return str(self._base_dir())
-
-    def _choose_directory_for(self, edit: QLineEdit, title: str) -> None:
-        start_dir = self._dialog_start_dir(edit.text())
-        chosen = QFileDialog.getExistingDirectory(self, title, start_dir)
-        if chosen:
-            edit.setText(chosen)
-
-    def _choose_files_for(self, edit: QPlainTextEdit, title: str) -> None:
-        existing_paths = _text_to_paths(edit.toPlainText())
-        start_seed = existing_paths[0] if existing_paths else ""
-        start_dir = self._dialog_start_dir(start_seed)
-        selected, _ = QFileDialog.getOpenFileNames(self, title, start_dir, "All Files (*)")
-        if selected:
-            edit.setPlainText(_paths_to_text(selected))
-
     def _build_model_flags(self, parent_layout: QVBoxLayout) -> None:
         group = QGroupBox("Model Flags")
         layout = QHBoxLayout(group)
@@ -636,55 +516,18 @@ class DceGuiWindow(QMainWindow):
         parent_layout.addWidget(group)
 
     def _build_run_controls(self, parent_layout: QVBoxLayout) -> None:
-        # This bar shows on every tab, so it is a single row: buttons, status text and the
-        # progress bar side by side. Each child is explicitly AlignVCenter rather than left
-        # to fill the row -- styles disagree about how much height a group box reserves for
-        # its title, and stacked rows drifted to the top of the box on macOS.
-        group = QGroupBox("Run")
-        group.setSizePolicy(group.sizePolicy().horizontalPolicy(), QSizePolicy.Fixed)
-        layout = QHBoxLayout(group)
-        layout.setContentsMargins(8, 2, 8, 2)
-        layout.setSpacing(8)
-
-        self.run_button = QPushButton("Run DCE")
-        self.stop_button = QPushButton("Hard Stop")
-        self.stop_button.setEnabled(False)
-        self.stage_label = QLabel("Stage: idle")
-        self.model_label = QLabel("Model: -")
-        # Minimum rather than fixed width: this pins the progress bar's left edge for every
-        # message these labels actually show, without truncating an unexpectedly long one.
-        metrics = self.stage_label.fontMetrics()
-        self.stage_label.setMinimumWidth(metrics.horizontalAdvance(WIDEST_STAGE_TEXT) + 8)
-        self.model_label.setMinimumWidth(metrics.horizontalAdvance(WIDEST_MODEL_TEXT) + 8)
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 100)
-        self.progress.setValue(0)
-        self.progress.setTextVisible(True)
-        self.progress.setFixedHeight(18)
-        self.progress.setMinimumWidth(200)
-        # Styled rather than left native: the macOS style draws no text on a progress bar and
-        # gives it a near-white groove, so on that platform an idle bar was invisible against
-        # the group box. An explicit border and track render the same everywhere.
-        self.progress.setStyleSheet(
-            "QProgressBar {"
-            " border: 1px solid #909090;"
-            " border-radius: 3px;"
-            " background-color: #ffffff;"
-            " text-align: center;"
-            " color: #000000;"
-            "}"
-            "QProgressBar::chunk {"
-            " background-color: #3b82f6;"
-            " border-radius: 2px;"
-            "}"
+        bar = build_run_bar(
+            run_text="Run DCE",
+            widest_stage_text=WIDEST_STAGE_TEXT,
+            widest_detail_text=WIDEST_MODEL_TEXT,
+            detail_idle_text="Model: -",
         )
-
-        for widget in (self.run_button, self.stop_button, self.stage_label, self.model_label):
-            layout.addWidget(widget, 0, Qt.AlignVCenter)
-        # No alignment flag here: a fixed-height widget is centred by the layout anyway, and
-        # an explicit flag would stop it stretching to fill the remaining width.
-        layout.addWidget(self.progress, 1)
-        parent_layout.addWidget(group)
+        self.run_button = bar.run_button
+        self.stop_button = bar.stop_button
+        self.stage_label = bar.stage_label
+        self.model_label = bar.detail_label
+        self.progress = bar.progress
+        parent_layout.addWidget(bar.group)
 
     def _build_inputs_tab(self) -> QWidget:
         """Config file selection plus every settings section, in one scrolling column."""
@@ -775,24 +618,13 @@ class DceGuiWindow(QMainWindow):
         return found
 
     def _build_log_tab(self) -> QWidget:
-        # No group box around these: the tab already frames and titles them, so a second
+        # No group box around this: the tab already frames and titles it, so a second
         # border with the same caption inside it is just noise.
         panel = QWidget()
-        logs_layout = QVBoxLayout(panel)
-        self.log_view = QPlainTextEdit()
-        self.log_view.setReadOnly(True)
-        self.log_view.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
-        self.log_view.setStyleSheet(
-            "QPlainTextEdit {"
-            " background-color: #000000;"
-            " color: #ffffff;"
-            " selection-background-color: #ffffff;"
-            " selection-color: #000000;"
-            " border: 1px solid #444444;"
-            "}"
-        )
+        layout = QVBoxLayout(panel)
+        self.log_view = build_log_view()
         self._reset_log_view()
-        logs_layout.addWidget(self.log_view)
+        layout.addWidget(self.log_view)
         return panel
 
     def _reset_log_view(self) -> None:
@@ -803,16 +635,10 @@ class DceGuiWindow(QMainWindow):
         )
 
     def _build_figures_tab(self) -> QWidget:
-        panel = QWidget()
-        fig_layout = QVBoxLayout(panel)
-        self.figure_list = QListWidget()
-        self.figure_preview = QLabel("No figure selected")
-        self.figure_preview.setAlignment(Qt.AlignCenter)
-        self.figure_preview.setMinimumHeight(300)
-        self.figure_preview.setStyleSheet("border: 1px solid #888;")
-        fig_layout.addWidget(self.figure_list, 1)
-        fig_layout.addWidget(self.figure_preview, 3)
-        return panel
+        panel = build_figures_panel()
+        self.figure_list = panel.list_widget
+        self.figure_preview = panel.preview
+        return panel.widget
 
     def _on_open_options_doc(self) -> None:
         if not OPTIONS_DOC_PATH.exists():
@@ -821,23 +647,6 @@ class DceGuiWindow(QMainWindow):
         opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(OPTIONS_DOC_PATH)))
         if not opened:
             QMessageBox.information(self, "Options Doc", f"Open this file:\n{OPTIONS_DOC_PATH}")
-
-    def _on_load_config_clicked(self) -> None:
-        path_str, _ = QFileDialog.getOpenFileName(self, "Load config JSON", str(REPO_ROOT), "JSON (*.json)")
-        if not path_str:
-            return
-        self._load_config(Path(path_str))
-
-    def _on_save_config_clicked(self) -> None:
-        path_str, _ = QFileDialog.getSaveFileName(self, "Save config JSON", str(REPO_ROOT / "out"), "JSON (*.json)")
-        if not path_str:
-            return
-        path = Path(path_str)
-        payload = self._collect_config_payload()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2) + "\n")
-        self.config_path_edit.setText(str(path))
-        self._config_path = path
 
     def _set_overrides_from_dict(self, stage_overrides: Dict[str, Any]) -> None:
         """Show every known key with the value this run will actually use.
@@ -1133,73 +942,18 @@ class DceGuiWindow(QMainWindow):
         self.figure_preview.setText("No figure selected")
         self._event_paths.clear()
         self._stdout_buffer = ""
-        # The subprocess sends machine events; the log shows what they mean, rendered by
-        # the same reporter the CLIs use so both surfaces describe a run identically.
-        self._log_reporter = Reporter(
-            stream=CallbackStream(self._append_log_line),
-            verbosity=run_reporting.GUI_VERBOSITY,
-            color=False,
-            tty=False,
-        )
+        self._log_reporter = self._new_log_reporter()
         self.progress.setValue(0)
         self.stage_label.setText("Stage: starting")
         self.model_label.setText("Model: -")
 
-        proc = QProcess(self)
-        proc.setWorkingDirectory(str(REPO_ROOT))
-        proc.setProcessChannelMode(QProcess.MergedChannels)
-        proc.readyReadStandardOutput.connect(self._on_process_output)
-        proc.finished.connect(self._on_process_finished)
-        self._process = proc
-
-        args = [str(CLI_ENTRYPOINT), "--config", str(config_path), "--events", "on"]
-        proc.start(sys.executable, args)
+        self._start_process(CLI_ENTRYPOINT, config_path)
         self.run_button.setEnabled(False)
         self.stop_button.setEnabled(True)
         # Follow the run to the log, but only from Inputs: if the user has deliberately
         # opened another tab, leave them there.
         if self.tabs.currentIndex() == TAB_INPUTS:
             self.tabs.setCurrentIndex(TAB_LOG)
-
-    def _stop_run_hard(self) -> None:
-        if self._process is None:
-            return
-        if self._process.state() != QProcess.NotRunning:
-            self._process.kill()
-            self.log_view.appendPlainText("Hard stop requested: process killed.")
-
-    def _append_log_line(self, line: str) -> None:
-        self.log_view.appendPlainText(line)
-        self.log_view.verticalScrollBar().setValue(self.log_view.verticalScrollBar().maximum())
-
-    def _on_process_output(self) -> None:
-        if self._process is None:
-            return
-        chunk = bytes(self._process.readAllStandardOutput()).decode("utf-8", errors="replace")
-        self._stdout_buffer += chunk
-        lines = self._stdout_buffer.splitlines(keepends=False)
-        if self._stdout_buffer and not self._stdout_buffer.endswith(("\n", "\r")):
-            self._stdout_buffer = lines[-1]
-            lines = lines[:-1]
-        else:
-            self._stdout_buffer = ""
-
-        for line in lines:
-            clean = line.rstrip()
-            if clean == "":
-                continue
-            if not clean.startswith(EVENT_PREFIX):
-                self._append_log_line(clean)
-                continue
-            try:
-                event = json.loads(clean[len(EVENT_PREFIX) :])
-            except Exception:
-                # Not decodable: show it raw rather than swallowing it.
-                self._append_log_line(clean)
-                continue
-            if self._log_reporter is not None:
-                self._log_reporter.handle_event(event)
-            self._handle_event(event)
 
     def _on_process_finished(self, exit_code: int, _exit_status: QProcess.ExitStatus) -> None:
         self.run_button.setEnabled(True)
@@ -1269,28 +1023,6 @@ class DceGuiWindow(QMainWindow):
         if event_type == "run_done":
             self.progress.setValue(100)
             return
-
-    def _add_figure(self, path: str) -> None:
-        if path in self._event_paths:
-            return
-        p = Path(path)
-        if not p.exists():
-            return
-        self._event_paths.add(path)
-        self.figure_list.addItem(QListWidgetItem(path))
-
-    def _on_figure_selected(self, current: Optional[QListWidgetItem], _previous: Optional[QListWidgetItem]) -> None:
-        if current is None:
-            self.figure_preview.setText("No figure selected")
-            return
-        path = current.text()
-        pix = QPixmap(path)
-        if pix.isNull():
-            self.figure_preview.setText(f"Unable to load image: {path}")
-            return
-        scaled = pix.scaled(self.figure_preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        self.figure_preview.setPixmap(scaled)
-
 
 def main(argv: Optional[List[str]] = None) -> int:
     del argv
