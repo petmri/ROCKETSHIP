@@ -18,6 +18,7 @@ from accel_backend import (
     resolve_backend_selection,
 )
 from parametric_models import t1_fa_nonlinear_fit, t1_fa_two_point_fit
+import version
 
 
 def _json_default(value: Any) -> Any:
@@ -746,6 +747,7 @@ def run_parametric_t1_pipeline(
         fit_type=config.fit_type,
         rsquared_threshold=float(config.rsquared_threshold),
         backend=config.backend,
+        **version.build_identity(),
     )
 
     vfa_data, affine, header = _load_vfa_data(config)
@@ -889,6 +891,7 @@ def run_parametric_t1_pipeline(
         "meta": {
             "pipeline": "parametric_t1_vfa",
             "status": "ok",
+            **version.build_identity(),
             "started_at": started_at.isoformat(),
             "finished_at": finished_at.isoformat(),
             "duration_seconds": float((finished_at - started_at).total_seconds()),

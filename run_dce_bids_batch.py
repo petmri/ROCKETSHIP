@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 import sys
 from typing import Any, Dict, List, Optional
@@ -15,8 +16,14 @@ sys.path.insert(0, str(REPO_ROOT / "python"))
 from bids_discovery import BidsSession, discover_bids_sessions  # noqa: E402
 from cli_overrides import parse_set_overrides  # noqa: E402
 import dce_config  # noqa: E402
-from dce_file_discovery import discover_dce_inputs  # noqa: E402
+from dce_file_discovery import (  # noqa: E402
+    discover_dce_input_paths,
+    discover_dce_inputs,
+    missing_required_inputs,
+)
 from dce_pipeline import DcePipelineConfig, run_dce_pipeline  # noqa: E402
+import run_reporting  # noqa: E402
+from run_reporting import Reporter, Verbosity  # noqa: E402
 
 
 def _load_config_template(path: Path) -> Dict[str, Any]:
@@ -139,7 +146,26 @@ Examples:
         default=None,
         help="Optional path to write batch summary JSON (default: derivatives/reports/[pipeline]/batch_summary_YYYYMMDD.json).",
     )
+    run_reporting.add_verbosity_argument(parser)
     return parser.parse_args(argv)
+
+
+def _preflight(sessions: List[BidsSession], skip_validation: bool) -> List[Dict[str, Any]]:
+    """Check each session's inputs up front so the queue can be described before it runs.
+
+    This only reports. The run loop still attempts every session exactly as before, so a
+    session listed as incomplete fails there and is recorded, rather than being dropped here.
+    """
+    plan: List[Dict[str, Any]] = []
+    for session in sessions:
+        missing: List[str] = []
+        if not skip_validation:
+            try:
+                missing = missing_required_inputs(discover_dce_input_paths(session))
+            except Exception as exc:  # discovery itself failing is a finding, not a crash
+                missing = [f"discovery failed: {exc}"]
+        plan.append({"session": session, "missing": missing})
+    return plan
 
 
 def _build_session_config(
@@ -257,14 +283,15 @@ def _build_session_config(
 
             # Template had patterns but they didn't match.
             if required:
-                print(
-                    f"Warning: Config template patterns for {key} didn't match any files. Falling back to auto-discovery.",
-                    file=sys.stderr,
+                run_reporting.notice(
+                    f"config template patterns for {key} matched nothing; "
+                    "falling back to auto-discovery",
+                    Verbosity.NORMAL,
                 )
             else:
-                print(
-                    f"Warning: Config template patterns for optional {key} didn't match any files. Leaving empty.",
-                    file=sys.stderr,
+                run_reporting.notice(
+                    f"config template patterns for optional {key} matched nothing; leaving empty",
+                    Verbosity.NORMAL,
                 )
                 return []
 
@@ -353,7 +380,16 @@ def _build_session_config(
 
 def main(argv: List[str] | None = None) -> int:
     args = parse_args(argv if argv is not None else sys.argv[1:])
+    verbosity = run_reporting.verbosity_from_args(args)
+    reporter = Reporter(verbosity=verbosity)
+    run_reporting.set_notice_sink(run_reporting.reporter_notice_sink(reporter))
+    try:
+        return _run_batch(args, reporter, verbosity)
+    finally:
+        run_reporting.set_notice_sink(None)
 
+
+def _run_batch(args: argparse.Namespace, reporter: Reporter, verbosity: Verbosity) -> int:
     bids_root = args.bids_root.expanduser().resolve()
     if not bids_root.is_dir():
         print(f"Error: BIDS root not found: {bids_root}", file=sys.stderr)
@@ -408,7 +444,7 @@ def main(argv: List[str] | None = None) -> int:
         template_dir = template_path.parent
         try:
             config_template = _load_config_template(template_path)
-            print(f"Loaded config template: {template_path}", flush=True)
+            reporter.note(f"config template  {run_reporting.shorten_path(template_path)}")
         except Exception as exc:
             print(f"Error loading config template: {exc}", file=sys.stderr)
             return 2
@@ -444,11 +480,33 @@ def main(argv: List[str] | None = None) -> int:
         print("Error: No sessions matched filter criteria", file=sys.stderr)
         return 2
 
-    print(f"Processing {len(sessions)} session(s) under {bids_root}", flush=True)
+    reporter.header(
+        "ROCKETSHIP DCE batch",
+        [
+            ("Dataset", run_reporting.shorten_path(bids_root)),
+            ("Input", input_pipeline or "rawdata"),
+            ("Output", run_reporting.shorten_path(output_root)),
+            ("Backend", args.backend),
+            ("Models", ", ".join(models) if models else "from config defaults"),
+        ],
+    )
+    plan = _preflight(sessions, args.skip_validation)
+    run_reporting.report_queue(
+        reporter,
+        [
+            (
+                entry["session"].id,
+                "missing " + ", ".join(entry["missing"]) if entry["missing"] else None,
+            )
+            for entry in plan
+        ],
+        checked=not args.skip_validation,
+    )
 
     # Run pipeline for each session
     session_results: List[Dict[str, Any]] = []
     failed_count = 0
+    batch_started = time.perf_counter()
 
     for idx, session in enumerate(sessions, 1):
         # Determine session output directory based on output strategy
@@ -468,7 +526,7 @@ def main(argv: List[str] | None = None) -> int:
         session_output_dir.mkdir(parents=True, exist_ok=True)
         session_reports_dir.mkdir(parents=True, exist_ok=True)
 
-        print(f"[{idx}/{len(sessions)}] {session.id}...", flush=True)
+        reporter.start(f"[{idx}/{len(sessions)}] {session.id}")
 
         try:
             # Validate inputs before config
@@ -490,8 +548,28 @@ def main(argv: List[str] | None = None) -> int:
             )
             config.validate()
 
-            # Run pipeline
-            result = run_dce_pipeline(config)
+            # At detailed and above the stages of each session are shown inline; at
+            # normal the session line is the whole story.
+            session_reporter = (
+                Reporter(verbosity=verbosity, nested=True)
+                if verbosity >= Verbosity.DETAILED
+                else None
+            )
+            if session_reporter is not None:
+                # While a session runs, its notices belong to that session's block.
+                run_reporting.set_notice_sink(
+                    run_reporting.reporter_notice_sink(session_reporter)
+                )
+            try:
+                # Only hand over a callback when something will render it, so a plain
+                # batch run calls the pipeline exactly as it did before.
+                result = (
+                    run_dce_pipeline(config, event_callback=session_reporter.handle_event)
+                    if session_reporter is not None
+                    else run_dce_pipeline(config)
+                )
+            finally:
+                run_reporting.set_notice_sink(run_reporting.reporter_notice_sink(reporter))
             
             # Move dce_pipeline_run.json to reports folder with BIDS naming
             pipeline_run_source = session_output_dir / "dce_pipeline_run.json"
@@ -508,7 +586,7 @@ def main(argv: List[str] | None = None) -> int:
                     "notes": result.get("meta", {}).get("notes", ""),
                 }
             )
-            print(f"  ✓ {status}", flush=True)
+            reporter.settle(status=status, ok=(status == "success"))
 
         except Exception as exc:
             failed_count += 1
@@ -520,7 +598,8 @@ def main(argv: List[str] | None = None) -> int:
                     "error": f"{type(exc).__name__}: {exc}",
                 }
             )
-            print(f"  ✗ failed: {exc}", flush=True)
+            reporter.settle(status="failed", ok=False)
+            reporter.warn(f"{type(exc).__name__}: {exc}")
 
     # Write summary
     summary = {
@@ -541,14 +620,17 @@ def main(argv: List[str] | None = None) -> int:
     }
 
     summary_json_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    print(f"\nSummary written to: {summary_json_path}", flush=True)
-    print(
-        f"  success={summary['sessions_success']}, "
-        f"partial={summary['sessions_partial']}, "
-        f"failed={summary['sessions_failed']}",
-        flush=True,
-    )
 
+    run_reporting.report_batch_finish(
+        reporter,
+        time.perf_counter() - batch_started,
+        [
+            ("succeeded", summary["sessions_success"]),
+            ("partial", summary["sessions_partial"]),
+            ("failed", summary["sessions_failed"]),
+        ],
+        [("Summary", run_reporting.shorten_path(summary_json_path))],
+    )
     return 0 if failed_count == 0 else 1
 
 

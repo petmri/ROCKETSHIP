@@ -7,6 +7,59 @@ Do not track open items in this file; active work belongs in `docs/project-manag
 
 Completed items moved from `TODO.md` on 2026-03-05 to keep the active backlog short.
 
+## Completed Recent Updates (2026-08-24)
+
+### Readable run output across the CLIs, batch drivers and GUI (from TODO Primary Items)
+- [x] **`python/run_reporting.py` renders the event stream for people.** The pipelines already
+      emitted a structured event stream; the CLIs printed it raw, one JSON object per line, which
+      is what made the terminal (and the GUI's "CLI output") an unreadable wall of text. The
+      stream itself is unchanged and still lands in full in `<output_dir>/*_events.jsonl`. One
+      renderer now turns it into aligned stage progress with timings, a header saying what the
+      run is using, and a closing summary; the CLIs, both batch drivers and both GUI log views
+      all render through it, so every interface describes a run identically.
+- [x] **Four verbosity levels, human-readable by default.** `--verbosity quiet|normal|detailed|debug`
+      with `-q`/`-v`/`-vv`. Verbosity selects what is *rendered*, never what is recorded. The
+      previous default -- raw JSON on stdout -- is now `--events on`, which the GUI passes
+      explicitly; stdout carries the machine stream or human progress, never both. Below `debug`
+      a failed run reports the error and exits non-zero without a traceback.
+- [x] **Batch runs describe the queue before running it.** Both batch drivers now check every
+      session's inputs up front and report what was found, what is ready and what is missing,
+      before the first session starts. The preflight only reports: the run loop still attempts
+      every session exactly as before, so a session listed as incomplete still fails there and is
+      recorded. At `detailed` each session's stages render nested inside its progress line.
+- [x] **Pipeline `print` calls became notices.** The messages from call sites with no event
+      callback in scope (config-time BIDS discovery, per-scan value provenance, Stage-D backend
+      choice) now post through `run_reporting.notice`, so they respect verbosity and reach
+      whichever surface is listening. With no sink installed they print, keeping the pipeline
+      usable as a library.
+- [x] **Timings are measured by the pipeline's clock, not the reader's.** The renderer prefers
+      each event's `timestamp_utc`, so the GUI reading down a pipe and anyone replaying a saved
+      event log both see the true stage durations.
+- [x] Coverage: `tests/python/test_run_reporting.py` (41 tests) pins the level-by-level contract,
+      the `ROCKETSHIP_EVENT` protocol the GUI parses, the rule that the event log stays complete
+      at every verbosity, and a drift guard that the GUI log renders events rather than dumping
+      them.
+
+### Release preparation: version 2.0.rc and build identity in run output
+
+- [x] **Version bumped to `2.0.rc`.** `python/version.py` is the single source and the CLI
+      banner reads it; `README.md` and both GUI window titles now agree. The GUI titles
+      previously read `(Python GUI v1)`, a hand-maintained number that was never the product
+      version -- they show `ROCKETSHIP DCE v2.0.rc (Python GUI)` and source it from
+      `version.py`. `_schema: "rocketship-dce-defaults/1"` is a file-format contract validated
+      by `dce_config.py` and was deliberately left alone.
+- [x] **Every run records which build produced it.** `version.build_identity()` returns
+      `{version, git_revision}` -- the short commit with `-dirty` when the tree has uncommitted
+      changes, `None` outside a checkout, which is the normal case for a release download. It
+      goes into the `cli_config` and `run_start` events and into the run summary JSON
+      (`provenance` for DCE, `meta` for parametric), unconditionally: recording is not gated on
+      verbosity, since result files outlive the terminal that made them. The header shows the
+      version at every level and the revision at `detailed` and above.
+- [x] Readers take the version from the *event*, never by importing `version` themselves, so a
+      GUI rendering a subprocess or a replay of an old log reports the build that produced the
+      run rather than the one doing the reading -- the same rule the event-timestamp timings
+      follow.
+
 ## Completed Recent Updates (2026-08-21)
 
 ### Installer usability (from TODO Primary Items)

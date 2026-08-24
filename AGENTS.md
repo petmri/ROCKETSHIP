@@ -139,7 +139,7 @@ the metadata sidecar when present; partial manual override alongside a sidecar i
 A run config names its inputs in `dynamic_files`/`aif_files`/`roi_files`/`t1map_files`, but
 any of those left empty is filled from the dceprep naming convention under `subject_tp_path`
 when one is set (`dce_file_discovery.DISCOVERABLE_FILE_LISTS`, applied in
-`DcePipelineConfig.from_dict`, logged as `[DCE] Found by BIDS convention: ...`). Naming a
+`DcePipelineConfig.from_dict`, reported as "Found by BIDS convention"). Naming a
 file wins; only empty lists are filled, and `drift_files` is never discovered. The batch
 driver and the GUI's auto-find use the same discovery, so all three interfaces select the
 same files. `subject_source_path`/`subject_tp_path` are optional -- omitting them is the
@@ -171,6 +171,37 @@ resolved baseline end and always fits the upslope duration as `t0_exp = t_base_e
 with `delta` floored at one frame. There is no `start_injection_min` option: the injection start
 *is* the baseline end. Background and rationale:
 `docs/project-management/projects/archived/batch-parity/aif_fitting_parity.md`.
+
+### Run output
+
+The pipelines emit a structured event stream (`_emit_progress` in `dce_pipeline.py`,
+`_emit_event` in `parametric_pipeline.py`). That stream is the machine record and always
+lands in full in `<output_dir>/*_events.jsonl`. `python/run_reporting.py` is the only place
+that turns it into text for people, and the CLIs, both batch drivers and both GUI log views
+all render through it, so every interface describes a run the same way.
+
+Verbosity (`--verbosity quiet|normal|detailed|debug`, `-v`/`-vv`/`-q`) selects how much of
+that stream is rendered, never how much is recorded. `normal` is the default; the GUI log
+renders at `detailed` (`run_reporting.GUI_VERBOSITY`). `--events on` puts the raw JSON
+stream on stdout *instead of* human progress -- stdout carries one audience at a time --
+and is how the GUI drives its progress bar. Below `debug`, a failed run reports the error
+and exits non-zero without a traceback.
+
+Every run records which ROCKETSHIP produced it. `python/version.py` is the single source:
+`__version__` plus `git_revision()`, the short commit with `-dirty` when the tree has
+uncommitted changes, or `None` outside a checkout. `version.build_identity()` returns both
+as one dict, and that dict goes into the `cli_config` and `run_start` events and into the
+run summary JSON. The rendered header shows the version at every level and the revision at
+`detailed` and above. Readers take it from the *event*, never by importing `version`
+themselves, so a GUI rendering a subprocess or a replay of an old log reports the build that
+produced the run rather than the one doing the reading.
+
+A few messages come from call sites with no event callback in scope (config-time BIDS
+discovery, per-scan value provenance, Stage-D backend choice). They call
+`run_reporting.notice(text, level)`, which the entry point routes to a reporter or into the
+event stream; with no sink installed it prints, so the pipeline stays usable as a library.
+Do not add bare `print` calls to the pipelines -- they bypass verbosity and reach every
+interface.
 
 ### Backend selection (Stage D acceleration)
 
@@ -286,6 +317,17 @@ and in commit messages, not in the source.
 The exception is a non-obvious constraint that will be silently broken by someone editing
 nearby — a numerical-stability requirement, a MATLAB-parity contract, a guard whose
 condition is subtler than it looks. State it in a sentence or two, then link out.
+
+### Commit messages
+Keep them shorter than the instinct to be thorough suggests. A subject line that states the
+change, then a body of a few short paragraphs — roughly 150-250 words — covering *why* the
+change was made and anything a reader could not infer from the diff. One paragraph per
+substantive change, not per file, per defect and per detail.
+
+The diff already says what moved. The durable record for reasoning, evidence and open
+caveats is `docs/project-management/` (see Documentation Discipline above) — cite it and let
+it carry the detail rather than restating it here. A message that runs past a screen is
+usually a document that was written in the wrong place.
 
 ## Porting Focus
 Primary focus:

@@ -6,12 +6,15 @@ import argparse
 import json
 from pathlib import Path
 import sys
-from typing import Any, Dict, IO, Optional
+from typing import Any, Callable, Dict, IO, Optional
 
 import dce_config
+import run_reporting
 from banner import print_banner
 from cli_overrides import parse_set_overrides
 from dce_pipeline import DcePipelineConfig, run_dce_pipeline
+from run_reporting import Reporter, Verbosity
+import version
 
 
 EVENT_PREFIX = "ROCKETSHIP_EVENT "
@@ -52,28 +55,54 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--checkpoint-dir", type=Path, help="Optional override for checkpoint_dir in config")
     parser.add_argument("--backend", choices=["auto", "cpu", "gpufit"], help="Optional override for backend in config")
     parser.add_argument("--set", dest="set_overrides", action="append", default=[], metavar="KEY=VALUE", help="Override stage_overrides key/value (repeatable)")
-    parser.add_argument("--events", choices=["on", "off"], default="on", help="Emit JSON progress events on stdout (default: on)")
+    parser.add_argument(
+        "--events",
+        choices=["on", "off"],
+        default="off",
+        help=(
+            "Put the machine-readable JSON event stream on stdout instead of human-readable "
+            "progress; the GUI uses this (default: off). The JSONL event log is written either way."
+        ),
+    )
     parser.add_argument("--event-log", type=Path, help="Optional JSONL path for event log (default: <output_dir>/dce_pipeline_events.jsonl)")
+    run_reporting.add_verbosity_argument(parser)
     return parser.parse_args(argv)
 
 
-def _build_event_logger(event_log_path: Path, emit_stdout: bool) -> tuple[IO[str], Any]:
+def _build_event_logger(
+    event_log_path: Path, sinks: list[Callable[[Dict[str, Any]], None]]
+) -> tuple[IO[str], Any]:
+    """Open the JSONL event log and return an emitter that also feeds `sinks`.
+
+    The log records every event regardless of what the console shows, so a run is
+    always reconstructable at full detail after the fact.
+    """
     event_log_path.parent.mkdir(parents=True, exist_ok=True)
     handle = event_log_path.open("w", encoding="utf-8")
 
     def _emit(event: Dict[str, Any]) -> None:
-        line = json.dumps(event, default=str)
-        handle.write(line + "\n")
+        handle.write(json.dumps(event, default=str) + "\n")
         handle.flush()
-        if emit_stdout:
-            print(EVENT_PREFIX + line, flush=True)
+        for sink in sinks:
+            sink(event)
 
     return handle, _emit
 
 
+def _stdout_event_sink(event: Dict[str, Any]) -> None:
+    print(EVENT_PREFIX + json.dumps(event, default=str), flush=True)
+
+
 def main(argv: list[str] | None = None) -> int:
-    print_banner()
     args = parse_args(argv if argv is not None else sys.argv[1:])
+    verbosity = run_reporting.verbosity_from_args(args)
+    # stdout carries one audience at a time: either the machine event stream (what the
+    # GUI reads and renders itself) or human-readable progress, never both interleaved.
+    machine_events = args.events == "on"
+
+    if verbosity >= Verbosity.NORMAL:
+        print_banner()
+
     config_path = args.config.expanduser().resolve()
     payload = _load_config(config_path)
 
@@ -93,35 +122,78 @@ def main(argv: list[str] | None = None) -> int:
     if stage_overrides:
         payload["stage_overrides"] = stage_overrides
 
-    # Relative paths in a config are anchored to that config's own directory, so the same
-    # file works from any working directory. `parametric_cli` resolves the same way.
+    # Config resolution reports what it discovered, but the console it should report to
+    # does not exist until output_dir is known -- which resolution is what determines.
+    # Hold those notices and replay them once there is somewhere to put them.
+    held: list[tuple[str, Verbosity]] = []
+    run_reporting.set_notice_sink(lambda text, level: held.append((text, level)))
+    reporter: Optional[Reporter] = None
     try:
-        config = DcePipelineConfig.from_dict(payload, base_dir=config_path.parent)
-        config.validate()
-    except (ValueError, KeyError) as exc:
-        # A malformed run config is a user error, not a crash: say what is wrong and stop.
-        print(f"Error in {config_path}: {exc}", file=sys.stderr)
-        return 2
-    resolved_output_dir = config.output_dir
-    event_log_path = args.event_log.expanduser().resolve() if args.event_log else (resolved_output_dir / "dce_pipeline_events.jsonl")
-    event_log_handle, emit_event = _build_event_logger(event_log_path, emit_stdout=(args.events == "on"))
-    try:
-        emit_event(
-            {
-                "type": "cli_config",
-                "config_path": str(config_path),
-                "resolved_output_dir": str(resolved_output_dir),
-                "event_log_path": str(event_log_path),
-                "config": payload,
-            }
+        # Relative paths in a config are anchored to that config's own directory, so the same
+        # file works from any working directory. `parametric_cli` resolves the same way.
+        try:
+            config = DcePipelineConfig.from_dict(payload, base_dir=config_path.parent)
+            config.validate()
+        except (ValueError, KeyError) as exc:
+            # A malformed run config is a user error, not a crash: say what is wrong and stop.
+            print(f"Error in {config_path}: {exc}", file=sys.stderr)
+            return 2
+
+        resolved_output_dir = config.output_dir
+        event_log_path = (
+            args.event_log.expanduser().resolve()
+            if args.event_log
+            else (resolved_output_dir / "dce_pipeline_events.jsonl")
         )
-        result = run_dce_pipeline(config, event_callback=emit_event)
+
+        sinks: list[Callable[[Dict[str, Any]], None]] = []
+        if machine_events:
+            sinks.append(_stdout_event_sink)
+        else:
+            reporter = Reporter(verbosity=verbosity)
+            sinks.append(reporter.handle_event)
+        event_log_handle, emit_event = _build_event_logger(event_log_path, sinks)
+
+        run_reporting.set_notice_sink(
+            run_reporting.event_notice_sink(emit_event)
+            if machine_events
+            else run_reporting.reporter_notice_sink(reporter)
+        )
+
+        try:
+            emit_event(
+                {
+                    "type": "cli_config",
+                    **version.build_identity(),
+                    "config_path": str(config_path),
+                    "resolved_output_dir": str(resolved_output_dir),
+                    "event_log_path": str(event_log_path),
+                    "config": payload,
+                }
+            )
+            for text, level in held:
+                run_reporting.notice(text, level)
+            held.clear()
+            result = run_dce_pipeline(config, event_callback=emit_event)
+        except Exception as exc:
+            # A failure inside a stage already emitted run_error; one outside them (writing
+            # the summary, say) did not, so emit here too -- the reporter shows whichever
+            # arrives first. A traceback on top helps only someone debugging the pipeline.
+            emit_event(
+                {"type": "run_error", "error_type": type(exc).__name__, "error": str(exc)}
+            )
+            if verbosity >= Verbosity.DEBUG:
+                raise
+            return 1
+        finally:
+            event_log_handle.close()
     finally:
-        event_log_handle.close()
+        run_reporting.set_notice_sink(None)
 
     meta = dict(result["meta"])
     meta["event_log_path"] = str(event_log_path)
-    print(json.dumps(meta, indent=2))
+    if machine_events or verbosity >= Verbosity.DEBUG:
+        print(json.dumps(meta, indent=2))
     return 0
 
 

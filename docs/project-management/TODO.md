@@ -8,14 +8,14 @@ Keep strategic sequencing in `docs/project-management/ROADMAP.md`. For current m
 Larger feature requests should be logged in `docs/project-management/projects/feature-request/new_features.md`.
 
 ## Blocking Items
-- [ ] Confirm function of GUI/CLI on non-bids data
-- [ ] Confirm function of CLI on bids data if only bids dirs set
+- [x] Confirm function of GUI/CLI on non-bids data
+- [x] Confirm function of CLI on bids data if only bids dirs set
+- [ ] Update parametric GUI, check CLI, add wrapper
 
 ## Primary Items
-- [ ] Redo the python terminal outputs so they are user readable. Make shorter, format properly.
 - [ ] Have GUI save/load last selected options
 - [ ] Have GUI browse buttons start in logical dir
-- [ ] Confirm the OSIPI badge publishes on the first real run. The gist
+- [x] Confirm the OSIPI badge publishes on the first real run. The gist
       (`ironictoo/b65ef98aadaa684f2d7d31e82137c4b4`) and the `GIST_TOKEN` secret are set up,
       and the id is wired into the `accelerated_backends` job in `.github/workflows/run_DCE.yml`
       and the `README.md` badge URL.
@@ -85,6 +85,23 @@ Larger feature requests should be logged in `docs/project-management/projects/fe
       No test covers it: `tests/python/test_run_parametric_bids_batch.py` builds synthetic
       session trees in tmp dirs, so the committed fixture is never exercised end to end.
       Found during the merge-readiness review of the CLI/batch interfaces (2026-08-23).
+- [ ] Silence (or route) the benign `divide by zero` RuntimeWarning that leaks to stderr on
+      real data. Stage A computes `ab = a / b` (`python/dce_pipeline.py:1823`) over every
+      voxel at once; where `b` is exactly zero the quotient is inf, numpy warns, and
+      `_clean_ab` on the very next line removes exactly those voxels. So the run is correct
+      and the warning is noise -- but it is raw numpy text on stderr, outside the reporter,
+      and it lands in the middle of otherwise formatted progress output. `np.log(ab)` two
+      lines down (`:1829`) can warn the same way for the same reason.
+
+      The example datasets do not trigger it, so it needs real data to reproduce; the
+      arithmetic above is the mechanism, not a guess, but confirm the line before fixing.
+
+      Preferred shape: wrap just those statements in `np.errstate(divide="ignore",
+      invalid="ignore")` -- narrow enough that a *new* divide-by-zero somewhere else still
+      surfaces -- and, if the count is worth knowing, report the number of voxels dropped
+      through `run_reporting.notice(...)` at DETAILED, where it belongs. Do not blanket
+      `np.seterr` at module scope. Found during the merge-readiness review of the CLI/batch
+      interfaces (2026-08-23).
 - [ ] Port MATLAB's contrast-agent relaxivity auto-selection to Python. `run_dce_cli.m:110-127`
       reads `InstitutionName`/`ManufacturersModelName` and `AcquisitionDateTime` from the DCE JSON
       and picks 5.7 (MultiHance, USC pre-2017-10-01) or 3.4 (Dotarem) unless

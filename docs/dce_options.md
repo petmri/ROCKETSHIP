@@ -83,6 +83,17 @@ which is where they were typed. This covers `--output-dir`, `--checkpoint-dir` a
 
 Absolute paths are used exactly as given. The parametric T1 interface follows the same rule.
 
+## How much a run prints
+
+Every CLI and batch driver takes `--verbosity quiet|normal|detailed|debug` (`-q`, `-v`, `-vv`).
+The default, `normal`, reports what the run is using, each stage as it finishes, and a closing
+summary. `detailed` adds the settings this config overrides, where each per-scan value came
+from, the Stage-D backend choice, and every file written -- it is what the GUI log shows.
+
+Verbosity selects what is rendered, not what is recorded: `<output_dir>/dce_pipeline_events.jsonl`
+holds every event at every level. `--events on` puts that machine-readable stream on stdout in
+place of human progress, which is how the GUI drives its progress bar.
+
 ## Precedence
 
 For options within `stage_overrides`, values are resolved in this order:

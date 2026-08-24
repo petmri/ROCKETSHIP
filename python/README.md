@@ -127,6 +127,45 @@ cd /path/to/ROCKETSHIP
   --set blood_t1_ms=1600
 ```
 
+### How much a run prints
+
+By default a run reports readable progress: what it is running on, each stage as it
+finishes, and a closing summary. Four levels are available on every CLI and batch driver:
+
+```bash
+.venv/bin/python run_dce_python_cli.py --verbosity detailed   # or -v
+```
+
+| Level | Flag | Shows |
+| --- | --- | --- |
+| `quiet` | `-q` | Errors only. For scripts and cron. |
+| `normal` | *(default)* | Inputs, stage progress with timings, closing summary. |
+| `detailed` | `-v` | Adds settings, per-scan value provenance, backend choice, array shapes, and every file written. This is what the GUI log shows. |
+| `debug` | `-vv` | Adds the raw event stream and keeps the traceback on failure. |
+
+Verbosity only changes what is *rendered*. `<output_dir>/dce_pipeline_events.jsonl`
+records every event at every level, so a run stays reconstructable in full after the fact.
+
+`--events on` puts the machine-readable event stream on stdout instead of human progress;
+that is how the GUI drives its progress bar, and scripts that parse `ROCKETSHIP_EVENT`
+lines should pass it explicitly.
+
+Every run records which build produced it. The header names the version, `-v` adds the git
+revision, and both are written into the run summary JSON (`provenance` for DCE, `meta` for
+parametric) whatever the console showed:
+
+```
+ROCKETSHIP DCE v2.0.rc
+  Config   dce_run_example_nonbids.json
+  Output   out/dce_run_example_nonbids
+  Backend  cpu
+  Models   tofts
+  Revision 8109e50-dirty          # -v and above
+```
+
+A `-dirty` suffix means the working tree had uncommitted changes when the run started. The
+revision is absent outside a git checkout, which is the normal case for a release download.
+
 Typical outputs:
 
 - Stage summary JSON: `<output_dir>/dce_pipeline_run.json`
@@ -338,8 +377,9 @@ Key expectations:
 - Current acceleration coverage in Stage D:
   - accelerated: `tofts`, `patlak`, `extended tofts`, `2cxm`, `tissue uptake`
   - non-accelerated (currently pure CPU path): other models
-- Stage D logs backend selection on each run:
-  - `[DCE] Stage-D backend selection: requested=... selected=... acceleration=... reason=...`
+- Stage D reports backend selection on each run (at `--verbosity detailed`, or at `normal`
+  when a backend falls back):
+  - `Stage-D backend: requested=... selected=... acceleration=... (reason)`
 - Supported AIF curve modes: `fitted`, `raw`, `imported`
 - Static blood-T1 override for Stage A is available via `stage_overrides.blood_t1_ms`
 

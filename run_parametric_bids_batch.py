@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 import re
 import sys
@@ -14,6 +15,8 @@ REPO_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(REPO_ROOT / "python"))
 
 from bids_discovery import BidsSession, discover_bids_sessions  # noqa: E402
+import run_reporting  # noqa: E402
+from run_reporting import Reporter, Verbosity  # noqa: E402
 from cli_overrides import parse_set_overrides  # noqa: E402
 from parametric_pipeline import ParametricT1Config, run_parametric_t1_pipeline  # noqa: E402
 
@@ -68,6 +71,7 @@ Examples:
     parser.add_argument("--skip-validation", action="store_true", help="Skip input file validation checks before run.")
     parser.add_argument("--set", dest="set_overrides", action="append", default=[], metavar="KEY=VALUE", help="Override top-level config key/value (repeatable). Example: --set tr_ms=5.0")
     parser.add_argument("--summary-json", type=Path, default=None, help="Optional path to write batch summary JSON (default: derivatives/reports/[pipeline]/batch_summary_YYYYMMDD.json).")
+    run_reporting.add_verbosity_argument(parser)
     return parser.parse_args(argv)
 
 
@@ -189,6 +193,20 @@ def _resolve_session_paths(session: BidsSession, raw_pattern: str) -> List[Path]
     return unique
 
 
+def _session_problem(session: BidsSession, skip_validation: bool) -> Optional[str]:
+    """Describe why a session cannot run, or None when it is ready.
+
+    Uses the same discovery the run loop uses, so the preflight cannot disagree with it.
+    """
+    if skip_validation:
+        return None
+    try:
+        _discover_parametric_inputs(session)
+    except Exception as exc:
+        return str(exc).split(":", 1)[0] if ":" in str(exc) else str(exc)
+    return None
+
+
 def _build_session_config(
     session: BidsSession,
     output_dir: Path,
@@ -242,9 +260,9 @@ def _build_session_config(
             if resolved:
                 payload["vfa_files"] = resolved
             else:
-                print(
-                    "Warning: Config template vfa_files did not match this session; falling back to auto-discovered VFA files.",
-                    file=sys.stderr,
+                run_reporting.notice(
+                    "config template vfa_files did not match this session; falling back to auto-discovered VFA files",
+                    Verbosity.NORMAL,
                 )
                 payload["vfa_files"] = discovered["vfa_files"]
 
@@ -253,9 +271,9 @@ def _build_session_config(
             if resolved_b1:
                 payload["b1_map_file"] = str(resolved_b1[0].resolve())
             elif discovered["b1_map_file"]:
-                print(
-                    "Warning: Config template b1_map_file did not match this session; falling back to auto-discovered B1 map.",
-                    file=sys.stderr,
+                run_reporting.notice(
+                    "config template b1_map_file did not match this session; falling back to auto-discovered B1 map",
+                    Verbosity.NORMAL,
                 )
                 payload["b1_map_file"] = discovered["b1_map_file"]
             else:
@@ -281,6 +299,16 @@ def _build_session_config(
 
 def main(argv: List[str] | None = None) -> int:
     args = parse_args(argv if argv is not None else sys.argv[1:])
+    verbosity = run_reporting.verbosity_from_args(args)
+    reporter = Reporter(verbosity=verbosity)
+    run_reporting.set_notice_sink(run_reporting.reporter_notice_sink(reporter))
+    try:
+        return _run_batch(args, reporter, verbosity)
+    finally:
+        run_reporting.set_notice_sink(None)
+
+
+def _run_batch(args: argparse.Namespace, reporter: Reporter, verbosity: Verbosity) -> int:
 
     bids_root = args.bids_root.expanduser().resolve()
     if not bids_root.is_dir():
@@ -332,7 +360,7 @@ def main(argv: List[str] | None = None) -> int:
         template_dir = template_path.parent
         try:
             config_template = _load_config_template(template_path)
-            print(f"Loaded config template: {template_path}", flush=True)
+            reporter.note(f"config template  {run_reporting.shorten_path(template_path)}")
         except Exception as exc:
             print(f"Error loading config template: {exc}", file=sys.stderr)
             return 2
@@ -361,10 +389,24 @@ def main(argv: List[str] | None = None) -> int:
         print("Error: No sessions matched filter criteria", file=sys.stderr)
         return 2
 
-    print(f"Processing {len(sessions)} session(s) under {bids_root}", flush=True)
+    reporter.header(
+        "ROCKETSHIP parametric T1 batch",
+        [
+            ("Dataset", run_reporting.shorten_path(bids_root)),
+            ("Input", input_pipeline or "rawdata"),
+            ("Output", run_reporting.shorten_path(output_root)),
+            ("Fit", args.fit_type),
+        ],
+    )
+    run_reporting.report_queue(
+        reporter,
+        [(session.id, _session_problem(session, args.skip_validation)) for session in sessions],
+        checked=not args.skip_validation,
+    )
 
     session_results: List[Dict[str, Any]] = []
     failed_count = 0
+    batch_started = time.perf_counter()
 
     for idx, session in enumerate(sessions, 1):
         if use_bids_structure:
@@ -381,7 +423,7 @@ def main(argv: List[str] | None = None) -> int:
         session_output_dir.mkdir(parents=True, exist_ok=True)
         session_reports_dir.mkdir(parents=True, exist_ok=True)
 
-        print(f"[{idx}/{len(sessions)}] {session.id}...", flush=True)
+        reporter.start(f"[{idx}/{len(sessions)}] {session.id}")
 
         try:
             if not args.skip_validation:
@@ -397,7 +439,25 @@ def main(argv: List[str] | None = None) -> int:
             )
             config.validate()
 
-            result = run_parametric_t1_pipeline(config)
+            session_reporter = (
+                Reporter(verbosity=verbosity, nested=True)
+                if verbosity >= Verbosity.DETAILED
+                else None
+            )
+            if session_reporter is not None:
+                run_reporting.set_notice_sink(
+                    run_reporting.reporter_notice_sink(session_reporter)
+                )
+            try:
+                # Only hand over a callback when something will render it, so a plain
+                # batch run calls the pipeline exactly as it did before.
+                result = (
+                    run_parametric_t1_pipeline(config, event_callback=session_reporter.handle_event)
+                    if session_reporter is not None
+                    else run_parametric_t1_pipeline(config)
+                )
+            finally:
+                run_reporting.set_notice_sink(run_reporting.reporter_notice_sink(reporter))
 
             pipeline_run_source = session_output_dir / "parametric_t1_run.json"
             if pipeline_run_source.exists():
@@ -414,7 +474,7 @@ def main(argv: List[str] | None = None) -> int:
                     "notes": result.get("meta", {}).get("notes", ""),
                 }
             )
-            print(f"  [OK] {status}", flush=True)
+            reporter.settle(status=status, ok=(status == "success"))
 
         except Exception as exc:
             failed_count += 1
@@ -426,7 +486,8 @@ def main(argv: List[str] | None = None) -> int:
                     "error": f"{type(exc).__name__}: {exc}",
                 }
             )
-            print(f"  [FAIL] {exc}", flush=True)
+            reporter.settle(status="failed", ok=False)
+            reporter.warn(f"{type(exc).__name__}: {exc}")
 
     summary = {
         "metadata": {
@@ -445,14 +506,16 @@ def main(argv: List[str] | None = None) -> int:
     }
 
     summary_json_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    print(f"\nSummary written to: {summary_json_path}", flush=True)
-    print(
-        f"  success={summary['sessions_success']}, "
-        f"partial={summary['sessions_partial']}, "
-        f"failed={summary['sessions_failed']}",
-        flush=True,
+    run_reporting.report_batch_finish(
+        reporter,
+        time.perf_counter() - batch_started,
+        [
+            ("succeeded", summary["sessions_success"]),
+            ("partial", summary["sessions_partial"]),
+            ("failed", summary["sessions_failed"]),
+        ],
+        [("Summary", run_reporting.shorten_path(summary_json_path))],
     )
-
     return 0 if failed_count == 0 else 1
 
 

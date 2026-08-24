@@ -19,6 +19,8 @@ import numpy as np
 import dce_config
 from dce_config import DceConfigError
 import dce_file_discovery
+import run_reporting
+import version
 
 from dce_fit_backends import (
     fit_2cxm_stage_d,
@@ -485,8 +487,14 @@ class DcePipelineConfig:
         discovered = _discover_missing_file_lists(data, base_dir)
         if discovered:
             data = {**data, **discovered}
-            summary = ", ".join(f"{key}={Path(v[0]).name}" for key, v in sorted(discovered.items()))
-            print(f"[DCE] Found by BIDS convention: {summary}", flush=True)
+            width = max(len(key) for key in discovered)
+            lines = "\n".join(
+                f"  {key.ljust(width)}  {Path(paths[0]).name}"
+                for key, paths in sorted(discovered.items())
+            )
+            run_reporting.notice(
+                f"Found by BIDS convention:\n{lines}", run_reporting.Verbosity.NORMAL
+            )
 
         return cls(
             output_dir=_resolve_path(data["output_dir"], base_dir),
@@ -670,7 +678,7 @@ def _log_scan_value_sources(
         f"{key}={float(value):g} ({_SCAN_SOURCE_LABELS.get(source, source)})"
         for key, (value, source) in resolved.items()
     )
-    print(f"[DCE] Stage-A per-scan values: {summary}", flush=True)
+    run_reporting.notice(f"Per-scan values: {summary}")
 
     for key, (value, source) in resolved.items():
         if source != "sidecar":
@@ -678,10 +686,11 @@ def _log_scan_value_sources(
         requested = _run_config_value(config, key)
         if requested is None:
             continue
-        print(
-            f"[DCE] {key}: run config set {float(requested):g}, not used. "
+        # Losing a value you set is worth saying out loud even in a quiet run.
+        run_reporting.notice(
+            f"{key}: run config set {float(requested):g}, not used. "
             f"The image sidecar's {float(value):g} wins for per-scan values.",
-            flush=True,
+            run_reporting.Verbosity.NORMAL,
         )
 
     return {f"{key}_source": source for key, (_, source) in resolved.items()}
@@ -3939,7 +3948,12 @@ def _log_backend_fallback(
         if next_candidate is not None
         else "no fallback remains."
     )
-    print(f"[DCE] Stage-D {model_name}: backend '{backend}' {reason}; {tail}", flush=True)
+    # A backend that quietly fell back changes runtime by orders of magnitude, so this
+    # is not a detail-only message.
+    run_reporting.notice(
+        f"Stage-D {model_name}: backend '{backend}' {reason}; {tail}",
+        run_reporting.Verbosity.NORMAL,
+    )
 
 
 def _fit_stage_d_model(
@@ -4031,10 +4045,9 @@ def _run_stage_d_real(
     selected_backend = backend_info["selected_backend"]
     acceleration_backend = backend_info["acceleration_backend"]
     backend_reason = backend_info["reason"]
-    print(
-        f"[DCE] Stage-D backend selection: requested={backend_info['requested_backend']} "
-        f"selected={selected_backend} acceleration={acceleration_backend} reason={backend_reason}",
-        flush=True,
+    run_reporting.notice(
+        f"Stage-D backend: requested={backend_info['requested_backend']} "
+        f"selected={selected_backend} acceleration={acceleration_backend} ({backend_reason})"
     )
 
     arrays = stage_b.get("arrays")
@@ -4537,6 +4550,7 @@ def run_dce_pipeline(
         checkpoint_dir=str(config.checkpoint_dir) if config.checkpoint_dir else None,
         backend=str(config.backend),
         dce_defaults_path=str(defaults_path),
+        **version.build_identity(),
     )
 
     def _finish_stage(stage: str, data: Dict[str, Any], **extra: Any) -> None:
@@ -4597,6 +4611,9 @@ def run_dce_pipeline(
 
     # Build provenance
     provenance = {
+        # Which ROCKETSHIP produced this. Recorded even when nothing printed it, since the
+        # result files outlive the terminal that made them.
+        **version.build_identity(),
         "execution_timestamp": datetime.now(timezone.utc).isoformat(),
         "duration_sec": duration_sec,
         "inputs": {

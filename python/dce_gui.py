@@ -47,6 +47,9 @@ from dce_file_discovery import (
     session_from_paths,
 )
 from dce_volume_viewer import Volume, VolumeViewer, discover_result_volumes
+import run_reporting
+from run_reporting import CallbackStream, Reporter
+from version import __version__
 
 
 EVENT_PREFIX = "ROCKETSHIP_EVENT "
@@ -193,11 +196,12 @@ class DceGuiWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("ROCKETSHIP DCE (Python GUI v1)")
+        self.setWindowTitle(f"ROCKETSHIP DCE v{__version__} (Python GUI)")
         self.resize(1000, 700)
 
         self._stdout_buffer = ""
         self._event_paths: set[str] = set()
+        self._log_reporter: Optional[Reporter] = None
         self._process: Optional[QProcess] = None
         self._config_path = DEFAULT_CONFIG_PATH
         self._last_run_config_path: Optional[Path] = None
@@ -1129,6 +1133,14 @@ class DceGuiWindow(QMainWindow):
         self.figure_preview.setText("No figure selected")
         self._event_paths.clear()
         self._stdout_buffer = ""
+        # The subprocess sends machine events; the log shows what they mean, rendered by
+        # the same reporter the CLIs use so both surfaces describe a run identically.
+        self._log_reporter = Reporter(
+            stream=CallbackStream(self._append_log_line),
+            verbosity=run_reporting.GUI_VERBOSITY,
+            color=False,
+            tty=False,
+        )
         self.progress.setValue(0)
         self.stage_label.setText("Stage: starting")
         self.model_label.setText("Model: -")
@@ -1176,14 +1188,18 @@ class DceGuiWindow(QMainWindow):
             clean = line.rstrip()
             if clean == "":
                 continue
-            self._append_log_line(clean)
-            if clean.startswith(EVENT_PREFIX):
-                payload_text = clean[len(EVENT_PREFIX) :]
-                try:
-                    event = json.loads(payload_text)
-                except Exception:
-                    continue
-                self._handle_event(event)
+            if not clean.startswith(EVENT_PREFIX):
+                self._append_log_line(clean)
+                continue
+            try:
+                event = json.loads(clean[len(EVENT_PREFIX) :])
+            except Exception:
+                # Not decodable: show it raw rather than swallowing it.
+                self._append_log_line(clean)
+                continue
+            if self._log_reporter is not None:
+                self._log_reporter.handle_event(event)
+            self._handle_event(event)
 
     def _on_process_finished(self, exit_code: int, _exit_status: QProcess.ExitStatus) -> None:
         self.run_button.setEnabled(True)

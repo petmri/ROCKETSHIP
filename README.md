@@ -150,6 +150,11 @@ python run_dce_python_cli.py \
   --set blood_t1_ms=1600
 ```
 
+Runs print readable progress by default. Use `-v` for more detail (settings, per-scan value
+provenance, backend choice, every file written), `-vv` to add the raw event stream, or `-q`
+for errors only. Verbosity changes only what is printed -- the JSONL event log below always
+records the run in full. See `python/README.md` for the full table.
+
 Typical outputs:
 
 - Stage summary JSON: `<output_dir>/dce_pipeline_run.json`
