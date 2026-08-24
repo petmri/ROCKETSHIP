@@ -19,6 +19,7 @@ from accel_backend import (
 )
 from parametric_models import t1_fa_nonlinear_fit, t1_fa_two_point_fit
 import parametric_config
+import parametric_qc
 import version
 
 
@@ -903,6 +904,27 @@ def run_parametric_t1_pipeline(
         _save_nifti(rho_path, fit_result["rho_map"], affine, header)
         _emit_event(event_callback, "artifact_written", artifact_type="rho_map", path=str(rho_path))
 
+    # Same artifact_type the DCE stages use, so every reader that already knows how to show
+    # a figure -- the GUI tab, the reporter, the event log -- needs no parametric special case.
+    figure_paths: Dict[str, str] = {}
+    if config.write_qc_figures:
+        figure_paths = parametric_qc.write_qc_figures(
+            output_dir=config.output_dir,
+            t1_map=fit_result["t1_map"],
+            r_squared_map=fit_result.get("r_squared_map"),
+            rsquared_threshold=float(config.rsquared_threshold),
+            label=output_label,
+            invalid_fill_value=float(config.invalid_fill_value),
+        )
+        for name, path in figure_paths.items():
+            _emit_event(
+                event_callback,
+                "artifact_written",
+                artifact_type="figure",
+                name=name,
+                path=str(path),
+            )
+
     finished_at = datetime.now(timezone.utc)
     summary = {
         "meta": {
@@ -937,6 +959,7 @@ def run_parametric_t1_pipeline(
             "t1_map_path": str(t1_path),
             "rsquared_map_path": str(rsquared_path) if rsquared_path else None,
             "rho_map_path": str(rho_path) if rho_path else None,
+            "qc_figures": figure_paths,
         },
         "metrics": fit_result["metrics"],
     }
