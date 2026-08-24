@@ -142,9 +142,13 @@ def test_the_run_example_is_a_run_config_not_a_second_defaults_file() -> None:
 
 @pytest.mark.unit
 def test_relative_paths_re_anchor_against_the_config_that_holds_them(tmp_path) -> None:
+    # Built from tmp_path rather than written as "/abs/b.nii": a leading slash is not an
+    # absolute path on Windows, so that literal would be re-anchored there and the test
+    # would be asserting the opposite of what it says.
+    elsewhere = tmp_path.parent / "b.nii"
     resolved = parametric_config.resolve_override_paths(
-        {"output_dir": "out", "vfa_files": ["a.nii", "/abs/b.nii"], "backend": "cpu"}, tmp_path
+        {"output_dir": "out", "vfa_files": ["a.nii", str(elsewhere)], "backend": "cpu"}, tmp_path
     )
     assert resolved["output_dir"] == str(tmp_path / "out")
-    assert resolved["vfa_files"] == [str(tmp_path / "a.nii"), "/abs/b.nii"]
+    assert resolved["vfa_files"] == [str(tmp_path / "a.nii"), str(elsewhere)]
     assert resolved["backend"] == "cpu", "non-path keys must pass through untouched"

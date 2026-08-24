@@ -174,7 +174,10 @@ def test_durations_read_the_way_a_person_would_say_them(seconds, expected) -> No
 
 @pytest.mark.unit
 def test_paths_are_shortened_against_the_directory_they_belong_to() -> None:
-    assert run_reporting.shorten_path("/x/out/maps/k.nii", Path("/x/out")) == "maps/k.nii"
+    # The separator is whatever this platform writes: the text is printed for a person to
+    # read and paste, so a Windows run has to say maps\k.nii.
+    shortened = run_reporting.shorten_path("/x/out/maps/k.nii", Path("/x/out"))
+    assert shortened == str(Path("maps/k.nii"))
     # Nothing to shorten against still has to come back usable.
     assert run_reporting.shorten_path("/elsewhere/k.nii", Path("/x/out")).endswith("k.nii")
     assert run_reporting.shorten_path(None) == "-"
@@ -215,8 +218,11 @@ def test_a_nested_reporter_shows_stages_but_not_the_framing_its_parent_printed()
 @pytest.mark.unit
 def test_a_nested_reporter_still_shortens_paths_against_the_output_dir() -> None:
     # It skips the header that usually carries output_dir, so it has to take it from run_start.
-    assert "curves.png" in _render(RUN, Verbosity.DETAILED, nested=True)
-    assert "/x/out/curves.png" not in _render(RUN, Verbosity.DETAILED, nested=True)
+    nested = _render(RUN, Verbosity.DETAILED, nested=True)
+    assert "curves.png" in nested
+    # The unshortened form, spelled the way this platform spells it -- comparing against a
+    # POSIX literal would pass on Windows without the shortening having happened at all.
+    assert str(Path("/x/out/curves.png")) not in nested
 
 
 # --------------------------------------------------------------------------- #
