@@ -211,7 +211,12 @@ external_programs/ModelID.m
 external_programs/libCpufit.*
 external_programs/libGpufit.*
 
-# Installer-generated GUI launcher (contains machine-local venv path)
+# Installer-generated GUI launchers (contain machine-local venv paths)
+rocketship_dce.sh
+rocketship_dce.bat
+rocketship_parametric.sh
+rocketship_parametric.bat
+# Superseded single launcher; install.py deletes it, this keeps a stale copy untracked.
 rocketship.sh
 rocketship.bat
 

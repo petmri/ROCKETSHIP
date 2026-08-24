@@ -64,6 +64,14 @@ Completed items moved from `TODO.md` on 2026-03-05 to keep the active backlog sh
       plot claiming to reject 5,479 voxels while showing almost nothing below the threshold.
       Values below zero are clipped into a labelled first bin so the caption and bars agree.
 
+### One launcher per GUI
+- [x] `install.py` wrote a single `rocketship.sh` that took `[dce|parametric]`. The
+      parametric GUI therefore existed only as an argument the installer's own next-steps
+      output never mentioned, so nobody found it. It now writes `rocketship_dce.sh` and
+      `rocketship_parametric.sh` (`.bat` on Windows) from one template, names both in the
+      post-install output, and deletes the superseded single launcher on re-install.
+      `rocketship.sh` was days old with no users, so it is gone rather than kept as an alias.
+
 ### Documentation
 - [x] `docs/parametric_options.md` is the field reference the parametric side never had,
       matching `dce_options.md` in structure, and is wired into the site nav and the GUI's

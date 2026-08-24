@@ -215,16 +215,41 @@ def test_check_matlab_install_tolerates_missing_symbols_on_macos() -> None:
 
 @pytest.mark.unit
 @pytest.mark.skipif(os.name == "nt", reason="POSIX launcher only")
-def test_gui_launcher_points_at_venv_relative_to_repo_root() -> None:
+def test_one_launcher_is_written_per_gui() -> None:
     with tempfile.TemporaryDirectory() as td:
         repo_root = Path(td)
-        launcher = installer._write_gui_launcher(repo_root, repo_root / ".venv" / "bin" / "python")
+        launchers = installer._write_gui_launchers(
+            repo_root, repo_root / ".venv" / "bin" / "python"
+        )
 
-        assert launcher == repo_root / "rocketship.sh"
-        assert os.access(launcher, os.X_OK)
-        body = launcher.read_text(encoding="utf-8")
-        assert 'VENV_DIR="$REPO_ROOT"/.venv' in body
-        assert 'source "$ACTIVATE"' in body
+        assert [p.name for p in launchers] == [
+            "rocketship_dce.sh",
+            "rocketship_parametric.sh",
+        ]
+        for launcher in launchers:
+            assert os.access(launcher, os.X_OK)
+            body = launcher.read_text(encoding="utf-8")
+            assert 'VENV_DIR="$REPO_ROOT"/.venv' in body
+            assert 'source "$ACTIVATE"' in body
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(os.name == "nt", reason="POSIX launcher only")
+def test_each_launcher_targets_its_own_gui() -> None:
+    """Both scripts share a template, so a substitution bug points them at one GUI."""
+    with tempfile.TemporaryDirectory() as td:
+        repo_root = Path(td)
+        installer._write_gui_launchers(repo_root, repo_root / ".venv" / "bin" / "python")
+
+        dce = (repo_root / "rocketship_dce.sh").read_text(encoding="utf-8")
+        parametric = (repo_root / "rocketship_parametric.sh").read_text(encoding="utf-8")
+        assert "run_dce_python_gui.py" in dce
+        assert "run_parametric_python_gui.py" not in dce
+        assert "run_parametric_python_gui.py" in parametric
+        assert "run_dce_python_gui.py" not in parametric
+        # No placeholder may survive, in either file.
+        for body in (dce, parametric):
+            assert "__" not in body
 
 
 @pytest.mark.unit
@@ -234,14 +259,27 @@ def test_gui_launcher_uses_absolute_path_for_venv_outside_repo() -> None:
         repo_root = Path(td) / "repo"
         repo_root.mkdir()
         outside_venv = Path(td) / "envs" / "rocketship"
-        launcher = installer._write_gui_launcher(repo_root, outside_venv / "bin" / "python")
+        launchers = installer._write_gui_launchers(repo_root, outside_venv / "bin" / "python")
 
-        assert f"VENV_DIR={outside_venv}" in launcher.read_text(encoding="utf-8")
+        for launcher in launchers:
+            assert f"VENV_DIR={outside_venv}" in launcher.read_text(encoding="utf-8")
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(os.name == "nt", reason="POSIX launcher only")
+def test_a_superseded_single_launcher_is_removed(tmp_path) -> None:
+    """Earlier releases wrote one rocketship.sh taking [dce|parametric]. It must not
+    survive a re-install, or it keeps launching through a path that no longer exists."""
+    stale = tmp_path / "rocketship.sh"
+    stale.write_text("#!/bin/sh\necho stale\n", encoding="utf-8")
+
+    installer._write_gui_launchers(tmp_path, tmp_path / ".venv" / "bin" / "python")
+    assert not stale.exists()
 
 
 @pytest.mark.integration
 @pytest.mark.skipif(os.name == "nt", reason="POSIX launcher only")
-def test_gui_launcher_activates_venv_and_dispatches_to_the_requested_gui() -> None:
+def test_each_launcher_activates_the_venv_and_runs_its_gui() -> None:
     with tempfile.TemporaryDirectory() as td:
         repo_root = Path(td)
         venv_bin = repo_root / ".venv" / "bin"
@@ -256,13 +294,20 @@ def test_gui_launcher_activates_venv_and_dispatches_to_the_requested_gui() -> No
                 f"import sys\nprint({name!r}, sys.argv[1:])\n", encoding="utf-8"
             )
 
-        launcher = installer._write_gui_launcher(repo_root, venv_bin / "python")
+        installer._write_gui_launchers(repo_root, venv_bin / "python")
 
-        def run(*args: str) -> subprocess.CompletedProcess:
+        def run(name: str, *args: str) -> subprocess.CompletedProcess:
             return subprocess.run(
-                [str(launcher), *args], check=True, capture_output=True, text=True
+                [str(repo_root / name), *args], check=True, capture_output=True, text=True
             )
 
-        assert "run_dce_python_gui.py []" in run().stdout
-        assert "run_dce_python_gui.py ['--x']" in run("dce", "--x").stdout
-        assert "run_parametric_python_gui.py ['--x']" in run("parametric", "--x").stdout
+        assert "run_dce_python_gui.py []" in run("rocketship_dce.sh").stdout
+        assert "run_dce_python_gui.py ['--x']" in run("rocketship_dce.sh", "--x").stdout
+        assert (
+            "run_parametric_python_gui.py ['--x']"
+            in run("rocketship_parametric.sh", "--x").stdout
+        )
+        # Arguments reach the GUI rather than being eaten as a subcommand.
+        assert "run_parametric_python_gui.py ['dce']" in run(
+            "rocketship_parametric.sh", "dce"
+        ).stdout

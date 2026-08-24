@@ -24,9 +24,12 @@ python3 install.py   # creates .venv, installs deps + pyGpufit/pyCpufit, writes 
 ```
 
 MATLAB is optional here: without it on `PATH` the installer warns that the MATLAB MEX files
-could not be verified and still exits 0. `rocketship.sh` (`rocketship.bat` on Windows) is a
-generated, machine-local, gitignored wrapper that activates the venv and launches a GUI
-(`./rocketship.sh [dce|parametric]`).
+could not be verified and still exits 0. `rocketship_dce.sh` and `rocketship_parametric.sh`
+(`.bat` on Windows) are generated, machine-local, gitignored wrappers that activate the venv
+and launch one GUI each; `install.py` writes both from one template (`LAUNCHERS`) and deletes
+the superseded single `rocketship.sh`. One launcher per GUI rather than one taking
+`[dce|parametric]`, because the subcommand form left the parametric GUI unmentioned in the
+installer's own next-steps output and nobody found it.
 
 Manual alternative: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`
 (add `-r requirements_gui.txt` for the PySide6 GUI). MATLAB toolboxes required: Curve

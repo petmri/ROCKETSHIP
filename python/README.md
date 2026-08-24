@@ -50,7 +50,7 @@ What this script does:
 - installs the MATLAB MEX files from the bundle and verifies them when MATLAB is on `PATH`
   (if MATLAB is not found the installer warns and still finishes successfully)
 - verifies imports and reports CUDA availability
-- writes the `rocketship.sh` launcher (`rocketship.bat` on Windows), which activates the
+- writes the `rocketship_dce.sh` and `rocketship_parametric.sh` launchers (`.bat` on Windows), which activate the
   virtual environment and starts a GUI
 
 Common installer options:
@@ -559,13 +559,13 @@ CI currently runs:
 
 ## GUI (PySide6) v1
 
-The automated installer writes `rocketship.sh` (`rocketship.bat` on Windows) into the
+The automated installer writes `rocketship_dce.sh` and `rocketship_parametric.sh` (`.bat` on Windows) into the
 repository root. It activates the virtual environment and launches a GUI:
 
 ```bash
 cd /path/to/ROCKETSHIP
-./rocketship.sh              # DCE GUI
-./rocketship.sh parametric   # parametric T1 GUI
+./rocketship_dce.sh          # DCE GUI
+./rocketship_parametric.sh   # parametric T1 GUI
 ```
 
 Arguments after the GUI name are forwarded to the GUI entry point. The launcher is

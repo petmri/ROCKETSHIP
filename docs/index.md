@@ -70,7 +70,7 @@ cd ROCKETSHIP && python3 install.py
 Launch the GUI:
 
 ```bash
-./rocketship.sh
+./rocketship_dce.sh
 ```
 
 Or work from the command line:

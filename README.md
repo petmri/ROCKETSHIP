@@ -73,7 +73,7 @@ What this script does:
 - installs the MATLAB MEX files from the bundle and verifies them when MATLAB is on `PATH`
   (if MATLAB is not found the installer warns and still finishes successfully)
 - verifies imports and reports CUDA availability
-- writes the `rocketship.sh` launcher (`rocketship.bat` on Windows), which activates the
+- writes the `rocketship_dce.sh` and `rocketship_parametric.sh` launchers (`.bat` on Windows), which activate the
   virtual environment and starts a GUI
 
 Common installer options:
@@ -235,11 +235,11 @@ activates the virtual environment for you:
 
 ```bash
 cd /path/to/ROCKETSHIP
-./rocketship.sh              # DCE GUI
-./rocketship.sh parametric   # parametric T1 GUI
+./rocketship_dce.sh          # DCE GUI
+./rocketship_parametric.sh   # parametric T1 GUI
 ```
 
-On Windows the installer writes `rocketship.bat`, used the same way. The remaining commands
+On Windows the installer writes the matching `.bat` files, used the same way. The remaining commands
 in this section are the manual equivalents.
 
 Install GUI dependency:
