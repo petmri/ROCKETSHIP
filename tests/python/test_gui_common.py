@@ -135,17 +135,91 @@ def test_the_dce_window_builds_with_its_tabs_and_settings(qt_app) -> None:
     assert window.log_view.toPlainText().startswith("[idle]")
 
 
-@pytest.mark.integration
-def test_the_dce_window_takes_its_shared_behaviour_from_the_mixin(qt_app) -> None:
-    """Guards the refactor: a re-added local copy would drift from the parametric GUI."""
-    import dce_gui
 
-    for name in (
+@pytest.mark.integration
+def test_the_parametric_window_matches_the_dce_shape(qt_app) -> None:
+    """The point of the rebuild: the two windows are the same interface over two pipelines."""
+    import dce_gui
+    import parametric_gui
+
+    window = parametric_gui.ParametricGuiWindow()
+    assert [window.tabs.tabText(i) for i in range(window.tabs.count())] == [
+        window.tabs.tabText(i) for i in range(dce_gui.DceGuiWindow().tabs.count())
+    ]
+    assert window.styleSheet(), "the window palette must be applied"
+    assert window.log_view.toPlainText().startswith("[idle]")
+
+
+@pytest.mark.integration
+def test_the_parametric_backend_is_reachable_from_the_gui(qt_app) -> None:
+    """backend was a validated config field with no control anywhere -- JSON only."""
+    import parametric_gui
+    from parametric_pipeline import ALLOWED_BACKENDS
+
+    window = parametric_gui.ParametricGuiWindow()
+    offered = {window.backend_combo.itemData(i) for i in range(window.backend_combo.count())}
+    assert offered == set(ALLOWED_BACKENDS)
+    window.backend_combo.setCurrentIndex(window.backend_combo.findData("cpu"))
+    assert window._collect_config_payload()["backend"] == "cpu"
+
+
+@pytest.mark.integration
+def test_the_fit_type_control_offers_only_what_the_pipeline_accepts(qt_app) -> None:
+    """It was free text, so a typo became a ValueError several seconds into a run."""
+    import parametric_gui
+    from parametric_pipeline import ParametricT1Config
+
+    window = parametric_gui.ParametricGuiWindow()
+    for index in range(window.fit_type_combo.count()):
+        window.fit_type_combo.setCurrentIndex(index)
+        payload = window._collect_config_payload()
+        payload["vfa_files"] = ["/nonexistent.nii"]
+        config = ParametricT1Config.from_dict(payload)
+        # validate() rejects an unknown fit_type before it looks at any file.
+        with pytest.raises(FileNotFoundError):
+            config.validate()
+
+
+@pytest.mark.integration
+def test_the_resolved_view_says_where_each_value_came_from(qt_app) -> None:
+    """The form fills every field, so without this the source of a value is invisible."""
+    import parametric_gui
+
+    window = parametric_gui.ParametricGuiWindow()
+    rows = {
+        window.resolved_table.item(r, 0).text(): window.resolved_table.item(r, 2).text()
+        for r in range(window.resolved_table.rowCount())
+    }
+    # The shipped example names output_label and leaves the preferences to the file.
+    assert rows["output_label"] == "run config"
+    assert rows["rsquared_threshold"] == "defaults file"
+    # Optional keys with nothing set are not errors, and must not be labelled as required.
+    assert rows["tr_ms"] == "unset (optional)"
+    assert rows["mask_file"] == "unset (optional)"
+
+    window.rsq_threshold_edit.setText("0.9")
+    window._refresh_resolved_table()
+    changed = {
+        window.resolved_table.item(r, 0).text(): window.resolved_table.item(r, 2).text()
+        for r in range(window.resolved_table.rowCount())
+    }
+    assert changed["rsquared_threshold"] == "edited here"
+    # A path re-anchored on load is not an edit, and must not be reported as one.
+    assert changed["output_dir"] == "run config"
+
+
+@pytest.mark.integration
+def test_both_windows_take_their_shared_behaviour_from_the_mixin(qt_app) -> None:
+    import dce_gui
+    import parametric_gui
+
+    shared = (
         "_base_dir",
         "_dialog_start_dir",
         "_choose_directory_for",
         "_choose_files_for",
         "_line_edit_with_browse",
+        "_collapsible_section",
         "_append_log_line",
         "_on_process_output",
         "_stop_run_hard",
@@ -153,6 +227,8 @@ def test_the_dce_window_takes_its_shared_behaviour_from_the_mixin(qt_app) -> Non
         "_on_figure_selected",
         "_on_load_config_clicked",
         "_on_save_config_clicked",
-    ):
-        assert name not in vars(dce_gui.DceGuiWindow), f"{name} is a local copy again"
-        assert hasattr(dce_gui.DceGuiWindow, name), f"{name} is not reachable at all"
+    )
+    for window_class in (dce_gui.DceGuiWindow, parametric_gui.ParametricGuiWindow):
+        for name in shared:
+            assert name not in vars(window_class), f"{window_class.__name__}.{name} is a copy"
+            assert hasattr(window_class, name), f"{window_class.__name__}.{name} is unreachable"

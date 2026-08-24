@@ -144,6 +144,15 @@ def _from_payload(payload: Mapping[str, Any], key: str) -> Any:
     return _UNSET
 
 
+def was_supplied(payload: Mapping[str, Any], key: str) -> bool:
+    """Whether this payload names `key` itself, rather than leaving it to the defaults file.
+
+    Callers that report provenance need this: once a form fills every field from the
+    defaults, the resolved value alone no longer says who chose it.
+    """
+    return _from_payload(payload, key) is not _UNSET
+
+
 def resolve(
     payload: Mapping[str, Any], key: str, *, defaults: Optional[ParametricDefaults] = None
 ) -> Any:

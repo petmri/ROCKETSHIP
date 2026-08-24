@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QSizePolicy,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -334,6 +335,47 @@ class GuiCommonMixin:
         browse.clicked.connect(on_browse)
         layout.addWidget(browse)
         return row
+
+    def _collapsible_section(self, title: str, tooltip: str = "") -> tuple:
+        """Group box whose body is hidden behind an expand/collapse caret.
+
+        Returns (group, header_layout, body_layout); the header row stays visible when
+        collapsed, so controls that belong there (e.g. the auto-find checkbox) can be
+        added by the caller."""
+        group = QGroupBox()
+        # No title, so WINDOW_QSS should not reserve the strip a title would sit in.
+        group.setProperty("titleless", True)
+        layout = QVBoxLayout(group)
+
+        toggle = QToolButton()
+        toggle.setText(title)
+        toggle.setCheckable(True)
+        toggle.setChecked(False)
+        toggle.setArrowType(Qt.RightArrow)
+        toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        toggle.setStyleSheet("QToolButton { border: none; font-weight: bold; }")
+        if tooltip:
+            toggle.setToolTip(tooltip)
+
+        header = QHBoxLayout()
+        header.addWidget(toggle)
+        layout.addLayout(header)
+
+        body = QWidget()
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body.setVisible(False)
+        layout.addWidget(body)
+
+        toggle.toggled.connect(
+            lambda expanded, b=body, t=toggle: self._set_section_expanded(b, t, expanded)
+        )
+        return group, header, body_layout
+
+    @staticmethod
+    def _set_section_expanded(body: QWidget, toggle: QToolButton, expanded: bool) -> None:
+        body.setVisible(expanded)
+        toggle.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
 
     # -- config file dialogs ------------------------------------------------- #
 
