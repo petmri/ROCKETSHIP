@@ -186,7 +186,7 @@ cd /path/to/ROCKETSHIP
 
 Default template location:
 
-- `/path/to/ROCKETSHIP/python/parametric_default.json`
+- `/path/to/ROCKETSHIP/python/parametric_run_example.json`
 
 Typical outputs:
 
@@ -310,7 +310,7 @@ Example with config template and overrides:
 .venv/bin/python run_parametric_bids_batch.py \
   --bids-root /path/to/data \
   --pipeline-folder t1prep \
-  --config-template python/parametric_default.json \
+  --config-template python/parametric_run_example.json \
   --set tr_ms=5.0 \
   --set rsquared_threshold=0.7
 ```

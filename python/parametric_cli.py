@@ -20,7 +20,7 @@ EVENT_PREFIX = "ROCKETSHIP_EVENT "
 
 
 def _default_config_path() -> Path:
-    return Path(__file__).resolve().parent / "parametric_default.json"
+    return Path(__file__).resolve().parent / "parametric_run_example.json"
 
 
 def _load_config(path: Path) -> Dict[str, Any]:
@@ -35,7 +35,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--config",
         type=Path,
         default=_default_config_path(),
-        help="Path to JSON pipeline config (default: python/parametric_default.json)",
+        help="Path to JSON pipeline config (default: python/parametric_run_example.json)",
     )
     parser.add_argument("--output-dir", type=Path, help="Optional override for output_dir in config")
     parser.add_argument("--tr-ms", type=float, help="Optional override for tr_ms in config")

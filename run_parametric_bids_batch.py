@@ -42,7 +42,7 @@ Examples:
 
   # Use a config template and override specific keys
   %(prog)s --bids-root /data/my_study --pipeline-folder t1prep \\
-    --config-template python/parametric_default.json \\
+    --config-template python/parametric_run_example.json \\
     --set tr_ms=5.0 --set rsquared_threshold=0.7
 
   # Run only selected subjects/sessions
@@ -64,7 +64,7 @@ Examples:
         ),
     )
     parser.add_argument("--output-root", type=Path, default=None, help="Custom flat output directory (ignores BIDS structure). Mutually exclusive with --pipeline-folder.")
-    parser.add_argument("--config-template", type=Path, default=None, help="Optional JSON config template for base settings (e.g., python/parametric_default.json).")
+    parser.add_argument("--config-template", type=Path, default=None, help="Optional JSON config template for base settings (e.g., python/parametric_run_example.json).")
     parser.add_argument("--fit-type", choices=["t1_fa_fit", "t1_fa_linear_fit", "t1_fa_two_point_fit"], default="t1_fa_fit", help="Parametric fit type (default: t1_fa_fit).")
     parser.add_argument("--subject", action="append", dest="subjects", help="Process only specific subject(s) (e.g., sub-01). Repeatable.")
     parser.add_argument("--session", action="append", dest="sessions", help="Process only specific session(s) (e.g., ses-01). Repeatable.")

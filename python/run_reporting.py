@@ -511,7 +511,9 @@ class Reporter:
             )
             self._header_shown = True
         if self.verbosity >= Verbosity.DETAILED:
-            self.note(f"defaults     {shorten_path(event.get('dce_defaults_path'))}")
+            # Each pipeline names its own defaults file; the header calls both "defaults".
+            defaults_path = event.get("dce_defaults_path") or event.get("defaults_path")
+            self.note(f"defaults     {shorten_path(defaults_path)}")
             if event.get("checkpoint_dir"):
                 self.note(f"checkpoints  {shorten_path(event.get('checkpoint_dir'))}")
         self.blank()

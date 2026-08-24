@@ -172,15 +172,17 @@ def test_runtime_parity_t1(
 
     # Python T1 map (timed).
     t0 = time.perf_counter()
-    cfg = ParametricT1Config(
-        output_dir=tmp_path / "py_out",
-        vfa_files=list(vfa),
-        fit_type="t1_fa_fit",
-        flip_angles_deg=list(T1_FLIP_ANGLES),
-        tr_ms=T1_TR_MS,
-        backend="cpu",
-        rsquared_threshold=0.0,
-        invalid_fill_value=float("nan"),
+    cfg = ParametricT1Config.from_dict(
+        {
+            "output_dir": str(tmp_path / "py_out"),
+            "vfa_files": [str(p) for p in vfa],
+            "fit_type": "t1_fa_fit",
+            "flip_angles_deg": list(T1_FLIP_ANGLES),
+            "tr_ms": T1_TR_MS,
+            "backend": "cpu",
+            "rsquared_threshold": 0.0,
+            "invalid_fill_value": float("nan"),
+        }
     )
     result = run_parametric_t1_pipeline(cfg)
     py_seconds = time.perf_counter() - t0

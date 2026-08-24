@@ -194,7 +194,7 @@ Single-case discovery behavior:
 
 Default template location:
 
-- `/path/to/ROCKETSHIP/python/parametric_default.json`
+- `/path/to/ROCKETSHIP/python/parametric_run_example.json`
 
 Typical outputs:
 

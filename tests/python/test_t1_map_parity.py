@@ -96,17 +96,21 @@ def test_bids_t1_map_parity_nonlinear(
         pytest.skip(f"T1 map parity fixture assets missing ({len(missing)}); first: {missing[0]}")
 
     with tempfile.TemporaryDirectory() as tmp:
-        config = ParametricT1Config(
-            output_dir=Path(tmp) / "py_out",
-            vfa_files=list(VFA_FILES),
-            fit_type="t1_fa_fit",
-            flip_angles_deg=list(FLIP_ANGLES_DEG),
-            tr_ms=TR_MS,
-            backend="cpu",
-            # No r^2 masking / no fill: compare the raw fit everywhere, then gate on
-            # physiological plausibility below so the mask is explicit and symmetric.
-            rsquared_threshold=0.0,
-            invalid_fill_value=float("nan"),
+        # from_dict, not the constructor: every unnamed setting then resolves from the
+        # shipped parametric_defaults.json, which is what a real run reads.
+        config = ParametricT1Config.from_dict(
+            {
+                "output_dir": str(Path(tmp) / "py_out"),
+                "vfa_files": [str(p) for p in VFA_FILES],
+                "fit_type": "t1_fa_fit",
+                "flip_angles_deg": list(FLIP_ANGLES_DEG),
+                "tr_ms": TR_MS,
+                "backend": "cpu",
+                # No r^2 masking / no fill: compare the raw fit everywhere, then gate on
+                # physiological plausibility below so the mask is explicit and symmetric.
+                "rsquared_threshold": 0.0,
+                "invalid_fill_value": float("nan"),
+            }
         )
         result = run_parametric_t1_pipeline(config)
         assert result["meta"]["status"] == "ok", result["meta"]

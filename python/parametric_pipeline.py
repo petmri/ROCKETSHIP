@@ -18,6 +18,7 @@ from accel_backend import (
     resolve_backend_selection,
 )
 from parametric_models import t1_fa_nonlinear_fit, t1_fa_two_point_fit
+import parametric_config
 import version
 
 
@@ -59,58 +60,73 @@ def _finalize_t1_output_map(t1_map: np.ndarray, invalid_fill_value: float) -> np
 class ParametricT1Config:
     """Configuration for a single parametric T1 VFA run."""
 
+    # No field here carries a default value. Every preference resolves through
+    # parametric_config against parametric_defaults.json, so there is exactly one place a
+    # number lives and editing source is never how behaviour changes. Constructing this
+    # class directly (tests, library callers) still requires every value, which is the
+    # point -- a silent fallback is what the defaults file exists to remove.
     output_dir: Path
-    vfa_files: List[Path] = field(default_factory=list)
-    fit_type: str = "t1_fa_fit"
-    output_basename: str = "T1_map"
-    output_label: str = ""
-    backend: str = "auto"
-    rsquared_threshold: float = 0.6
+    vfa_files: List[Path]
+    fit_type: str
+    output_basename: str
+    output_label: str
+    backend: str
+    rsquared_threshold: float
+    write_r_squared: bool
+    write_rho_map: bool
+    invalid_fill_value: float
+    odd_echoes: bool
+    xy_smooth_sigma: float
+    write_qc_figures: bool
+    # Absent means "discover it": tr_ms and flip_angles_deg come from the JSON sidecars,
+    # and the two masks mean "no mask" / "nominal flip angles".
     tr_ms: Optional[float] = None
     flip_angles_deg: List[float] = field(default_factory=list)
-    write_r_squared: bool = True
-    write_rho_map: bool = False
-    invalid_fill_value: float = -1.0
-    odd_echoes: bool = False
-    xy_smooth_sigma: float = 0.0
     mask_file: Optional[Path] = None
     b1_map_file: Optional[Path] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any], base_dir: Optional[Path] = None) -> "ParametricT1Config":
-        vfa_values = data.get("vfa_files")
-        if vfa_values is None:
-            vfa_values = data.get("file_list")
-        flip_values = data.get("flip_angles_deg")
-        if flip_values is None:
-            flip_values = data.get("parameters", [])
-        tr_value = data.get("tr_ms")
-        if tr_value is None and data.get("tr") is not None:
-            tr_value = data.get("tr")
-        xy_smooth_raw = data.get("xy_smooth_sigma")
-        if xy_smooth_raw is None:
-            xy_smooth_raw = data.get("xy_smooth_size", 0.0)
-        invalid_fill_raw = data.get("invalid_fill_value", -1.0)
-        if invalid_fill_raw is None:
-            invalid_fill_raw = -1.0
+        """Build a config from a run-config payload, resolved against the defaults file.
 
+        A key the payload does not set falls back to `parametric_defaults.json`, and a key
+        in neither raises rather than being guessed. Unknown keys are rejected up front, so
+        a typo stops the run instead of being silently ignored.
+        """
+        defaults = parametric_config.load_defaults()
+        parametric_config.validate_keys(data, defaults=defaults)
+
+        def pref(key: str) -> Any:
+            return parametric_config.resolve(data, key, defaults=defaults)
+
+        def optional(key: str, fallback: Any = None) -> Any:
+            return parametric_config.resolve_optional(data, key, fallback, defaults=defaults)
+
+        # output_dir is in the defaults file's `required` section with no value, so the
+        # ordinary resolver raises the message that section carries.
+        output_dir = pref("output_dir")
+
+        tr_value = optional("tr_ms")
+        mask_file = optional("mask_file")
+        b1_map_file = optional("b1_map_file")
         return cls(
-            output_dir=_resolve_path(data["output_dir"], base_dir),
-            vfa_files=_to_path_list(vfa_values, base_dir),
-            fit_type=str(data.get("fit_type", "t1_fa_fit")),
-            output_basename=str(data.get("output_basename", "T1_map")),
-            output_label=str(data.get("output_label", "")),
-            backend=str(data.get("backend", "auto")),
-            rsquared_threshold=float(data.get("rsquared_threshold", 0.6)),
+            output_dir=_resolve_path(output_dir, base_dir),
+            vfa_files=_to_path_list(optional("vfa_files", []), base_dir),
+            fit_type=str(pref("fit_type")),
+            output_basename=str(pref("output_basename")),
+            output_label=str(pref("output_label")),
+            backend=str(pref("backend")),
+            rsquared_threshold=float(pref("rsquared_threshold")),
             tr_ms=float(tr_value) if tr_value is not None else None,
-            flip_angles_deg=[float(v) for v in flip_values],
-            write_r_squared=bool(data.get("write_r_squared", True)),
-            write_rho_map=bool(data.get("write_rho_map", False)),
-            invalid_fill_value=float(invalid_fill_raw),
-            odd_echoes=bool(data.get("odd_echoes", False)),
-            xy_smooth_sigma=float(xy_smooth_raw),
-            mask_file=_resolve_path(data["mask_file"], base_dir) if data.get("mask_file") else None,
-            b1_map_file=_resolve_path(data["b1_map_file"], base_dir) if data.get("b1_map_file") else None,
+            flip_angles_deg=[float(v) for v in optional("flip_angles_deg", [])],
+            write_r_squared=bool(pref("write_r_squared")),
+            write_rho_map=bool(pref("write_rho_map")),
+            invalid_fill_value=float(pref("invalid_fill_value")),
+            odd_echoes=bool(pref("odd_echoes")),
+            xy_smooth_sigma=float(pref("xy_smooth_sigma")),
+            write_qc_figures=bool(pref("write_qc_figures")),
+            mask_file=_resolve_path(mask_file, base_dir) if mask_file else None,
+            b1_map_file=_resolve_path(b1_map_file, base_dir) if b1_map_file else None,
         )
 
     def validate(self) -> None:
@@ -747,6 +763,7 @@ def run_parametric_t1_pipeline(
         fit_type=config.fit_type,
         rsquared_threshold=float(config.rsquared_threshold),
         backend=config.backend,
+        defaults_path=str(parametric_config.load_defaults().path),
         **version.build_identity(),
     )
 

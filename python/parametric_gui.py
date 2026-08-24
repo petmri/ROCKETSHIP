@@ -38,7 +38,7 @@ from version import __version__
 
 EVENT_PREFIX = "ROCKETSHIP_EVENT "
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent / "parametric_default.json"
+DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent / "parametric_run_example.json"
 CLI_ENTRYPOINT = REPO_ROOT / "run_parametric_python_cli.py"
 
 
