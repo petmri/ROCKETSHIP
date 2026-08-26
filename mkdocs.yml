@@ -1,9 +1,21 @@
-site_name: ROCKETSHIP Documentation
+# Shared DCEasy theme: palette, fonts, features, social, analytics, extensions.
+# Source of truth is petmri/petmri.github.io › theme/. Do NOT redeclare
+# theme.features here — lists replace rather than merge, and the site would
+# silently lose every feature not listed.
+INHERIT: ./dceasy-base.yml
+
+site_name: ROCKETSHIP
 site_description: Processing and analysis of dynamic contrast-enhanced and parametric MRI data.
-site_url: https://petmri.github.io/ROCKETSHIP/
+site_url: https://dceasy.org/ROCKETSHIP/
 repo_url: https://github.com/petmri/ROCKETSHIP
 repo_name: petmri/ROCKETSHIP
 docs_dir: docs
+
+# Header mark. Overrides Material's default (material/library).
+# Swap for `theme.logo: assets/dceasy-mark.svg` once the family mark exists.
+theme:
+  icon:
+    logo: material/rocket-launch-outline
 
 # Project-management notes and archived project records are working documents for the
 # development team, not user documentation. They stay in the repository and are excluded
@@ -11,27 +23,7 @@ docs_dir: docs
 exclude_docs: |
   project-management/
 
-theme:
-  name: material
-  features:
-    - navigation.sections
-    - navigation.top
-    - navigation.indexes
-    - search.suggest
-    - search.highlight
-    - content.code.copy
-
-markdown_extensions:
-  - admonition
-  - tables
-  - attr_list
-  - toc:
-      permalink: true
-  - pymdownx.arithmatex:
-      generic: true
-  - pymdownx.superfences
-  - pymdownx.details
-
+# Site-specific: ROCKETSHIP's reference pages carry display maths.
 extra_javascript:
   - javascripts/mathjax.js
   - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
@@ -62,3 +54,4 @@ nav:
   - Testing:
       - Overview: testing.md
       - OSIPI Verification: osipi-verification.md
+  - DCEasy family: https://dceasy.org/

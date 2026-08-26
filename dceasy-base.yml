@@ -1,0 +1,106 @@
+# ==============================================================================
+# DCEasy shared MkDocs configuration
+# Source of truth: petmri/petmri.github.io › theme/dceasy-base.yml
+#
+# Each site consumes it with a relative path at the top of its own mkdocs.yml:
+#
+#     INHERIT: ./dceasy-base.yml
+#
+# MERGE SEMANTICS — verified against mkdocs 1.6.1 (mergedeep.merge):
+#   * dict values MERGE with the child's
+#   * list values are REPLACED wholesale by the child's
+#
+# That is why markdown_extensions and plugins use dict syntax here: a site can
+# add one extension without redeclaring all of them. theme.features has no dict
+# form, so this file holds the complete list and sites must NOT redeclare it —
+# doing so silently drops everything below.
+#
+# INHERIT resolves a LOCAL path only; it cannot fetch a URL. Sync this file into
+# each repo (see theme/README.md).
+# ==============================================================================
+
+theme:
+  name: material
+
+  font:
+    text: Source Serif 4
+    code: JetBrains Mono
+
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+  # Complete list — see merge semantics above.
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tooltips
+
+  icon:
+    repo: fontawesome/brands/github
+
+extra_css:
+  - stylesheets/dceasy.css
+
+markdown_extensions:
+  admonition: {}
+  attr_list: {}
+  md_in_html: {}
+  footnotes: {}
+  tables: {}
+  toc:
+    permalink: true
+  pymdownx.arithmatex:
+    generic: true
+  pymdownx.details: {}
+  pymdownx.highlight:
+    anchor_linenums: true
+  pymdownx.inlinehilite: {}
+  pymdownx.snippets: {}
+  pymdownx.superfences:
+    custom_fences:
+      - name: mermaid
+        class: mermaid
+        format: !!python/name:pymdownx.superfences.fence_code_format
+  pymdownx.tabbed:
+    alternate_style: true
+  pymdownx.emoji:
+    emoji_index: !!python/name:material.extensions.emoji.twemoji
+    emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+plugins:
+  search: {}
+
+extra:
+  analytics:
+    provider: google
+    property: G-QGP3ETP28Q
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/petmri
+      name: petmri on GitHub
+    - icon: material/web
+      link: https://dceasy.org/
+      name: DCEasy family

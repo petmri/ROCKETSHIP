@@ -1,0 +1,56 @@
+cff-version: 1.2.0
+message: "If you use ROCKETSHIP in your research, please cite the article below."
+title: ROCKETSHIP
+abstract: >-
+  An open source toolbox for the processing and analysis of dynamic
+  contrast-enhanced (DCE) and parametric MRI data. Provides quantitative
+  pharmacokinetic modelling, parametric mapping of T1, T2, T2* and the apparent
+  diffusion coefficient, and the supporting workflow required to take a study
+  from acquired images to parameter maps.
+type: software
+authors:
+  - family-names: Barnes
+    given-names: Samuel R.
+    orcid: "https://orcid.org/0000-0002-1065-8442"
+    affiliation: Loma Linda University
+  - family-names: Saca
+    given-names: Lucas
+    orcid: "https://orcid.org/0009-0008-3291-0750"
+    affiliation: Loma Linda University
+  - family-names: Ng
+    given-names: Thomas S. C.
+    affiliation: California Institute of Technology
+license: GPL-3.0-or-later
+repository-code: "https://github.com/petmri/ROCKETSHIP"
+url: "https://petmri.github.io/ROCKETSHIP/"
+keywords:
+  - DCE-MRI
+  - pharmacokinetic modelling
+  - parametric mapping
+  - Ktrans
+  - MRI
+preferred-citation:
+  type: article
+  title: >-
+    ROCKETSHIP: a flexible and modular software tool for the planning,
+    processing and analysis of dynamic MRI studies
+  authors:
+    - family-names: Barnes
+      given-names: Samuel R.
+    - family-names: Ng
+      given-names: Thomas S. C.
+    - family-names: Santa-Maria
+      given-names: Naomi
+    - family-names: Montagne
+      given-names: Axel
+    - family-names: Zlokovic
+      given-names: Berislav V.
+    - family-names: Jacobs
+      given-names: Russell E.
+  journal: BMC Medical Imaging
+  volume: 15
+  issue: 1
+  start: 19
+  year: 2015
+  month: 6
+  doi: 10.1186/s12880-015-0062-3

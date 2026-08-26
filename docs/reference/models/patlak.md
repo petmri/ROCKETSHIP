@@ -16,7 +16,7 @@ h(t) = K^{trans} + v_p \, \delta(t)
 giving
 
 \[
-\boxed{\;C_t(t) = K^{trans} \int_{0}^{t} C_p(\tau)\, \mathrm{d}\tau \;+\; v_p \, C_p(t)\;}
+C_t(t) = K^{trans} \int_{0}^{t} C_p(\tau)\, \mathrm{d}\tau \;+\; v_p \, C_p(t)
 \]
 
 This is the limiting case of the [extended Tofts model](extended-tofts.md) as

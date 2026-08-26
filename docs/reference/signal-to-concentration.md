@@ -62,8 +62,8 @@ E_1(t) = \frac{1 - u(t)}{1 - u(t)\cos\alpha}
 which inverts directly to the relaxation rate:
 
 \[
-\boxed{\;R_1(t) = \frac{1}{\mathrm{TR}}\,
-\ln\!\left(\frac{1 - u(t)\cos\alpha}{1 - u(t)}\right)\;}
+R_1(t) = \frac{1}{\mathrm{TR}}\,
+\ln\!\left(\frac{1 - u(t)\cos\alpha}{1 - u(t)}\right)
 \]
 
 This is the form ROCKETSHIP evaluates. The numerator and denominator are computed separately
@@ -110,7 +110,7 @@ R_1(t) = R_{10} + r_1 \, C(t)
 Rearranging gives the tissue concentration directly,
 
 \[
-\boxed{\;C_t(t) = \frac{R_1(t) - 1/T_{10}}{r_1}\;}
+C_t(t) = \frac{R_1(t) - 1/T_{10}}{r_1}
 \]
 
 For the arterial input function an additional correction is required. The contrast agent is
@@ -119,7 +119,7 @@ plasma volume fraction \((1 - \mathrm{Hct})\) converts a whole-blood concentrati
 plasma concentration the models require:
 
 \[
-\boxed{\;C_p(t) = \frac{R_1(t) - 1/T_{10,\text{blood}}}{r_1 \,(1 - \mathrm{Hct})}\;}
+C_p(t) = \frac{R_1(t) - 1/T_{10,\text{blood}}}{r_1 \,(1 - \mathrm{Hct})}
 \]
 
 !!! warning "The fast-exchange assumption"

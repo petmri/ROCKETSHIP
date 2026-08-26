@@ -19,9 +19,9 @@ h(t) = F_p \left[ E + (1 - E)\, e^{-t/T_p} \right]
 Expanding gives the form ROCKETSHIP evaluates:
 
 \[
-\boxed{\;C_t(t) = K^{trans} \int_{0}^{t} C_p(\tau)\,\mathrm{d}\tau
+C_t(t) = K^{trans} \int_{0}^{t} C_p(\tau)\,\mathrm{d}\tau
 \;+\; \left(F_p - K^{trans}\right) \int_{0}^{t} C_p(\tau)\,
-e^{-\frac{t - \tau}{T_p}} \,\mathrm{d}\tau\;}
+e^{-\frac{t - \tau}{T_p}} \,\mathrm{d}\tau
 \]
 
 The first term is the irreversibly retained contrast agent, identical to the leakage term of

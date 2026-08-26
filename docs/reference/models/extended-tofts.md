@@ -16,8 +16,8 @@ h(t) = K^{trans} e^{-k_{ep} t} + v_p \, \delta(t), \qquad k_{ep} = \frac{K^{tran
 giving
 
 \[
-\boxed{\;C_t(t) = K^{trans} \int_{0}^{t} C_p(\tau)\,
-e^{-\frac{K^{trans}}{v_e}(t - \tau)} \,\mathrm{d}\tau \;+\; v_p \, C_p(t)\;}
+C_t(t) = K^{trans} \int_{0}^{t} C_p(\tau)\,
+e^{-\frac{K^{trans}}{v_e}(t - \tau)} \,\mathrm{d}\tau \;+\; v_p \, C_p(t)
 \]
 
 The plasma term is not convolved. This is the model's defining approximation: plasma within

@@ -5,6 +5,10 @@ on:
     branches:
       - main
       - master
+      # Docs currently live on dev, so dev publishes the site. Remove this once
+      # dev merges, otherwise main and dev race for the Pages deployment and the
+      # last push wins.
+      - dev
   pull_request:
 
 permissions:

@@ -16,8 +16,8 @@ h(t) = K^{trans} \, e^{-k_{ep} t}, \qquad k_{ep} = \frac{K^{trans}}{v_e}
 giving the tissue concentration
 
 \[
-\boxed{\;C_t(t) = K^{trans} \int_{0}^{t} C_p(\tau)\,
-e^{-\frac{K^{trans}}{v_e}\,(t - \tau)} \; \mathrm{d}\tau \;}
+C_t(t) = K^{trans} \int_{0}^{t} C_p(\tau)\,
+e^{-\frac{K^{trans}}{v_e}\,(t - \tau)} \; \mathrm{d}\tau
 \]
 
 Equivalently, in differential form, the rate of change of tissue concentration is the

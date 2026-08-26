@@ -1,0 +1,176 @@
+/* ==========================================================================
+   DCEasy shared theme — "Journal" direction
+   Source of truth: petmri/petmri.github.io › theme/dceasy.css
+   Copy to each site as docs/stylesheets/dceasy.css
+
+   Navy #0D1F3C · sky #63C0F5 · Source Serif 4 body · IBM Plex Sans chrome
+   ========================================================================== */
+
+/* Material loads theme.font.text and theme.font.code, but only those two.
+   IBM Plex Sans is the third face, so we fetch it ourselves.
+   @import must stay at the very top of the file. */
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap");
+
+
+/* --------------------------------------------------------------------------
+   1. Brand palette — light
+   Token names match Material's built-in palettes exactly; setting
+   `primary: custom` / `accent: custom` in mkdocs.yml is what activates them.
+   -------------------------------------------------------------------------- */
+
+[data-md-color-primary="custom"] {
+  --md-primary-fg-color:        #0D1F3C;  /* header bar, sidebar active state */
+  --md-primary-fg-color--light: #2A4166;
+  --md-primary-fg-color--dark:  #07142A;
+  --md-primary-bg-color:        #FFFFFF;  /* text sitting ON the navy bar */
+  --md-primary-bg-color--light: #FFFFFFB3;
+
+  /* Material derives link colour from primary, which would make every link
+     navy and nearly indistinguishable from body text. Point it at the accent. */
+  --md-typeset-a-color: #1D6FA5;
+}
+
+[data-md-color-accent="custom"] {
+  --md-accent-fg-color:              #1D6FA5;  /* 5.4:1 on white — AA at any size */
+  --md-accent-fg-color--transparent: #1D6FA51A;
+  --md-accent-bg-color:              #FFFFFF;  /* text ON accent fills */
+  --md-accent-bg-color--light:       #FFFFFFB3;
+}
+
+
+/* --------------------------------------------------------------------------
+   2. Brand palette — slate
+   #63C0F5 is too light to carry white bar text, so it never becomes primary.
+   In dark mode it takes over as the link and accent colour, where it reads
+   at 7.7:1 against the slate ground.
+   -------------------------------------------------------------------------- */
+
+[data-md-color-scheme="slate"] {
+  --md-hue: 215;                          /* tilts the slate greys toward navy */
+}
+
+[data-md-color-scheme="slate"][data-md-color-primary="custom"] {
+  --md-primary-fg-color:        #0B1826;
+  --md-primary-fg-color--light: #24405E;
+  --md-primary-fg-color--dark:  #060F1A;
+  --md-typeset-a-color:         #63C0F5;
+}
+
+[data-md-color-scheme="slate"][data-md-color-accent="custom"] {
+  --md-accent-fg-color:              #63C0F5;
+  --md-accent-fg-color--transparent: #63C0F51A;
+  --md-accent-bg-color:              #0B1826;  /* dark text on a light accent */
+  --md-accent-bg-color--light:       #0B1826B3;
+}
+
+
+/* --------------------------------------------------------------------------
+   3. The third face
+   Body text is Source Serif (via theme.font.text). Everything structural —
+   chrome, headings, table headers, buttons — is IBM Plex Sans.
+   -------------------------------------------------------------------------- */
+
+:root {
+  --dceasy-ui-font: "IBM Plex Sans", -apple-system, BlinkMacSystemFont,
+                    "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+.md-header,
+.md-tabs,
+.md-nav,
+.md-search,
+.md-footer,
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-typeset h4,
+.md-typeset h5,
+.md-typeset h6,
+.md-typeset table th,
+.md-typeset .md-button,
+.md-typeset .admonition-title,
+.md-typeset summary {
+  font-family: var(--dceasy-ui-font);
+}
+
+
+/* --------------------------------------------------------------------------
+   4. Heading correction
+   Material ships headings at font-weight 300, with h1 additionally set to
+   --md-default-fg-color--light (#0000008a — 54% opacity black). That is what
+   makes stock Material pages read as washed out. Full ink, semibold, tighter
+   tracking. Same specificity as Material's rule, so load order decides —
+   extra_css is injected after main.css, so this wins.
+   -------------------------------------------------------------------------- */
+
+.md-typeset h1 {
+  color: var(--md-default-fg-color);
+  font-weight: 600;
+  letter-spacing: -.022em;
+}
+
+.md-typeset h2 {
+  font-weight: 600;
+  letter-spacing: -.015em;
+}
+
+.md-typeset h3 {
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+
+
+/* --------------------------------------------------------------------------
+   5. Serif body tuning
+   Source Serif sets optically smaller than a sans at the same size, so the
+   base bumps from Material's .8rem. Longer leading suits the serif and the
+   equation-heavy reference pages.
+   -------------------------------------------------------------------------- */
+
+.md-typeset {
+  font-size: .82rem;
+  line-height: 1.7;
+  font-optical-sizing: auto;
+}
+
+/* Measure control on prose only — direct children, so grid cards, admonition
+   bodies and nested lists keep their own layout. Remove this block if you
+   would rather prose run the full content width.
+
+   NB: `ch`, not `rem`. Material sets html { font-size: 125% }, so 1rem is 20px
+   here, not 16px — a rem-based cap silently lands ~25% wider than intended.
+   `ch` is relative to the font actually in use, which is what a measure should
+   track. 66ch renders at roughly 75 characters in Source Serif at this size. */
+.md-typeset > p,
+.md-typeset > ul,
+.md-typeset > ol,
+.md-typeset > blockquote {
+  max-width: 66ch;
+}
+
+/* JetBrains Mono has a large x-height; it needs pulling back a little to sit
+   comfortably inside serif running text. */
+.md-typeset code {
+  font-size: .8em;
+}
+
+.md-typeset pre > code {
+  font-size: .78em;
+  line-height: 1.6;
+}
+
+
+/* --------------------------------------------------------------------------
+   6. Tables
+   Parameter tables are a big share of these docs. Lining figures so columns
+   of bounds and defaults actually align.
+   -------------------------------------------------------------------------- */
+
+.md-typeset table:not([class]) {
+  font-variant-numeric: tabular-nums;
+}
+
+.md-typeset table:not([class]) th {
+  font-weight: 600;
+  letter-spacing: .01em;
+}

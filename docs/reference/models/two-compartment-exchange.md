@@ -16,8 +16,8 @@ h(t) = F_p \left[(1 - A)\, e^{-K_{+} t} + A \, e^{-K_{-} t}\right]
 so that
 
 \[
-\boxed{\;C_t(t) = F_p \int_{0}^{t} C_p(\tau)
-\left[(1 - A)\, e^{-K_{+}(t - \tau)} + A\, e^{-K_{-}(t - \tau)}\right] \mathrm{d}\tau\;}
+C_t(t) = F_p \int_{0}^{t} C_p(\tau)
+\left[(1 - A)\, e^{-K_{+}(t - \tau)} + A\, e^{-K_{-}(t - \tau)}\right] \mathrm{d}\tau
 \]
 
 The rate constants and the mixing coefficient derive from three characteristic times.

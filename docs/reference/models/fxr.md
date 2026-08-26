@@ -35,9 +35,9 @@ e^{-\frac{K^{trans}}{v_e}(t - \tau)}\,\mathrm{d}\tau
 and the observed relaxation rate is the smaller root of the two-site exchange expression:
 
 \[
-\boxed{\;R_1(t) = \frac{1}{2}\left[\,2 R_{1i} + r_1 C_t(t) + X
+R_1(t) = \frac{1}{2}\left[\,2 R_{1i} + r_1 C_t(t) + X
 - \sqrt{\left(\frac{2}{\tau_i} - r_1 C_t(t) - X\right)^{2}
-+ \frac{4\,(1 - p_o)}{\tau_i^{2}\, p_o}}\;\right]\;}
++ \frac{4\,(1 - p_o)}{\tau_i^{2}\, p_o}}\;\right]
 \]
 
 where
