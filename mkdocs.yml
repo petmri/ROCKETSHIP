@@ -11,11 +11,11 @@ repo_url: https://github.com/petmri/ROCKETSHIP
 repo_name: petmri/ROCKETSHIP
 docs_dir: docs
 
-# Header mark. Overrides Material's default (material/library).
-# Swap for `theme.logo: assets/dceasy-mark.svg` once the family mark exists.
+# Per-project favicon — the family mark is shared via the header logo, but the
+# tab icon has to tell this site apart from the other DCEasy sites.
 theme:
-  icon:
-    logo: material/rocket-launch-outline
+  favicon: assets/favicon.svg
+
 
 # Project-management notes and archived project records are working documents for the
 # development team, not user documentation. They stay in the repository and are excluded
@@ -54,4 +54,3 @@ nav:
   - Testing:
       - Overview: testing.md
       - OSIPI Verification: osipi-verification.md
-  - DCEasy family: https://dceasy.org/

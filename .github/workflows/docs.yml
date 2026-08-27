@@ -10,15 +10,20 @@ on:
       # last push wins.
       - dev
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
   pages: write
   id-token: write
 
+# Deployments must not cancel each other. A push and a pull_request run can fire
+# for the same commit; with cancel-in-progress the later one kills the former, and
+# since deploy only runs on push, the site silently never updates. Matches DCEPrep
+# and GitHub's own Pages starter workflow.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:

@@ -58,6 +58,18 @@ theme:
     - content.code.annotate
     - content.tooltips
 
+  # Family mark and favicon — the same on every DCEasy site. Each repo carries
+  # a copy at docs/assets/ (see theme/README.md). The header variant is stroked
+  # white rather than currentColor because theme.logo renders an <img>, which
+  # does not inherit page colour.
+  # The header mark is shared: it sits beside the site name, which already says
+  # which site you are on, so its job is to signal the family.
+  #
+  # theme.favicon is deliberately NOT here. A favicon is often the only thing
+  # identifying a pinned or narrow tab, so it must differ per project. Each site
+  # sets its own from theme/assets/favicons/.
+  logo: assets/dceasy-mark-white.svg
+
   icon:
     repo: fontawesome/brands/github
 
