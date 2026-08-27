@@ -10,12 +10,13 @@ import shutil
 import sys
 from typing import Any, Dict, List, Optional
 
-from parametric_cli import _build_event_logger, _coerce_value
+from cli_overrides import parse_set_overrides
+from parametric_cli import _build_event_logger, _stdout_event_sink
 from parametric_pipeline import ParametricT1Config, run_parametric_t1_pipeline
 
 
 def _default_defaults_json_path() -> Path:
-    return Path(__file__).resolve().parent / "parametric_default.json"
+    return Path(__file__).resolve().parent / "parametric_defaults.json"
 
 
 def _default_anat_output_dir(output_dir: Path) -> Path:
@@ -30,19 +31,6 @@ def _load_defaults(path: Path) -> Dict[str, Any]:
     if not path.exists():
         raise FileNotFoundError(f"Defaults JSON not found: {path}")
     return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _parse_set_overrides(values: List[str]) -> Dict[str, Any]:
-    overrides: Dict[str, Any] = {}
-    for raw in values:
-        if "=" not in raw:
-            raise ValueError(f"Invalid --set entry '{raw}'. Expected KEY=VALUE")
-        key, value = raw.split("=", 1)
-        key = key.strip()
-        if not key:
-            raise ValueError(f"Invalid --set entry '{raw}'. Empty KEY")
-        overrides[key] = _coerce_value(value)
-    return overrides
 
 
 def _find_one(parent: Path, pattern: str) -> Optional[Path]:
@@ -337,14 +325,15 @@ def main(argv: List[str] | None = None) -> int:
         [*vfa_files, *( [b1_map_file] if b1_map_file is not None else [] ), *( [mask_file] if mask_file is not None else [] )],
     )
 
-    payload.update(_parse_set_overrides(args.set_overrides))
+    payload.update(parse_set_overrides(args.set_overrides))
 
     config = ParametricT1Config.from_dict(payload)
     event_log_path = (
         args.event_log.expanduser().resolve() if args.event_log else (_default_reports_output_dir(case_root) / "parametric_t1_events.jsonl")
     )
 
-    event_log_handle, emit_event = _build_event_logger(event_log_path, emit_stdout=(args.events == "on"))
+    sinks = [_stdout_event_sink] if args.events == "on" else []
+    event_log_handle, emit_event = _build_event_logger(event_log_path, sinks)
     try:
         emit_event(
             {
