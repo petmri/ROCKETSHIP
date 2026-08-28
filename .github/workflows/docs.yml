@@ -1,5 +1,19 @@
 name: docs
 
+# Builds the ROCKETSHIP site with Zensical and publishes it to GitHub Pages.
+#
+# Zensical replaces Material for MkDocs, which reaches end of life on
+# 5 November 2026. It reads the same mkdocs.yml and inherits the shared DCEasy
+# theme from dceasy-base.yml, so the config here is unchanged by the switch.
+#
+# No CNAME file: this is a project site, and it inherits the custom domain from
+# the organization site (petmri/petmri.github.io), which is where dceasy.org is
+# configured. Adding one here would give the two copies a chance to disagree.
+#
+# Action majors are kept current because GitHub retires the Node runtime they
+# run on, not because this workflow needs new features. Every action below is on
+# node24; upload-pages-artifact pins upload-artifact internally.
+
 on:
   push:
     branches:
@@ -33,17 +47,15 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
       - name: Install docs dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-docs.txt
+        run: pip install -r requirements-docs.txt
 
       - name: Build docs
-        run: mkdocs build --strict
+        run: zensical build --strict
 
       - name: Configure Pages
         uses: actions/configure-pages@v6
