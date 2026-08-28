@@ -158,10 +158,7 @@ def _parse_models(raw: str) -> Dict[str, int]:
 
 def _load_stage_defaults(path: Path) -> Dict[str, Any]:
     payload = json.loads(path.read_text())
-    defaults = dict(payload.get("stage_overrides", payload.get("defaults", {})))
-    defaults.pop("dce_preferences_path", None)
-    defaults["use_dce_preferences"] = False
-    return defaults
+    return dict(payload.get("stage_overrides", payload.get("defaults", {})))
 
 
 def _find_bids_part(path: Path, prefix: str) -> Optional[str]:
@@ -331,7 +328,6 @@ def main(argv: list[str] | None = None) -> int:
         "stage_a_mode": "real",
         "stage_b_mode": "real",
         "stage_d_mode": "real",
-        "aif_curve_mode": "fitted",
         "write_param_maps": True,
     })
     derived_rootname = _derive_case_rootname(subject_source, subject_tp, inputs["dynamic"])
@@ -348,7 +344,7 @@ def main(argv: list[str] | None = None) -> int:
         backend=args.backend,
         checkpoint_dir=checkpoint_dir,
         write_xls=True,
-        aif_mode="auto",
+        aif_mode="fitted",
         dynamic_files=[inputs["dynamic"]],
         aif_files=[inputs["aif"]],
         roi_files=[inputs["roi"]],
