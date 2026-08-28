@@ -39,6 +39,19 @@ def _glob_first(parent: Path, *patterns: str) -> Optional[Path]:
     return None
 
 
+def _dynamic_sidecar(dynamic_file: Optional[Path]) -> Optional[Path]:
+    if dynamic_file is None:
+        return None
+    name = dynamic_file.name
+    if name.endswith(".nii.gz"):
+        candidate = dynamic_file.with_name(name[:-7] + ".json")
+    elif name.endswith(".nii"):
+        candidate = dynamic_file.with_suffix(".json")
+    else:
+        return None
+    return candidate.resolve() if candidate.exists() else None
+
+
 def _resolve_single_case_inputs(subject_source: Path, subject_tp: Path) -> Dict[str, Optional[Path]]:
     source = subject_source.expanduser().resolve()
     tp = subject_tp.expanduser().resolve()
@@ -52,6 +65,7 @@ def _resolve_single_case_inputs(subject_source: Path, subject_tp: Path) -> Dict[
             None,
             [
                 _glob_first(dce_dir, "*desc-bfcz_DCE.nii*", "*DCE.nii*"),
+                _glob_first(source_dce_dir, "*DCE.nii*"),
                 source / "Dynamic_t1w.nii",
                 source / "Dynamic_t1w.nii.gz",
                 tp / "Dynamic_t1w.nii",
@@ -107,7 +121,16 @@ def _resolve_single_case_inputs(subject_source: Path, subject_tp: Path) -> Dict[
             ],
         )
     )
-    metadata = _find_first(filter(None, [_glob_first(source_dce_dir, "*DCE.json"), _glob_first(dce_dir, "*DCE.json")]))
+    metadata = _find_first(
+        filter(
+            None,
+            [
+                _dynamic_sidecar(dynamic),
+                _glob_first(source_dce_dir, "*DCE.json"),
+                _glob_first(dce_dir, "*DCE.json"),
+            ],
+        )
+    )
 
     return {
         "dynamic": dynamic,
@@ -279,6 +302,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--roi-file", type=Path, help="Optional explicit ROI mask override.")
     parser.add_argument("--t1map-file", type=Path, help="Optional explicit T1 map override.")
     parser.add_argument("--noise-file", type=Path, help="Optional explicit noise mask override.")
+    parser.add_argument("--metadata-json", type=Path, help="Optional DCE acquisition metadata JSON.")
+    parser.add_argument("--tr-ms", type=float, help="Repetition time in milliseconds when no metadata JSON is available.")
+    parser.add_argument("--fa-deg", type=float, help="Flip angle in degrees when no metadata JSON is available.")
+    parser.add_argument("--time-resolution-sec", type=float, help="DCE frame spacing in seconds when no metadata JSON is available.")
+    parser.add_argument("--relaxivity", type=float, help="Contrast-agent relaxivity in /mM/s when no metadata JSON is available.")
     parser.add_argument("--events", choices=["on", "off"], default="on", help="Emit JSON progress events on stdout (default: on).")
     parser.add_argument("--event-log", type=Path, help="Optional JSONL path for event log (default: <output_dir>/reports/dce_pipeline_events.jsonl).")
     parser.add_argument("--no-checkpoints", action="store_true", help="Skip writing checkpoint files.")
@@ -292,6 +320,18 @@ def _missing_required_inputs(inputs: Dict[str, Optional[Path]]) -> list[str]:
         if inputs.get(key) is None:
             missing.append(key)
     return missing
+
+
+def _missing_acquisition_settings(
+    metadata_path: Optional[Path], stage_overrides: Dict[str, Any]
+) -> list[str]:
+    if metadata_path is not None:
+        return []
+    return [
+        key
+        for key in ("tr_ms", "fa_deg", "time_resolution_sec", "relaxivity")
+        if stage_overrides.get(key) is None
+    ]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -314,6 +354,8 @@ def main(argv: list[str] | None = None) -> int:
         inputs["t1map"] = args.t1map_file.expanduser().resolve()
     if args.noise_file:
         inputs["noise"] = args.noise_file.expanduser().resolve()
+    if args.metadata_json:
+        inputs["metadata_json"] = args.metadata_json.expanduser().resolve()
 
     missing = _missing_required_inputs(inputs)
     if missing:
@@ -336,6 +378,17 @@ def main(argv: list[str] | None = None) -> int:
     if inputs["metadata_json"] is not None:
         stage_overrides["dce_metadata_path"] = str(inputs["metadata_json"])
     stage_overrides.update(parse_set_overrides(args.set_overrides))
+    for key in ("tr_ms", "fa_deg", "time_resolution_sec", "relaxivity"):
+        value = getattr(args, key)
+        if value is not None:
+            stage_overrides[key] = value
+
+    missing_settings = _missing_acquisition_settings(inputs["metadata_json"], stage_overrides)
+    if missing_settings:
+        raise ValueError(
+            "DCE acquisition metadata was not found. Pass --metadata-json or provide all "
+            f"of: {', '.join(missing_settings)}."
+        )
 
     config = DcePipelineConfig(
         subject_source_path=subject_source,
