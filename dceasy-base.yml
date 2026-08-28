@@ -6,14 +6,21 @@
 #
 #     INHERIT: ./dceasy-base.yml
 #
-# MERGE SEMANTICS — verified against mkdocs 1.6.1 (mergedeep.merge):
-#   * dict values MERGE with the child's
-#   * list values are REPLACED wholesale by the child's
+# MERGE SEMANTICS — and the two build tools disagree, so read carefully:
+#   * dict values MERGE with the child's, under both
+#   * list values are REPLACED wholesale by mkdocs 1.6.1 (mergedeep.merge),
+#     but CONCATENATED by Zensical 0.0.57 — verified both ways
 #
-# That is why markdown_extensions and plugins use dict syntax here: a site can
-# add one extension without redeclaring all of them. theme.features has no dict
-# form, so this file holds the complete list and sites must NOT redeclare it —
-# doing so silently drops everything below.
+# All three DCEasy sites build with Zensical, so concatenation is the live
+# behavior: a site that redeclares extra_css gets the base's entries PLUS its
+# own, and repeating an entry loads that file twice.
+#
+# Dict syntax for markdown_extensions and plugins sidesteps the disagreement
+# entirely, which is why they use it here: a site can add one extension without
+# redeclaring all of them, under either tool. theme.features has no dict form,
+# so this file holds the complete list; sites should still not redeclare it,
+# since anything they list is appended under Zensical and silently replaces the
+# whole list if the site is ever built with mkdocs.
 #
 # INHERIT resolves a LOCAL path only; it cannot fetch a URL. Sync this file into
 # each repo (see theme/README.md).
@@ -21,6 +28,17 @@
 
 theme:
   name: material
+
+  # Zensical ships two looks. "classic" is Material's, which is what the DCEasy
+  # palette below is built for: it paints the header bar with
+  # --md-primary-fg-color, the navy set in dceasy.css. "modern" is Zensical's
+  # own design and does NOT use that variable for the header, so a site left on
+  # the default renders a white header and loses the family color entirely.
+  #
+  # Zensical-only key; MkDocs does not know it. It lives here rather than in
+  # each mkdocs.yml so the three sites cannot drift apart -- which is exactly
+  # what happened when only the hub set it.
+  variant: classic
 
   font:
     text: Source Serif 4
