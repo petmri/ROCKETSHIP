@@ -1,6 +1,6 @@
 """The defaults file is the single source of truth; these tests keep it that way.
 
-See `docs/project-management/projects/defaults-single-source/PLAN.md`. The AST scans here
+See `project-management/projects/defaults-single-source/PLAN.md`. The AST scans here
 are the anti-rot mechanism: they fail when someone adds a preference read without adding the
 key to `python/dce_defaults.json`, or reintroduces a hardcoded fallback in source.
 """

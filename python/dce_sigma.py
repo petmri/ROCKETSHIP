@@ -1,7 +1,7 @@
 """Per-voxel noise-σ estimation and reduced χ² for DCE quality-of-fit (QoF).
 
 Implements the day-1 pieces of the QoF reduced-χ² signal
-(`docs/project-management/projects/archived/batch-parity/sigma_estimators.md`):
+(`project-management/projects/archived/batch-parity/sigma_estimators.md`):
 
 - **Estimator B** — a robust successive-difference (von Neumann / lag-1) noise σ in
   concentration units, computed from the per-voxel `C(t)` the pipeline already writes

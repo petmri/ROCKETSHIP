@@ -3,9 +3,9 @@
 ## Purpose
 Track only active, actionable tasks.
 
-Do not log historical completions here. Record finished work in `docs/project-management/COMPLETED.md`.
-Keep strategic sequencing in `docs/project-management/ROADMAP.md`. For current measurable state, run the test suite — there is no status document.
-Larger feature requests should be logged in `docs/project-management/projects/feature-request/new_features.md`.
+Do not log historical completions here. Record finished work in `project-management/COMPLETED.md`.
+Keep strategic sequencing in `project-management/ROADMAP.md`. For current measurable state, run the test suite — there is no status document.
+Larger feature requests should be logged in `project-management/projects/feature-request/new_features.md`.
 
 ## Blocking Items
 - [x] Confirm function of GUI/CLI on non-bids data
@@ -33,7 +33,7 @@ Larger feature requests should be logged in `docs/project-management/projects/fe
 ### 2. Large Test/Parity Data Distribution
 - [ ] Decide how to distribute large test/parity fixtures (~240 MB now, growing) outside the
       main git repo. Options + recommendation (Release assets now, DataLad later) in
-      `docs/project-management/projects/large-data-distribution/large_data_distribution.md`.
+      `project-management/projects/large-data-distribution/large_data_distribution.md`.
 
 ### 3. Modeling and Workflow Follow-Ups
 - [ ] Decide whether to gate `2cxm` Fp reporting on frame rate and/or fit quality. Fp is
@@ -127,11 +127,11 @@ Larger feature requests should be logged in `docs/project-management/projects/fe
       polluting ROI means. This was the original motivation for the QoF work and is the one piece
       never built -- the metric, the maps, the pipeline hook and the parity filter are all landed
       and shipped. Background:
-      `docs/project-management/projects/archived/batch-parity/quality_of_fit.md`.
+      `project-management/projects/archived/batch-parity/quality_of_fit.md`.
 - [ ] Decide whether `shrink_sigma` (eBayes σ² moderation + prior-predictive clamp) should become
       the pipeline default rather than opt-in. Needs broader `RUNNER_DATA` evidence than the one
       session it was validated on. Background:
-      `docs/project-management/projects/archived/batch-parity/sigma_estimators.md`.
+      `project-management/projects/archived/batch-parity/sigma_estimators.md`.
 - [ ] **Regenerate the `matlabref` tree on a MATLAB host.** Needs doing, and needs hardware this
       was not run on. `tests/data/BIDS_test/derivatives/matlabref/` is fit through
       `FXLfit_generic`, which reads `dce/dce_preferences.txt`, so the `voxel_MaxFunEvals`

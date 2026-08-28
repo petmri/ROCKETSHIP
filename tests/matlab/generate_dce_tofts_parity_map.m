@@ -101,7 +101,7 @@ end
 
 % Baselines must come from the CPU fit()/confint() path: gpufit zero-pads the CI columns and
 % diverges from MATLAB CPU, which shipped all-zero CI maps undetected for months (issue #3,
-% docs/project-management/projects/archived/batch-parity/batch_parity.md).
+% project-management/projects/archived/batch-parity/batch_parity.md).
 % Mirrors the fitter's own USE_GPU test (FXLfit_generic.m) -- checking force_cpu alone fires
 % on CUDA-less machines already on the CPU path. Checked, not set: dce_preferences.txt is
 % tracked CRLF, so a generator rewriting it is its own hazard.

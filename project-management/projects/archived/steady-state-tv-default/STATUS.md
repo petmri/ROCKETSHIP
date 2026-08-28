@@ -7,7 +7,7 @@
 > complete and verified. The still-open parity-gate residual (this doc's "Blocked"
 > section) has been folded into the ongoing parity-tracking doc, since it's the same
 > class of issue already tracked there: see
-> `docs/project-management/projects/archived/batch-parity/batch_parity.md` ("Update (2026-07-22):
+> `project-management/projects/archived/batch-parity/batch_parity.md` ("Update (2026-07-22):
 > tv-default steady-state rollout re-triggers this, plus new residuals") for current
 > status and next steps. This file is kept as a historical snapshot of how the `tv`
 > default was chosen and built; do not treat it as the live tracking doc going forward.
@@ -93,7 +93,7 @@ threshold 0.95. GM and WM regions both pass fine for patlak; tofts passes in bra
 
 **This looks like the same already-documented, already-"tabled" single-voxel
 non-identifiability issue**, not a new regression from `tv`:
-`docs/project-management/projects/stage-d-fit-consolidation/STAGE_D_FIT_CONSOLIDATION_PLAN.md`
+`project-management/projects/stage-d-fit-consolidation/STAGE_D_FIT_CONSOLIDATION_PLAN.md`
 ("Known residual, tabled") and the `parity-whole-brain-roi-noise` memory note both
 describe `patlak_ktrans_brain_auto_vs_cpu` on this exact fixture collapsing to
 near-zero correlation, root-caused to a single voxel where `vp` saturates its upper

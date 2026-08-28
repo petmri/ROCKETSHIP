@@ -8,7 +8,7 @@
 > Stage-B AIF fix made it unnecessary. Sub-docs `aif_fitting_parity.md`, `quality_of_fit.md`
 > and `sigma_estimators.md` are archived alongside this one.
 >
-> **What stayed live** (moved to `docs/project-management/TODO.md`, do not track them here):
+> **What stayed live** (moved to `project-management/TODO.md`, do not track them here):
 > testing gaps **A** (Stage-B AIF contract gate) and **B** (backend-equivalence gate), and
 > **QoF-aware ROI stats**. Gaps **C** (dense-ROI companion) and **D** (dedicated CI parity job)
 > were dropped as won't-do, as were the QoF/σ refinements listed in the sub-docs.
@@ -223,7 +223,7 @@ compare only final maps (not Stage-B `Cp_use` as a first-class contract); no req
 `cpu`-vs-`cpufit_cpu` backend-equivalence test on a real-data checkpoint; sparse-ROI sampling
 with no dense-ROI cross-check to separate true drift from mask instability.
 
-**A and B moved to `docs/project-management/TODO.md` and are tracked there. C and D are won't-do.**
+**A and B moved to `project-management/TODO.md` and are tracked there. C and D are won't-do.**
 
 - **A. Stage-B AIF contract gate** — lock `Cp_use`/`step`/`baseline`/`max_index` against a
   reference payload; gate on MAE/corr, not existence. **The highest-value gap, and S11 proved

@@ -7,7 +7,7 @@ assembly/multi-start machinery in dce_fit_backends.py (fixed default + random lo
 draws, assembled once and shared by every backend). The CUDA kernels mirror the verified
 cpufit math (same reparam + analytic Jacobian) and additionally port the CPU solver's
 constrained backtracking line search, confirmed on CUDA hardware. Details:
-``docs/project-management/projects/osipi-verification/STATUS.md``.
+``project-management/projects/osipi-verification/STATUS.md``.
 """
 
 from __future__ import annotations

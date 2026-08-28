@@ -15,7 +15,7 @@
 > outstanding work.
 >
 > The remaining open question — whether `shrink_sigma` should become the pipeline default — is
-> recorded in `docs/project-management/TODO.md` alongside the QoF-aware ROI stats item, since
+> recorded in `project-management/TODO.md` alongside the QoF-aware ROI stats item, since
 > answering it needs the same broader `RUNNER_DATA` evidence.
 
 _Batch-parity / quality-of-fit sub-plan. Split out of [`quality_of_fit.md`](quality_of_fit.md)

@@ -321,7 +321,7 @@ def _metrics(
     # high-leverage voxel (e.g. a non-identifiable fit pinned at a parameter bound) can
     # collapse it even though every other voxel agrees closely -- observed on real fixtures
     # (patlak brain corr ~-0.007 from one degenerate-seed voxel out of 237; see
-    # docs/project-management/projects/archived/batch-parity/batch_parity.md, "Tabled" section, and
+    # project-management/projects/archived/batch-parity/batch_parity.md, "Tabled" section, and
     # the same fix already applied to tests/contracts/check_matlabref_map_drift.py). A
     # genuine algorithm change still collapses Spearman to ~0/negative.
     corr = float(spearmanr(x, y).correlation) if np.std(x) > 0 and np.std(y) > 0 else float("nan")
@@ -504,7 +504,7 @@ ROI_XLS_MAX_ABS_ERR = 0.01
 # the bolus rise occupies a single sample, and Fp is determined almost entirely by that leading
 # edge. It is also the parameter most exposed to how the AIF's peak is fitted, which is exactly
 # the thing the data cannot pin down (the peak has leverage 1 in the biexponential model -- see
-# docs/project-management/projects/archived/batch-parity/aif_fitting_parity.md). Gating on Fp
+# project-management/projects/archived/batch-parity/aif_fitting_parity.md). Gating on Fp
 # measures the fixture's temporal resolution, not the port's correctness.
 #
 # Re-measured 2026-07-29 and still precisely scoped: Fp (0.073345) and its two CI columns

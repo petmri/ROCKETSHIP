@@ -18,10 +18,13 @@ theme:
 
 
 # Project-management notes and archived project records are working documents for the
-# development team, not user documentation. They stay in the repository and are excluded
-# from the published site.
-exclude_docs: |
-  project-management/
+# development team, not user documentation. They live at the repository root, in
+# project-management/, deliberately OUTSIDE docs/ — anything under docs/ is published.
+#
+# This used to be docs/project-management/ kept out by exclude_docs. That works under
+# MkDocs but Zensical has no exclude_docs, no not_in_nav and no draft support, and would
+# silently publish all 18 pages and index them for site search. Placement, not
+# configuration, is what keeps them unpublished. Do not move them back under docs/.
 
 # Site-specific: ROCKETSHIP's reference pages carry display maths.
 extra_javascript:

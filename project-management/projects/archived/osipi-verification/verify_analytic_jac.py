@@ -14,7 +14,7 @@ import sys, math
 from pathlib import Path
 import numpy as np
 
-# Repo root = five parents up from docs/project-management/projects/osipi-verification/.
+# Repo root = five parents up from project-management/projects/osipi-verification/.
 REPO = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(REPO / "tests" / "python"))
 from osipi_fast_backend_helpers import FAST_BACKEND_CASES, DCE_DATA_DIR, _rows, _series

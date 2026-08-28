@@ -7,7 +7,7 @@
 > pipeline hook that writes `*_qof_{sigma,chi2nu,reliable}` maps on a normal run are all landed
 > and covered by 27 unit tests. Validated on real `RUNNER_DATA` against controls.
 >
-> **One item stayed live and moved to `docs/project-management/TODO.md`: QoF-aware ROI stats** —
+> **One item stayed live and moved to `project-management/TODO.md`: QoF-aware ROI stats** —
 > excluding unreliable voxels from ROI parameter rollups. That was the original motivation for
 > the whole workstream and is the one piece never built.
 >

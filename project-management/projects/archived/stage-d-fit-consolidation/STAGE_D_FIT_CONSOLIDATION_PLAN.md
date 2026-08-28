@@ -151,7 +151,7 @@ effective diversity. Confirmed unrelated to iteration/tolerance budget (2000 ite
 1e-10 tolerance changed nothing). GM/WM regions (which exclude this voxel) are already
 perfect (corr=1.0). Full root-cause writeup, open questions, and the planned mitigation
 (a GM/WM-style gating exception for patlak+brain, not a fitter change) are tracked in
-`docs/project-management/projects/archived/batch-parity/batch_parity.md` and the
+`project-management/projects/archived/batch-parity/batch_parity.md` and the
 `parity-whole-brain-roi-noise` memory note.
 
 ## `tissue_uptake` and `2cxm`: what was built

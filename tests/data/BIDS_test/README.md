@@ -76,7 +76,7 @@ Ground truth in `ses-01/gt/` (BIDS `desc-gt*` naming):
 
 The DCE forward model used to synthesize the phantom curves is more complex than the standard
 fitted models (Tofts/ex-Tofts/Patlak), so some systematic recovery bias is expected by design;
-see [`docs/project-management/projects/phantom-gt/PHANTOM_GT_QUALIFICATION_STATUS.md`](../../../docs/project-management/projects/phantom-gt/PHANTOM_GT_QUALIFICATION_STATUS.md).
+see [`project-management/projects/phantom-gt/PHANTOM_GT_QUALIFICATION_STATUS.md`](../../../project-management/projects/phantom-gt/PHANTOM_GT_QUALIFICATION_STATUS.md).
 
 ### Fit-parity fixtures (`sub-10bbbdownsample`, `sub-11tiny`)
 
@@ -105,4 +105,4 @@ are committed assets (regenerate the MATLAB maps with `tests/matlab/generate_t1_
 - `tests/python/test_dce_pipeline_settings_matrix.py` — fast DCE settings/feature sweeps on the `sub-11tiny` tiny DCE.
 - `tests/python/run_dce_benchmark.py` — backend runtime benchmark. It no longer reads this tree:
   it expects the `sourcedata/raw` + `derivatives/<dceprep-*>` layout and `desc-` input names,
-  which this fixture predates. Migration is tracked in `docs/project-management/TODO.md`.
+  which this fixture predates. Migration is tracked in `project-management/TODO.md`.

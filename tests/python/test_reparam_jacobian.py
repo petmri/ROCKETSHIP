@@ -8,8 +8,8 @@ kernel formulas (or this mirror) drift, the columns stop matching.
 
 The compiled kernels themselves are exercised end-to-end by the OSIPI cpufit/gpufit sweeps
 (``test_osipi_pycpufit.py`` / ``test_osipi_pygpufit.py``). Full derivation:
-``docs/project-management/projects/osipi-verification/STATUS.md`` and
-``docs/project-management/projects/osipi-verification/verify_analytic_jac.py``.
+``project-management/projects/osipi-verification/STATUS.md`` and
+``project-management/projects/osipi-verification/verify_analytic_jac.py``.
 """
 from __future__ import annotations
 

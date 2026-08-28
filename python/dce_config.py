@@ -3,7 +3,7 @@
 Every default the DCE code uses lives in `python/dce_defaults.json`. Nothing in `python/`
 carries a fallback value: a key absent from both the run config and the defaults file is an
 error, not a guess. See
-`docs/project-management/projects/defaults-single-source/PLAN.md`.
+`project-management/projects/defaults-single-source/PLAN.md`.
 
 Resolution order, highest first:
 

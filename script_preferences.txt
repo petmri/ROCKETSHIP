@@ -99,7 +99,7 @@ force_use_default_relaxivity = 0
 % relaxivity a hard stop instead, resolved image sidecar -> run config -> error, and
 % python/dce_defaults.json lists it under "required" with no value. Removing this fallback
 % from MATLAB too would change results for existing MATLAB users mid-study, so it stays.
-% See docs/project-management/projects/defaults-single-source/PLAN.md (decision D9).
+% See project-management/projects/defaults-single-source/PLAN.md (decision D9).
 
 % boolean value, perform drift correction globally,
 % not on a slice by slice basis

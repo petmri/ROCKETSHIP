@@ -77,7 +77,7 @@ installed.
 
 **Reported metrics.** Every check logs `corr` (Spearman rank correlation, not Pearson — robust to the
 single high-leverage/non-identifiable voxel that can otherwise dominate a sum-of-products statistic;
-see `docs/project-management/projects/archived/batch-parity/batch_parity.md`) and `rmse`; each Python-vs-MATLAB
+see `project-management/projects/archived/batch-parity/batch_parity.md`) and `rmse`; each Python-vs-MATLAB
 parameter check also logs CI-aware diagnostics — **`ci_norm_absdiff_p95`** (p95 of `|py−matlab| /
 CI-width`, both sides are 95% CI) and **proportion outside the CI**. These CI-aware fields are
 reported-only, never gated. They were non-functional until 2026-07-23 (the MATLAB reference had been
@@ -222,7 +222,7 @@ ignored, so an old file will not error.
 `--run-multi-model-backend-parity` / `--mm-parity`, `--parity-required-models`, `--parity-cpu-optional-models`,
 and `--parity-require-all-models` / `--all-models` are superseded by `--parity-suite` (the gated/reported
 split is now fixed in code). They still work as aliases; removing them is tracked in
-`docs/project-management/TODO.md`.
+`project-management/TODO.md`.
 
 ## Other Python test groups
 
@@ -269,7 +269,7 @@ python tests/python/run_phantom_gt_reliability.py --backend auto [--subject sub-
 
 The phantom tolerance profile (`tests/data/BIDS_test/phantom_gt_mae_tolerances.json`) is provisional;
 `test_phantom_gt_reliability.py` `xfail`s when `gate_ready=false`. See
-`docs/project-management/projects/phantom-gt/PHANTOM_GT_QUALIFICATION_STATUS.md`.
+`project-management/projects/phantom-gt/PHANTOM_GT_QUALIFICATION_STATUS.md`.
 
 ## Performance benchmark
 
@@ -291,7 +291,7 @@ fallback scan probes up to 64 siblings, `dceprep*` first, and prints which one i
 Inputs are matched on the `desc-` naming convention (`desc-bfcz_DCE`, `desc-AIF_T1map`,
 `space-DCEref_desc-brain_mask`, `space-DCEref_T1map`); `*_RAS.*` duplicates are ignored.
 `tests/data/BIDS_test` still uses the older `label-` names and a `rawdata/` tree, so the
-default `--dataset-root` does not currently resolve — see `docs/project-management/TODO.md`.
+default `--dataset-root` does not currently resolve — see `project-management/TODO.md`.
 
 **Reading the table.** `A(s)`/`B(s)`/`D(s)` come from each pipeline's own stage timers and
 `Other(s)` is the remainder. They are *not* like-for-like: MATLAB's timers bracket

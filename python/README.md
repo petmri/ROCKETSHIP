@@ -26,8 +26,8 @@ currently in this repository.
 
 For detailed port status and todo items, see:
 
-- `/path/to/ROCKETSHIP/docs/project-management/ROADMAP.md`
-- `/path/to/ROCKETSHIP/docs/project-management/TODO.md`
+- `/path/to/ROCKETSHIP/project-management/ROADMAP.md`
+- `/path/to/ROCKETSHIP/project-management/TODO.md`
 
 ## Environment setup
 

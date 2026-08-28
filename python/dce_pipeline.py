@@ -1463,7 +1463,7 @@ def _biexp_fit_baseline_end(stlv: np.ndarray, config: "DcePipelineConfig") -> Di
 
     Weighting is uniform; a noise-inflated peak is handled by the robust estimator
     (``aif_Robust``) rather than by discarding frames. See
-    ``docs/project-management/projects/archived/batch-parity/aif_fitting_parity.md``.
+    ``project-management/projects/archived/batch-parity/aif_fitting_parity.md``.
     """
     curves = np.asarray(stlv, dtype=np.float64)
     if curves.ndim == 1:
@@ -2774,7 +2774,7 @@ def _fit_aif_biexp(
     # sessions it made the production fit worse, not better -- adjusted R² mean 0.882 against
     # 0.944 with it off, 106 sessions below 0.90 against 30, and a worst case of -1.46 (a fit
     # worse than a horizontal line) against +0.57. It is still selectable. See S11 in
-    # docs/project-management/projects/archived/batch-parity/aif_fitting_parity.md.
+    # project-management/projects/archived/batch-parity/aif_fitting_parity.md.
     aif_robust_raw = _stage_override(config, "aif_Robust")
     if fit_pass == "timing":
         # The timing pass can opt out separately, and had to while `aif_Robust` defaulted to
@@ -2789,7 +2789,7 @@ def _fit_aif_biexp(
     # prior derived from how far it stands above the rest of the curve. That has to be data-based
     # rather than residual-based: the peak has leverage 1 here, so the robust estimator
     # (aif_Robust) cannot see it. See _aif_peak_weight, the `fit_pass` note above, and
-    # docs/project-management/projects/archived/batch-parity/aif_fitting_parity.md.
+    # project-management/projects/archived/batch-parity/aif_fitting_parity.md.
     peak_weight = 1.0
     if fit_pass == "production":
         peak_weight = _aif_peak_weight(

@@ -8,7 +8,7 @@ Ktrans=Fp pole becomes the bound E->1), and use the shared candidate-assembly/mu
 machinery in dce_fit_backends.py (fixed default + random log-uniform draws, assembled
 once and shared by every backend) to pick the flow basin. The low-flow (Fp=5) cases
 that previously missed now pass once Fp can reach that regime (lower_limit_fp). Details:
-``docs/project-management/projects/osipi-verification/STATUS.md``.
+``project-management/projects/osipi-verification/STATUS.md``.
 """
 
 from __future__ import annotations

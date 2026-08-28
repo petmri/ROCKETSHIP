@@ -2,7 +2,7 @@
 
 The rest of the parity suite compares only final parameter maps, which is how a
 structurally different Stage-B AIF fit went undetected for months (issue #2 /
-``docs/project-management/projects/archived/batch-parity/aif_fitting_parity.md``):
+``project-management/projects/archived/batch-parity/aif_fitting_parity.md``):
 Ktrans maps still correlated well enough to pass while ``Cp_use`` itself was wrong.
 This gates the Stage-B outputs directly, so that failure mode fails here first.
 
