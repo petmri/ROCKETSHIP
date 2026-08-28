@@ -1,3 +1,12 @@
+---
+# Zensical renders <title> as "{page title} - {site_name}" and derives the page
+# title from the first h1. This page's h1 is the inline banner SVG, so there is
+# no text to derive from and it falls back to the filename — "Index - ROCKETSHIP".
+# MkDocs used to fall back to site_name here, so this keeps the title it had.
+# Only <title> and the social meta are affected; the nav label stays "Home".
+title: DCE and parametric MRI analysis
+---
+
 <!-- dceasy-band — generated from theme/assets/banners/ in petmri/petmri.github.io.
      Inline rather than <img> so the wordmark uses the page's IBM Plex Sans;
      an SVG loaded as an image cannot reach the document's webfonts. -->
