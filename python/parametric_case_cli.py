@@ -288,7 +288,8 @@ def main(argv: List[str] | None = None) -> int:
             "Pass --vfa-file explicitly if your layout is nonstandard."
         )
 
-    payload = _load_defaults(defaults_json)
+    defaults_payload = _load_defaults(defaults_json)
+    payload = dict(defaults_payload.get("defaults", {}))
     payload["output_dir"] = str(output_dir)
     payload["fit_type"] = args.fit_type
     payload["vfa_files"] = [str(path) for path in vfa_files]
