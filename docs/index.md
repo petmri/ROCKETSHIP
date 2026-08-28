@@ -4,7 +4,7 @@
 <h1 class="dceasy-band-figure">
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1065 389"
        class="dceasy-band" role="img"
-       aria-label="ROCKETSHIP — DCE-MRI kinetic modelling and reconstruction">
+       aria-label="ROCKETSHIP — DCE-MRI kinetic modeling and reconstruction">
     <defs>
     <linearGradient id="dceasy-band-rocketship" x1="0" y1="0" x2="1" y2="1">
     <stop offset="0" stop-color="#FBFAF6"/>
@@ -23,7 +23,7 @@
     <path d="M90 371 C 117 369 152 325 192 295 C 232 266 272 222 310 203" stroke="#94a0a8"/>
     </g>
     <text x="345" y="192" fill="#0D1F3C" font-family="IBM Plex Sans, Helvetica, sans-serif" font-size="54" font-weight="700" letter-spacing="1.5">ROCKETSHIP</text>
-    <text x="522" y="224" fill="#16707f" text-anchor="middle" font-family="IBM Plex Sans, Helvetica, sans-serif" font-size="21" font-weight="600" letter-spacing="0.6">DCE-MRI KINETIC MODELLING</text>
+    <text x="522" y="224" fill="#16707f" text-anchor="middle" font-family="IBM Plex Sans, Helvetica, sans-serif" font-size="21" font-weight="600" letter-spacing="0.6">DCE-MRI KINETIC MODELING</text>
     <text x="522" y="252" fill="#16707f" text-anchor="middle" font-family="IBM Plex Sans, Helvetica, sans-serif" font-size="21" font-weight="600" letter-spacing="0.6">&amp; RECONSTRUCTION</text>
     <g transform="translate(878,168) rotate(38)">
     <path d="M0 -120 C 30 -88 40 -34 40 18 L 40 52 L -40 52 L -40 18 C -40 -34 -30 -88 0 -120 Z" fill="#8C9BA8"/>
@@ -112,7 +112,7 @@ ROCKETSHIP covers steps 5 and 6. The full DCEasy pipeline:
 
 ROCKETSHIP is an open source toolbox for the processing and analysis of dynamic
 contrast-enhanced (DCE) and parametric MRI data. It provides quantitative pharmacokinetic
-modelling, parametric mapping of T<sub>1</sub>, T<sub>2</sub>, T<sub>2</sub><sup>*</sup> and
+modeling, parametric mapping of T<sub>1</sub>, T<sub>2</sub>, T<sub>2</sub><sup>*</sup> and
 the apparent diffusion coefficient, and the supporting workflow required to take a study from
 acquired images to parameter maps.
 
@@ -126,13 +126,13 @@ ROCKETSHIP is part of the [**DCEasy** family of software](https://dceasy.org/) f
 contrast-enhanced MRI. DCEasy provides an integrated set of tools covering the full path from scanner output to
 quantitative results:
 
-- **DICOM to BIDS conversion**, preparing acquired studies into a standard organised layout
+- **DICOM to BIDS conversion**, preparing acquired studies into a standard organized layout
   with the acquisition metadata that quantitative analysis requires.
 - **Automatic and manual arterial input function selection**, addressing the largest single
   source of systematic error in quantitative DCE-MRI.
 - **Batch processing**, applying a validated analysis consistently across entire studies
   rather than one session at a time.
-- **Pharmacokinetic modelling and parametric mapping**, provided by ROCKETSHIP itself.
+- **Pharmacokinetic modeling and parametric mapping**, provided by ROCKETSHIP itself.
 
 The components are designed to work together, so a study prepared with the DCEasy conversion
 and input function tools can be processed by ROCKETSHIP without further preparation. Each is

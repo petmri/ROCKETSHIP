@@ -92,7 +92,7 @@ high field strengths, or in tissue with large cells and correspondingly long int
 water lifetimes.
 
 The additional parameter has a cost. \(\tau_i\) is estimated from a subtle departure from
-monoexponential behaviour, so it demands good signal to noise ratio, and it is often poorly
+monoexponential behavior, so it demands good signal to noise ratio, and it is often poorly
 determined in individual voxels even where the fit as a whole is sound. Fitting regions of
 interest rather than voxels, and inspecting confidence intervals, is advisable.
 

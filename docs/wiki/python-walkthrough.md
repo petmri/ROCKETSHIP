@@ -120,7 +120,7 @@ source .venv/bin/activate
 python run_parametric_python_gui.py
 ```
 
-The DCE interface is organised into four tabs:
+The DCE interface is organized into four tabs:
 
 - **Inputs** — select images, masks and maps, and set acquisition and fitting options.
 - **CLI Output** — the run log as it is produced.

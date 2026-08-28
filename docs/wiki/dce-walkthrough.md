@@ -25,7 +25,7 @@ without recomputing those before it.
 | A | Load images and regions of interest, convert signal to concentration |
 | B | Define analysis timing and derive the arterial input function |
 | D | Fit the pharmacokinetic models and produce parameter maps |
-| E | Analyse the fitted curves and compare models |
+| E | Analyze the fitted curves and compare models |
 
 ---
 
@@ -58,7 +58,7 @@ expected in milliseconds; values supplied in seconds are detected and converted.
 **Select Drift ROI** is optional and defines a region used to correct for scanner signal
 drift. The region must have constant signal intensity throughout the acquisition, so an
 external reference such as a vial of contrast-doped water is required. Tissue cannot be used,
-because tissue always takes up some contrast agent. All signal intensities are then normalised
+because tissue always takes up some contrast agent. All signal intensities are then normalized
 in time against this reference.
 
 **Global drift correction** calculates a single correction factor for the whole image. When
@@ -90,7 +90,7 @@ Published relaxivity values for common contrast agents are tabulated in
 
 ### Arterial input function selection
 
-| Option | Behaviour |
+| Option | Behavior |
 | --- | --- |
 | ROI defined | Region supplied by the user; \(T_1\) taken from the \(T_1\) map or the region file |
 | ROI w/ Static T1 | Region supplied by the user; \(T_1\) fixed to the value given here |
@@ -114,7 +114,7 @@ Select the `.mat` file saved by Part A.
 
 ### Input function
 
-| Option | Behaviour |
+| Option | Behavior |
 | --- | --- |
 | Raw AIF | Use the measured samples unmodified |
 | Fitted AIF | Fit the measured samples to a linear upslope and biexponential decay, and use the fitted curve. Reduces noise; may reduce accuracy |
@@ -166,7 +166,7 @@ equations, parameters and selection guidance are in the
 | [Tissue Uptake](../reference/models/tissue-uptake.md) | \(K^{trans}\), \(F_p\), \(T_p\) |
 | [2CXM](../reference/models/two-compartment-exchange.md) | \(K^{trans}\), \(v_e\), \(v_p\), \(F_p\) |
 | [FXR](../reference/models/fxr.md) | \(K^{trans}\), \(v_e\), \(\tau_i\) |
-| [Area under curve](../reference/models/auc.md) | AUC, normalised AUC |
+| [Area under curve](../reference/models/auc.md) | AUC, normalized AUC |
 | Nested Model | Variable |
 
 ### Smoothing
@@ -175,7 +175,7 @@ Smoothing may be applied in time or in the imaging plane.
 
 - **Time smoothing** is not generally recommended, since model fitting already smooths
   effectively in the time dimension. Robust local regression is useful for suppressing
-  isolated outlying timepoints arising from motion or artefact, preventing them from
+  isolated outlying timepoints arising from motion or artifact, preventing them from
   influencing the fit.
 - **XY smooth size** sets the standard deviation, in voxels, of a Gaussian kernel applied in
   the imaging plane.
@@ -225,7 +225,7 @@ supported.
 
 | Test | Applies |
 | --- | --- |
-| Akaike | Akaike information criterion, penalising additional parameters ([Glatting et al.](https://pubmed.ncbi.nlm.nih.gov/18072493/)) |
+| Akaike | Akaike information criterion, penalizing additional parameters ([Glatting et al.](https://pubmed.ncbi.nlm.nih.gov/18072493/)) |
 | F Test | F test between nested models ([Glatting et al.](https://pubmed.ncbi.nlm.nih.gov/18072493/)) |
 | FMI/FRI | Fit micro and macro indices ([Balvay et al.](https://pubmed.ncbi.nlm.nih.gov/16155897/)) |
 

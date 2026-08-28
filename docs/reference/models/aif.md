@@ -14,7 +14,7 @@ image.
 
 The `aif_mode` option selects where the curve comes from and whether it is fitted.
 
-| Mode | Behaviour |
+| Mode | Behavior |
 | --- | --- |
 | `fitted` | Take samples from the arterial mask and replace them with a fitted biexponential |
 | `raw` | Take samples from the arterial mask and use them unmodified |
@@ -82,7 +82,7 @@ it identifies the same physical timepoint however the window is set.
 Several automatic detectors are available, differing in how they identify the departure from
 baseline. The default is a total variation denoising method that locates the first
 statistically significant upward step. Alternatives include a Sobel edge heuristic, a
-piecewise constant split, a generalised likelihood ratio change detector, and a full
+piecewise constant split, a generalized likelihood ratio change detector, and a full
 biexponential fit that resolves both transition times simultaneously.
 
 The start of the injection is defined as the resolved end of the baseline; there is no

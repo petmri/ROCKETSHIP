@@ -65,8 +65,8 @@ outside them are set out in detail by
 
 | Model | Parameters | Assumes | Typical use |
 | --- | --- | --- | --- |
-| [Tofts](tofts.md) | \(K^{trans}\), \(v_e\) | Negligible intravascular contribution | Weakly vascularised tissue; the historical standard |
-| [Extended Tofts](extended-tofts.md) | \(K^{trans}\), \(v_e\), \(v_p\) | Rapid plasma equilibration | Well vascularised tumours; the most widely used model |
+| [Tofts](tofts.md) | \(K^{trans}\), \(v_e\) | Negligible intravascular contribution | Weakly vascularized tissue; the historical standard |
+| [Extended Tofts](extended-tofts.md) | \(K^{trans}\), \(v_e\), \(v_p\) | Rapid plasma equilibration | Well vascularized tumors; the most widely used model |
 | [Patlak](patlak.md) | \(K^{trans}\), \(v_p\) | Negligible backflux | Low permeability tissue, most used for blood–brain barrier integrity |
 | [Tissue Uptake](tissue-uptake.md) | \(K^{trans}\), \(F_p\), \(T_p\) | Negligible backflux, finite flow | Separating flow from permeability over a short acquisition |
 | [Two-Compartment Exchange](two-compartment-exchange.md) | \(K^{trans}\), \(v_e\), \(v_p\), \(F_p\) | Two well mixed compartments | High temporal resolution data where flow and permeability are separable |

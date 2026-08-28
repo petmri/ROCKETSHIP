@@ -25,7 +25,7 @@ baselines are generated, is in the repository:
 - [tests/contracts/README.md](https://github.com/petmri/ROCKETSHIP/blob/master/tests/contracts/README.md)
   — the cross-language contracts and MATLAB baselines
 
-Graphical interface behaviour is intentionally out of scope; the suite targets the algorithms.
+Graphical interface behavior is intentionally out of scope; the suite targets the algorithms.
 
 ## OSIPI verification
 
@@ -91,7 +91,7 @@ The table also breaks the total into `A(s)`, `B(s)`, `D(s)` and an `Other(s)` re
     meaningless; compare `Total(s)`.
 
 The measured interpreter startup floor is printed for each language, approximately ten seconds
-for MATLAB against under one second for Python, so that a small total can be recognised as
+for MATLAB against under one second for Python, so that a small total can be recognized as
 mostly startup rather than mistaken for fast fitting.
 
 The number of fitted voxels is reported for each configuration, and a mismatch is flagged.

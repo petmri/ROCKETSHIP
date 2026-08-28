@@ -17,7 +17,7 @@ signal intensity units respectively:
 \mathrm{AUC}_s = \int_{t_0}^{t_{end}} S_t(\tau)\,\mathrm{d}\tau
 \]
 
-The other two normalise these by the corresponding integrals of the arterial curves:
+The other two normalize these by the corresponding integrals of the arterial curves:
 
 \[
 \mathrm{NAUC}_c = \frac{\mathrm{AUC}_c}{\displaystyle\int_{t_0}^{t_{end}} C_p(\tau)\,\mathrm{d}\tau},
@@ -37,8 +37,8 @@ level.
 | --- | --- | --- |
 | AUC conc | \(\mathrm{AUC}_c\) | Tissue concentration curve |
 | AUC sig | \(\mathrm{AUC}_s\) | Tissue signal intensity curve |
-| NAUC conc | \(\mathrm{NAUC}_c\) | Normalised by the arterial concentration integral |
-| NAUC sig | \(\mathrm{NAUC}_s\) | Normalised by the arterial signal integral |
+| NAUC conc | \(\mathrm{NAUC}_c\) | Normalized by the arterial concentration integral |
+| NAUC sig | \(\mathrm{NAUC}_s\) | Normalized by the arterial signal integral |
 
 No parameters are fitted, so no confidence intervals or sum of squared errors are reported for
 this model.
@@ -50,9 +50,9 @@ relaxivity, the \(T_1\) map and the conversion described in
 [signal to concentration](../signal-to-concentration.md). The signal form is in arbitrary
 units and is not comparable between scans, subjects or sessions.
 
-The normalised forms are the more useful of the four for comparison across subjects. Dividing
+The normalized forms are the more useful of the four for comparison across subjects. Dividing
 by the arterial integral removes the dependence on injected dose, cardiac output and injection
-rate, which are the largest sources of between-subject variability in the unnormalised
+rate, which are the largest sources of between-subject variability in the unnormalized
 measures.
 
 !!! warning "Dependence on the integration window"

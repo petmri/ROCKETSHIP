@@ -209,7 +209,7 @@ The end of the pre-contrast baseline is resolved with the following precedence:
 Where none is set, automatic detection uses the total variation method.
 
 **`steady_state_start`, `steady_state_end`** pin the baseline window explicitly. These are
-applied to the analysed series, after any trimming by `start_t` and `end_t`.
+applied to the analyzed series, after any trimming by `start_t` and `end_t`.
 
 **AIF JSON sidecar.** A `.json` sidecar placed alongside `aif_files[0]`, following the same
 naming convention as the DCE metadata sidecar, may carry a one-based
@@ -230,7 +230,7 @@ above is set.
 | `tv` | Total variation denoising followed by detection of the first significant upward step. The default |
 | `legacy_sobel` | Sobel edge and line-fit heuristic applied to the global signal |
 | `piecewise_constant` | Brute-force two-constant split with local minimum backtracking |
-| `glr` | One-sided generalised likelihood ratio change-in-mean detector |
+| `glr` | One-sided generalized likelihood ratio change-in-mean detector |
 | `biexp_fit` | Six-parameter biexponential fit to the mean arterial signal curve, seeded by `tv` |
 
 The `biexp_fit` method differs from the shape heuristics in also reporting where the upslope

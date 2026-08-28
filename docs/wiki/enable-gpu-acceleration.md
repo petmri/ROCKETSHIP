@@ -59,7 +59,7 @@ reports unavailable, the CPU acceleration path will still be used.
 
 The `backend` option controls which fitting path is used. It accepts three values.
 
-| Value | Behaviour |
+| Value | Behavior |
 | --- | --- |
 | `auto` | Select the fastest available backend automatically. This is the default. |
 | `cpu` | Use the standard fitting path, with no acceleration library. |

@@ -58,7 +58,7 @@ used to recover the residue function from the tissue and arterial curves.
 
 ## Bolus injection time
 
-| Option | Behaviour |
+| Option | Behavior |
 | --- | --- |
 | Automatic | Bolus arrival is detected from the signal intensity curves |
 | User Selected | Bolus arrival is identified interactively |

@@ -56,7 +56,7 @@ The Patlak model is the standard choice for low permeability tissue, where \(K^{
 small enough that backflux does not become measurable within a typical acquisition. Its
 principal application is the quantification of blood–brain barrier integrity, where the
 transfer constants of interest are two to three orders of magnitude below those seen in
-tumours and where the stability of a linear estimator is decisive.
+tumors and where the stability of a linear estimator is decisive.
 
 It is also useful as a robust fallback for any tissue in which the nonlinear models converge
 unreliably, at the cost of not estimating \(v_e\).

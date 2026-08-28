@@ -7,7 +7,7 @@ interface (`run_parametric_python_gui.py`) or the batch driver
 
 The pipeline fits \(T_1\) from a variable flip angle (VFA) series: several spoiled gradient
 echo images of the same anatomy acquired at different flip angles, from which \(T_1\) and the
-equilibrium magnetisation \(\rho\) are recovered voxel by voxel.
+equilibrium magnetization \(\rho\) are recovered voxel by voxel.
 
 ## Configuration files
 
@@ -121,7 +121,7 @@ The three estimators:
 | `fit_type` | Method | When to use it |
 | --- | --- | --- |
 | `t1_fa_fit` | Non-linear least squares over all flip angles | The default. Most accurate, and the only one that uses every angle properly. |
-| `t1_fa_linear_fit` | Linearised form, solved directly | Faster, but noise on the signal biases the result because the linearisation is not noise-preserving. |
+| `t1_fa_linear_fit` | Linearized form, solved directly | Faster, but noise on the signal biases the result because the linearization is not noise-preserving. |
 | `t1_fa_two_point_fit` | Closed form from two flip angles | Only where two angles were acquired, or for a fast approximation. |
 
 ### Outputs
@@ -131,7 +131,7 @@ The three estimators:
 | `output_basename` | `T1_map` | Leading part of the map filenames. |
 | `output_label` | `""` | Trailing label distinguishing runs. Derived from the input when empty. |
 | `write_r_squared` | `true` | Write the goodness-of-fit map beside the \(T_1\) map. |
-| `write_rho_map` | `false` | Write the equilibrium magnetisation map. |
+| `write_rho_map` | `false` | Write the equilibrium magnetization map. |
 | `write_qc_figures` | `true` | Write the QC figures described below. |
 
 A run writes `<output_basename>_<fit_type>_<output_label>.nii.gz` for \(T_1\) in

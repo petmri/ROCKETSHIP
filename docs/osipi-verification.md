@@ -10,7 +10,7 @@ the rest of the automated test suite, see [Testing](testing.md).
 
 ## Why an external standard
 
-Nonlinear model fitting is sensitive to implementation detail. A unit convention, an optimiser
+Nonlinear model fitting is sensitive to implementation detail. A unit convention, an optimizer
 setting, or a subtly miscoded model equation can shift estimated parameters by enough to change
 a clinical conclusion, while the fit itself still converges and the curves still look
 reasonable.

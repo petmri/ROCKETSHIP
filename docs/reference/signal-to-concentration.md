@@ -34,7 +34,7 @@ S = M_0 \sin\alpha \,\frac{1 - E_1}{1 - \cos\alpha \; E_1},
 \qquad E_1 = e^{-\mathrm{TR}\,R_1}
 \]
 
-where \(R_1=1/T_1\) and \(M_0\) collects the equilibrium magnetisation, receive gain, proton density and all
+where \(R_1=1/T_1\) and \(M_0\) collects the equilibrium magnetization, receive gain, proton density and all
 \(T_2^{*}\) weighting. These factors are unknown, and the purpose of the derivation below is
 to eliminate them.
 
@@ -52,7 +52,7 @@ pre-contrast relaxation rate \(R_{10} = 1/T_{10}\),
 S^{*} = \frac{1 - e^{-\mathrm{TR}/T_{10}}}{1 - \cos\alpha \; e^{-\mathrm{TR}/T_{10}}}
 \]
 
-and form the normalised signal \(u(t) = S^{*} \, S(t) / \bar{S}_0\). Substituting into the
+and form the normalized signal \(u(t) = S^{*} \, S(t) / \bar{S}_0\). Substituting into the
 SPGR expression and solving for \(E_1\) gives
 
 \[

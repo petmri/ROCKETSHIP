@@ -60,9 +60,9 @@ The permeability surface area product follows from the fitted parameters as
 PS = \frac{K^{trans} F_p}{F_p - K^{trans}}
 \]
 
-Fitting is carried out in an extraction fraction parametrisation, with \(E = K^{trans}/F_p\)
+Fitting is carried out in an extraction fraction parametrization, with \(E = K^{trans}/F_p\)
 in place of \(K^{trans}\), and the supplied \(K^{trans}\) bounds are mapped into \(E\) space
-accordingly. This parametrisation is better conditioned, because it keeps the fitted variable
+accordingly. This parametrization is better conditioned, because it keeps the fitted variable
 bounded in \((0, 1)\) and decouples it from the flow estimate.
 
 !!! note "Model-specific defaults"
@@ -80,11 +80,11 @@ plasma exponential.
 ROCKETSHIP therefore evaluates the model on a dense internal grid. Following the OSIPI
 convention, the arterial input function is interpolated to a 0.1 second grid, the forward
 model is evaluated there, and the resulting curve is sampled back at the acquired timepoints
-for comparison with the data. This removes the discretisation error introduced by evaluating
+for comparison with the data. This removes the discretization error introduced by evaluating
 on a coarse grid.
 
 !!! warning "Interpolation is not information"
-    Dense evaluation removes discretisation error; it cannot recover detail the acquisition
+    Dense evaluation removes discretization error; it cannot recover detail the acquisition
     never recorded. Where the frame interval is long relative to the plasma transit time, the
     residual error from an unresolved first pass dominates every other error source in this
     model, and \(F_p\) and \(v_p\) should be treated as poorly determined. Confidence

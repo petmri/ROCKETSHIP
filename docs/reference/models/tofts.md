@@ -64,11 +64,11 @@ temporal resolution.
 ## When to use it
 
 The Tofts model is appropriate where the intravascular contribution to the measured signal is
-genuinely negligible: weakly vascularised tissue, or an acquisition whose first timepoints do
+genuinely negligible: weakly vascularized tissue, or an acquisition whose first timepoints do
 not resolve the vascular peak. It is well conditioned and converges reliably, which makes it
 a robust choice for data that cannot support a third parameter.
 
-!!! warning "Bias in well vascularised tissue"
+!!! warning "Bias in well vascularized tissue"
     Where a plasma compartment does contribute measurably, omitting it biases both fitted
     parameters. The plasma signal is absorbed into the extravascular compartment, typically
     inflating \(K^{trans}\) and depressing \(v_e\). In such tissue the

@@ -86,7 +86,7 @@ S(\alpha) = A\,\frac{\left(1 - e^{-\mathrm{TR}/T_1}\right)\sin\alpha}
 by nonlinear least squares, with \(T_1\) restricted to 0–10000 ms. This is the variable flip
 angle method, and is the usual route to the \(T_1\) map required for DCE analysis.
 
-**T1 Multi FA Linear** linearises the same relationship. Plotting \(S/\sin\alpha\) against
+**T1 Multi FA Linear** linearizes the same relationship. Plotting \(S/\sin\alpha\) against
 \(S/\tan\alpha\) gives a straight line of slope \(e^{-\mathrm{TR}/T_1}\), so that
 
 \[

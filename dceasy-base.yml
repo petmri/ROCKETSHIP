@@ -61,7 +61,7 @@ theme:
   # Family mark and favicon — the same on every DCEasy site. Each repo carries
   # a copy at docs/assets/ (see theme/README.md). The header variant is stroked
   # white rather than currentColor because theme.logo renders an <img>, which
-  # does not inherit page colour.
+  # does not inherit page color.
   # The header mark is shared: it sits beside the site name, which already says
   # which site you are on, so its job is to signal the family.
   #

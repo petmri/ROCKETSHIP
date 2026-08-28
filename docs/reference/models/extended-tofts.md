@@ -47,7 +47,7 @@ reasonable. Where the acquisition does resolve plasma transit, the
 
 ## When to use it
 
-This is the appropriate default for well vascularised tissue, and for tumour imaging in
+This is the appropriate default for well vascularized tissue, and for tumor imaging in
 particular. It requires only that the acquisition capture the arrival of the bolus with
 enough fidelity to distinguish the vascular peak from subsequent leakage, and it degrades
 gracefully towards the Tofts model as \(v_p\) approaches zero.
