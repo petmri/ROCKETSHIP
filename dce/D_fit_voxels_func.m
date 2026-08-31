@@ -326,18 +326,18 @@ for model_index=1:numel(dce_model_list)
         roi_name = [];
         roi_ext = [];
         %After sanitizing make sure we have some left
-        if number_rois~=0
+        if number_rois>0
             [~, roi_name, roi_ext] = arrayfun(@(x) fileparts(x{:}), roi_list, 'UniformOutput', false);
             
             %Load ROI, find the selected voxels
             for r=number_rois:-1:1
                 single_file=cell2mat(roi_list(r));
                 
-                if strcmp(roi_ext(r),'.nii') || strcmp(roi_ext(r),'.hdr') || strcmp(roi_ext(r),'.img')
+                if endsWith(single_file, {'.nii', '.nii.gz', '.hdr', '.img'})
                     single_roi = load_untouch_nii(single_file);
                     single_roi = double(single_roi.img);
                     roi_index{r}= find(single_roi > 0);
-                elseif strcmp(roi_ext(r),'.roi')
+                elseif endsWith(single_file, '.roi')
                     single_roi = ReadImageJROI(single_file);
                     if strcmp(single_roi.strType,'Polygon') || strcmp(single_roi.strType,'Freehand')
                         roi_image = poly2mask(...
@@ -446,7 +446,7 @@ for model_index=1:numel(dce_model_list)
     % return;
     
     % a1) smoothing in image domain
-    if xy_smooth_size~=0 && fit_voxels
+    if xy_smooth_size>0 && fit_voxels
         % original_timepoint = NaN(size(currentimg));
         original_timepoint = zeros(size(currentimg));
         % make size 3*sigma rounded to nearest odd
@@ -568,7 +568,21 @@ for model_index=1:numel(dce_model_list)
     else
         if number_rois~=0
             disp(['Starting fitting for ' num2str(number_rois) ' ROIs...']);
-            
+            % Add subject/session ID to roi_data
+            if isfield(Bdata, 'dynam_name')
+                % Extract all characters before the 2nd underscore in dynam_name
+                underscores = strfind(Bdata.dynam_name, '_');
+                if numel(underscores) >= 2
+                    roi_data{1}.ID = Bdata.dynam_name(1:underscores(2)-1);
+                else
+                    roi_data{1}.ID = Bdata.dynam_name;
+                end
+            elseif isfield(Bdata, 'rootname')
+                roi_data{1}.ID = Bdata.rootname;
+            else
+                roi_data{1}.ID = '';
+            end
+
             roi_data{1}.Cp = xdata{1}.Cp;
             roi_data{1}.timer = xdata{1}.timer;
             roi_data{1}.Ct = roi_series;
@@ -670,6 +684,44 @@ for model_index=1:numel(dce_model_list)
         disp(results{model_index})
         % disp(['File MD5 hash: ' mat_md5])
     end
+    D_vars = fit_data;
+    if number_rois > 0
+        D_vars.fit_parameters = D_vars.roi_results;
+    end
+
+    % Add all data needed for plot_dce_curve function
+    D_vars.Cp = xdata{1}.Cp;
+    D_vars.timer = xdata{1}.timer;
+    if number_rois > 0
+        D_vars.Ct = roi_series;
+        D_vars.Ct_original = roi_series_original;
+        D_vars.title = ['DCE Curve Fit - ' cur_dce_model ' ' roi_data{1}.ID];
+    else
+        % If no ROIs, use empty arrays
+        D_vars.Ct = [];
+        D_vars.Ct_original = [];
+        D_vars.title = ['DCE Curve Fit - ' cur_dce_model];
+    end
+    D_vars.show_original = true;
+    D_vars.show_ci = true;
+    D_vars.x_units = 'Time (min)';
+    D_vars.y_units = 'Concentration (mM)';
+
+    % Add model-specific parameters for fxr
+    if strcmp(cur_dce_model, 'fxr')
+        % These would need to be calculated or passed from somewhere
+        % For now, set defaults or check if they exist
+        if exist('R1o', 'var')
+            D_vars.R1o = R1o;
+        end
+        if exist('R1i', 'var')
+            D_vars.R1i = R1i;
+        end
+        D_vars.r1 = relaxivity;
+        if exist('fw', 'var')
+            D_vars.fw = fw;
+        end
+    end
     
     % d) Check if physiologically possible, if not, remove
     %************************
@@ -766,7 +818,7 @@ for model_index=1:numel(dce_model_list)
     
     
     % Write ROI results
-    if number_rois~=0
+    if number_rois>0
         xls_results = [roi_list roi_name mat2cell(roi_results,ones(1,size(roi_results,1)),ones(1,size(roi_results,2)))];
         xls_results = [headings; xls_results];
         xls_path = [results_base '_rois.xls'];

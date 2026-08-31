@@ -69,8 +69,16 @@ rootname = Adata.rootname;
 Cp       = double(Adata.Cp);
 Ct       = double(Adata.Ct);
 if (start_injection == -1 || end_injection == -1)
-    start_injection = Adata.start_injection*time_resolution;
-    end_injection = Adata.end_injection*time_resolution;
+    % Adata.start_injection (= end_ss, the LAST baseline frame) and
+    % Adata.end_injection (= mean peak frame) are 1-based frame numbers, but
+    % timer = 0:time_resolution:... is 0-based, so frame f sits at
+    % (f-1)*time_resolution. Scaling the frame number straight through lands a
+    % full frame late: it puts the end of the baseline on the *first contrast*
+    % frame, and AIFbiexpfithelp bounds t_base_end below by timer(start_index),
+    % which then forces the fitted AIF to zero on a frame that already carries
+    % contrast. Mirrored in python/dce_pipeline.py.
+    start_injection = (Adata.start_injection - 1)*time_resolution;
+    end_injection = (Adata.end_injection - 1)*time_resolution;
 end
 
 % We also load the Rawdata for raw curve fitting if necessary
@@ -231,28 +239,46 @@ xdata{1}.step = [start_injection end_injection];
 
 M{1} = '';
 aif_name = '';
+% Empty unless the fitted branch runs; the parity contract keys off these.
+aif_fit_params_cp = [];
+aif_fit_params_stlv = [];
+aif_fit_rsquare_cp = NaN;
+aif_fit_rsquare_stlv = NaN;
 if isempty(import_aif_path)
     if(fit_aif==1)
         xdata{1}.fittingAU = false;
-        [Cp_fitted xAIF xdataAIF] = AIFbiexpfithelp(xdata, 1);
+        [Cp_fitted, xAIF, xdataAIF, rsquareAIF] = AIFbiexpfithelp(xdata, 1);
         Cp_use = Cp_fitted;
- 
+        aif_fit_params_cp = xAIF;   % [A B c d t_base_end t0_exp]
+        aif_fit_rsquare_cp = rsquareAIF;
+
         M{2} = 'Fitted Curve';
         aif_name = 'fitted';
-        
+
         %Fit raw data curve
         Cptemp = xdata{1}.Cp;
         xdata{1}.Cp = xdata{1}.Stlv;
         xdata{1}.fittingAU = true;
-        [Stlv_fitted, ~, ~] = AIFbiexpfithelp(xdata, 1);
+        [Stlv_fitted, xStlv, ~, rsquareStlv] = AIFbiexpfithelp(xdata, 1);
         xdata{1}.Cp = Cptemp;
         Stlv_use = Stlv_fitted;
-    elseif(fit_aif==2)
+        aif_fit_params_stlv = xStlv;
+        aif_fit_rsquare_stlv = rsquareStlv;
+    elseif(fit_aif==2) || (fit_aif==0)
         Cp_use = CpROI;
         M{2} = 'Using Raw Curve';
         aif_name = 'raw';
-        
+
         Stlv_use = StlvROI;
+    elseif(fit_aif==5)
+        % Smooth the AIF using rlowess and display both pre- and post-smoothing curves
+        Cp_smooth = smooth(CpROI, 7, 'rlowess'); % window size 7, can be parameterized
+        Cp_use = Cp_smooth;
+        M{2} = 'Smoothed Curve (rlowess)';
+        aif_name = 'smooth';
+
+        Stlv_smooth = smooth(StlvROI, 7, 'rlowess');
+        Stlv_use = Stlv_smooth;
     end
 else
     external = load(import_aif_path);
@@ -325,35 +351,45 @@ else
 end
 
 % 5.5 Plot the results
+
 b = figure;
 subplot(1,2,1)
-plot(timer,CpROI,'r.');
+plot(timer, CpROI, 'r.', 'DisplayName', 'Measured plasma curve');
 hold on;
-plot(timer, Cp_use,'b');
+plot(timer, Cp_use, 'b', 'DisplayName', M{2});  % 'Fitted Curve' / 'Using Raw Curve' / ...
+% Mark the fitted transition times when they exist (fit_aif==1 populates xAIF).
+if exist('xAIF', 'var') && numel(xAIF) >= 6
+    plot_aif_transition_lines(xAIF(5), xAIF(6));
+end
+if (fit_aif==5)
+    legend({'Original Plasma Curve', 'Smoothed Curve (rlowess)'});
+else
+    legend('show', 'Location', 'best');
+end
 disp('AIF mmol:')
 perLine = 14;
 fmt = [repmat('%8.4f ', 1, perLine), '\n'];
 fprintf(fmt, CpROI);
-if mod( length(CpROI), perLine) ~= 0; fprintf('\n'); end
-
-M{1} = 'Original Plasma Curve';
-% M{2} = 'Selected Curve';
-
-legend(M);
+if mod(length(CpROI), perLine) ~= 0; fprintf('\n'); end
 root_modified = rootname;
-root_modified(end)='';
+root_modified(end) = '';
 hold off;
 title([root_modified ' - AIF Bi-Exponential, Linear Upslope'], 'Interpreter', 'none');
 ylabel('Concentration (mM)');
 xlabel('Time (min)');
 
 subplot(1,2,2)
-plot(timer,StlvROI,'r.');
+plot(timer, StlvROI, 'r.', 'DisplayName', 'Measured signal curve');
 hold on;
-plot(timer, Stlv_use,'b');
-
-M{1} = 'Original Plasma Curve: Raw data';
-legend(M);
+plot(timer, Stlv_use, 'b', 'DisplayName', M{2});
+if exist('xAIF', 'var') && numel(xAIF) >= 6
+    plot_aif_transition_lines(xAIF(5), xAIF(6));
+end
+if (fit_aif==5)
+    legend({'Original Plasma Curve: Raw data', 'Smoothed Curve (rlowess)'});
+else
+    legend('show', 'Location', 'best');
+end
 hold off;
 title([root_modified ' - AIF Bi-Exponential, Linear Upslope'], 'Interpreter', 'none');
 ylabel('Signal (a.u)');
@@ -384,6 +420,13 @@ Bdata.threshold     = threshold;
 Bdata.time_resolution=time_resolution;
 Bdata.timer         = timer;
 Bdata.xdata         = xdata;
+% AIF fit coefficients [A B c d t_base_end t0_exp] + adjusted R^2, empty/NaN outside the
+% fitted branch. Kept because t_base_end/t0_exp are the Stage-B parity contract's timing
+% terms and were otherwise only ever printed to the log.
+Bdata.aif_fit_params_cp    = aif_fit_params_cp;
+Bdata.aif_fit_params_stlv  = aif_fit_params_stlv;
+Bdata.aif_fit_rsquare_cp   = aif_fit_rsquare_cp;
+Bdata.aif_fit_rsquare_stlv = aif_fit_rsquare_stlv;
 
 % Results from A that need to be passed through
 Bdata.rootname    = Adata.rootname;
@@ -421,9 +464,8 @@ if save_output==true
     disp('MAT results saved to: ')
     disp(results)
 % disp(['File MD5 hash: ' mat_md5])
-else
-    B_vars = Bdata;
 end
+B_vars = Bdata;
 
 disp(' ');
 disp('Finished B');

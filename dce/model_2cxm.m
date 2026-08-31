@@ -20,34 +20,55 @@ options = fitoptions('Method', 'NonlinearLeastSquares',...
 ft = fittype('model_2cxm_cfit( Ktrans, ve, vp, fp, Cp, T1)',...
     'independent', {'T1', 'Cp'},...
     'coefficients',{'Ktrans', 've', 'vp', 'fp'});
-[f, gof, output] = fit([timer, Cp'],Ct,ft, options);
-confidence_interval = confint(f,0.95);
-if output.exitflag<=0
-    % Change start point to try for better fit
-    new_options = fitoptions(options,...
-        'StartPoint', [prefs.initial_value_ktrans*10 prefs.initial_value_ve prefs.initial_value_vp prefs.initial_value_fp]);
-    [new_f, new_gof, new_output] = fit([timer, Cp'],Ct,ft, new_options);
-    
-    if new_gof.sse < gof.sse
-        f = new_f;
-        gof = new_gof;
-        output = new_output;
-        confidence_interval = confint(f,0.95);
-    end
-    
-    if output.exitflag<=0
-        % Change start point to try for better fit
-        new_options = fitoptions(options,...
-            'StartPoint', [prefs.initial_value_ktrans*100 prefs.initial_value_ve prefs.initial_value_vp prefs.initial_value_fp]);
-        [new_f, new_gof, new_output] = fit([timer, Cp'],Ct,ft, new_options);
 
-        if new_gof.sse < gof.sse
-            f = new_f;
-            gof = new_gof;
-            output = new_output;
-            confidence_interval = confint(f,0.95);
-        end
+lower = [prefs.lower_limit_ktrans prefs.lower_limit_ve prefs.lower_limit_vp prefs.lower_limit_fp];
+upper = [prefs.upper_limit_ktrans prefs.upper_limit_ve prefs.upper_limit_vp prefs.upper_limit_fp];
+base_start = [prefs.initial_value_ktrans prefs.initial_value_ve prefs.initial_value_vp prefs.initial_value_fp];
+
+start_candidates = [
+    base_start;
+    [prefs.initial_value_ktrans*10 prefs.initial_value_ve prefs.initial_value_vp prefs.initial_value_fp];
+    [prefs.initial_value_ktrans*100 prefs.initial_value_ve prefs.initial_value_vp prefs.initial_value_fp];
+    [prefs.initial_value_ktrans*2 max(prefs.initial_value_ve*0.8, prefs.lower_limit_ve) max(prefs.initial_value_vp*0.8, prefs.lower_limit_vp) max(prefs.initial_value_fp*1.5, prefs.initial_value_ktrans*1.5)];
+];
+
+best_sse = inf;
+best_f = [];
+best_gof = [];
+best_output = [];
+
+for i = 1:size(start_candidates,1)
+    sp = start_candidates(i,:);
+    sp = max(sp, lower);
+    sp = min(sp, upper);
+    if (sp(4) - sp(1)) < 1e-4
+        sp(4) = min(upper(4), max(lower(4), sp(1) + 1e-4));
     end
+    try
+        cur_options = fitoptions(options, 'StartPoint', sp);
+        [cand_f, cand_gof, cand_output] = fit([timer, Cp'],Ct,ft, cur_options);
+        if cand_gof.sse < best_sse
+            best_sse = cand_gof.sse;
+            best_f = cand_f;
+            best_gof = cand_gof;
+            best_output = cand_output;
+        end
+    catch
+        % Ignore failed starts and continue.
+    end
+end
+
+if isempty(best_f)
+    [best_f, best_gof, best_output] = fit([timer, Cp'],Ct,ft, options);
+end
+
+f = best_f;
+gof = best_gof;
+output = best_output;
+try
+    confidence_interval = confint(f,0.95);
+catch
+    confidence_interval = repmat([f.Ktrans f.ve f.vp f.fp], [2 1]);
 end
 
 

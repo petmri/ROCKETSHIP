@@ -22,8 +22,8 @@
     % input nifti datasets, can specify subfolders and use wildcard *
     dynamic_files = /dce/*_desc-bfcz_DCE.nii*
 
-    aif_files = /dce/*desc-AIF_T1map.nii*
-    roi_files = /anat/*space-DCEref_desc-brain_mask.nii*
+    aif_files = /dce/*label-AIF_T1map.nii*
+    roi_files = /anat/*space-DCEref_label-brain_mask.nii*
     t1map_files = /anat/*space-DCEref_T1map.nii*
     noise_files =
     drift_files =
@@ -91,6 +91,15 @@ injection_time = -2
 relaxivity = 2.8
 % set below to 1 if you wish to use the value above with the CLI command.
 force_use_default_relaxivity = 0
+%
+% Deliberate MATLAB/Python divergence: the value above is a study-wide fallback that the
+% MATLAB path keeps, and the Python port does not have one. There is no correct default
+% for relaxivity -- it depends on the contrast agent -- so a wrong guess here silently
+% rescales every concentration and therefore every Ktrans. The Python port makes a missing
+% relaxivity a hard stop instead, resolved image sidecar -> run config -> error, and
+% python/dce_defaults.json lists it under "required" with no value. Removing this fallback
+% from MATLAB too would change results for existing MATLAB users mid-study, so it stays.
+% See project-management/projects/defaults-single-source/PLAN.md (decision D9).
 
 % boolean value, perform drift correction globally,
 % not on a slice by slice basis

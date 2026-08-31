@@ -1,0 +1,78 @@
+name: docs
+
+# Builds the ROCKETSHIP site with Zensical and publishes it to GitHub Pages.
+#
+# Zensical replaces Material for MkDocs, which reaches end of life on
+# 5 November 2026. It reads the same mkdocs.yml and inherits the shared DCEasy
+# theme from dceasy-base.yml, so the config here is unchanged by the switch.
+#
+# No CNAME file: this is a project site, and it inherits the custom domain from
+# the organization site (petmri/petmri.github.io), which is where dceasy.org is
+# configured. Adding one here would give the two copies a chance to disagree.
+#
+# Action majors are kept current because GitHub retires the Node runtime they
+# run on, not because this workflow needs new features. Every action below is on
+# node24; upload-pages-artifact pins upload-artifact internally.
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      # Docs currently live on dev, so dev publishes the site. Remove this once
+      # dev merges, otherwise main and dev race for the Pages deployment and the
+      # last push wins.
+      - dev
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Deployments must not cancel each other. A push and a pull_request run can fire
+# for the same commit; with cancel-in-progress the later one kills the former, and
+# since deploy only runs on push, the site silently never updates. Matches DCEPrep
+# and GitHub's own Pages starter workflow.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install docs dependencies
+        run: pip install -r requirements-docs.txt
+
+      - name: Build docs
+        run: zensical build --strict
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v6
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

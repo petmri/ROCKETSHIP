@@ -1,0 +1,267 @@
+/* ==========================================================================
+   DCEasy shared theme — "Journal" direction
+   Source of truth: petmri/petmri.github.io › theme/dceasy.css
+   Copy to each site as docs/stylesheets/dceasy.css
+
+   Navy #0D1F3C · sky #63C0F5 · Source Serif 4 body · IBM Plex Sans chrome
+   ========================================================================== */
+
+/* Material loads theme.font.text and theme.font.code, but only those two.
+   IBM Plex Sans is the third face, so we fetch it ourselves.
+   @import must stay at the very top of the file. */
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap");
+
+
+/* --------------------------------------------------------------------------
+   1. Brand palette — light
+   Token names match Material's built-in palettes exactly; setting
+   `primary: custom` / `accent: custom` in mkdocs.yml is what activates them.
+   -------------------------------------------------------------------------- */
+
+[data-md-color-primary="custom"] {
+  --md-primary-fg-color:        #0D1F3C;  /* header bar, sidebar active state */
+  --md-primary-fg-color--light: #2A4166;
+  --md-primary-fg-color--dark:  #07142A;
+  --md-primary-bg-color:        #FFFFFF;  /* text sitting ON the navy bar */
+  --md-primary-bg-color--light: #FFFFFFB3;
+
+  /* Material derives link color from primary, which would make every link
+     navy and nearly indistinguishable from body text. Point it at the accent. */
+  --md-typeset-a-color: #1D6FA5;
+}
+
+[data-md-color-accent="custom"] {
+  --md-accent-fg-color:              #1D6FA5;  /* 5.4:1 on white — AA at any size */
+  --md-accent-fg-color--transparent: #1D6FA51A;
+  --md-accent-bg-color:              #FFFFFF;  /* text ON accent fills */
+  --md-accent-bg-color--light:       #FFFFFFB3;
+}
+
+
+/* --------------------------------------------------------------------------
+   2. Brand palette — slate
+   #63C0F5 is too light to carry white bar text, so it never becomes primary.
+   In dark mode it takes over as the link and accent color, where it reads
+   at 7.7:1 against the slate ground.
+   -------------------------------------------------------------------------- */
+
+[data-md-color-scheme="slate"] {
+  --md-hue: 215;                          /* tilts the slate grays toward navy */
+}
+
+[data-md-color-scheme="slate"][data-md-color-primary="custom"] {
+  --md-primary-fg-color:        #0B1826;
+  --md-primary-fg-color--light: #24405E;
+  --md-primary-fg-color--dark:  #060F1A;
+  --md-typeset-a-color:         #63C0F5;
+}
+
+[data-md-color-scheme="slate"][data-md-color-accent="custom"] {
+  --md-accent-fg-color:              #63C0F5;
+  --md-accent-fg-color--transparent: #63C0F51A;
+  --md-accent-bg-color:              #0B1826;  /* dark text on a light accent */
+  --md-accent-bg-color--light:       #0B1826B3;
+}
+
+
+/* --------------------------------------------------------------------------
+   3. The third face
+   Body text is Source Serif (via theme.font.text). Everything structural —
+   chrome, headings, table headers, buttons — is IBM Plex Sans.
+   -------------------------------------------------------------------------- */
+
+:root {
+  --dceasy-ui-font: "IBM Plex Sans", -apple-system, BlinkMacSystemFont,
+                    "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+.md-header,
+.md-tabs,
+.md-nav,
+.md-search,
+.md-footer,
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-typeset h4,
+.md-typeset h5,
+.md-typeset h6,
+.md-typeset table th,
+.md-typeset .md-button,
+.md-typeset .admonition-title,
+.md-typeset summary {
+  font-family: var(--dceasy-ui-font);
+}
+
+
+/* --------------------------------------------------------------------------
+   4. Heading correction
+   Material ships headings at font-weight 300, with h1 additionally set to
+   --md-default-fg-color--light (#0000008a — 54% opacity black). That is what
+   makes stock Material pages read as washed out. Full ink, semibold, tighter
+   tracking. Same specificity as Material's rule, so load order decides —
+   extra_css is injected after main.css, so this wins.
+   -------------------------------------------------------------------------- */
+
+.md-typeset h1 {
+  color: var(--md-default-fg-color);
+  font-weight: 600;
+  letter-spacing: -.022em;
+}
+
+.md-typeset h2 {
+  font-weight: 600;
+  letter-spacing: -.015em;
+}
+
+.md-typeset h3 {
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+
+
+/* --------------------------------------------------------------------------
+   5. Serif body tuning
+   Source Serif sets optically smaller than a sans at the same size, so the
+   base bumps from Material's .8rem. Longer leading suits the serif and the
+   equation-heavy reference pages.
+   -------------------------------------------------------------------------- */
+
+.md-typeset {
+  font-size: .82rem;
+  line-height: 1.7;
+  font-optical-sizing: auto;
+}
+
+/* Measure control on prose only — direct children, so grid cards, admonition
+   bodies and nested lists keep their own layout. Remove this block if you
+   would rather prose run the full content width.
+
+   NB: `ch`, not `rem`. Material sets html { font-size: 125% }, so 1rem is 20px
+   here, not 16px — a rem-based cap silently lands ~25% wider than intended.
+   `ch` is relative to the font actually in use, which is what a measure should
+   track. 66ch renders at roughly 75 characters in Source Serif at this size. */
+.md-typeset > p,
+.md-typeset > ul,
+.md-typeset > ol,
+.md-typeset > blockquote {
+  max-width: 66ch;
+}
+
+/* JetBrains Mono has a large x-height; it needs pulling back a little to sit
+   comfortably inside serif running text. */
+.md-typeset code {
+  font-size: .8em;
+}
+
+.md-typeset pre > code {
+  font-size: .78em;
+  line-height: 1.6;
+}
+
+
+/* --------------------------------------------------------------------------
+   6. Tables
+   Parameter tables are a big share of these docs. Lining figures so columns
+   of bounds and defaults actually align.
+   -------------------------------------------------------------------------- */
+
+.md-typeset table:not([class]) {
+  font-variant-numeric: tabular-nums;
+}
+
+.md-typeset table:not([class]) th {
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+
+
+/* --------------------------------------------------------------------------
+   7. Pipeline diagram
+   The family pipeline diagram is inlined as SVG in each site's index page
+   (generated by theme/make-pipeline.py). Inline rather than <img> so the
+   diagram inherits the page's text color through currentColor.
+
+   The SVG carries its own highlight color as presentation attributes, so it
+   still reads correctly on its own — in a README, or anywhere this stylesheet
+   is absent. Presentation attributes lose to any CSS rule, which is what lets
+   the slate override below take effect without !important.
+   -------------------------------------------------------------------------- */
+
+.md-typeset .dceasy-pipeline {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 1.2em 0 1.6em;
+  font-family: var(--dceasy-ui-font);
+}
+
+/* #16707f is a 2.8:1 stroke and a 2.8:1 label against the slate ground — under
+   3:1 for the border and well under 4.5:1 for the tool names. The sky accent
+   the rest of the slate palette already uses clears both. */
+[data-md-color-scheme="slate"] .dceasy-pipeline-on rect {
+  fill: #63C0F5;
+  stroke: #63C0F5;
+}
+
+[data-md-color-scheme="slate"] .dceasy-pipeline-on text:last-of-type {
+  fill: #63C0F5;
+}
+
+
+/* --------------------------------------------------------------------------
+   8. Family band
+   The hero band at the top of each site's index page. Inlined as SVG rather
+   than referenced with <img> because the wordmark is live text: an SVG loaded
+   as an image is isolated from the document and cannot use its webfonts, so
+   IBM Plex Sans would silently fall back.
+
+   The band is a fixed light plate in both palettes — a deliberate call from
+   the design review. It reads as a printed figure rather than a second dark
+   slab under an already-navy header. In slate it needs a hairline, or it
+   floats as an unbounded white rectangle.
+   -------------------------------------------------------------------------- */
+
+.md-typeset .dceasy-band {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 0 0 1.4em;
+  border-radius: .1rem;
+  font-family: var(--dceasy-ui-font);
+}
+
+[data-md-color-scheme="slate"] .dceasy-band {
+  box-shadow: 0 0 0 1px #FFFFFF1F;
+}
+
+/* The band carries the wordmark, so on index pages it *is* the h1 — that is
+   what lets the duplicate text heading go away while the page keeps a real
+   heading, named from the SVG's aria-label. Strip the heading chrome; the band
+   supplies its own spacing. */
+.md-typeset h1.dceasy-band-figure {
+  margin: 0;
+  line-height: 0;
+}
+
+
+/* --------------------------------------------------------------------------
+   9. Buttons in slate
+   Material's .md-button takes its text and border from --md-primary-fg-color.
+   That works in light, where primary is the navy header color on a white
+   page, but in slate primary is #0B1826 — near-black ink on a near-black
+   ground, measuring about 1.3:1. Point it at the accent instead, which is
+   already what the hover state uses.
+   -------------------------------------------------------------------------- */
+
+[data-md-color-scheme="slate"] .md-typeset .md-button {
+  color: var(--md-accent-fg-color);
+}
+
+/* --primary would otherwise be a #0B1826 slab on a #1E2329 page: the label
+   stays readable but the button itself vanishes. */
+[data-md-color-scheme="slate"] .md-typeset .md-button--primary {
+  background-color: var(--md-accent-fg-color);
+  border-color: var(--md-accent-fg-color);
+  color: var(--md-accent-bg-color);
+}

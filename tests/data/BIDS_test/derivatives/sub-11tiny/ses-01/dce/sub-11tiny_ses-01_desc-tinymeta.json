@@ -1,0 +1,16 @@
+{
+  "seed": 20260214,
+  "shape": [
+    10,
+    10,
+    1,
+    18
+  ],
+  "tr_ms": 8.29,
+  "fa_deg": 15.0,
+  "time_resolution_sec": 15.84,
+  "relaxivity": 3.6,
+  "hematocrit": 0.42,
+  "start_injection_min": 1.056,
+  "end_injection_min": 1.584
+}

@@ -1,0 +1,56 @@
+{
+  "_doc": [
+    "Example run config in dceprep form: file lists are globs relative to the session's",
+    "derivatives folder rather than literal paths, which is what run_dce_bids_batch.py's",
+    "--config-template expects when you want to override its auto-discovery.",
+    "",
+    "Every knob not listed under stage_overrides resolves from python/dce_defaults.json,",
+    "the single source for defaults, limits and preferences. See dce_run_example_bids.json for",
+    "the literal-path form the CLI and GUI use.",
+    "",
+    "This is the one example that sets 'relaxivity' in stage_overrides, as a study-wide",
+    "fallback: a batch sweeps many sessions, and any whose sidecar omits it would otherwise",
+    "stop the run. Sessions that do carry it in their sidecar use that instead -- the sidecar",
+    "outranks this file for per-scan values."
+  ],
+  "subject_source_path": "../tests/data/BIDS_test/rawdata/sub-02downsample/ses-01",
+  "subject_tp_path": "../tests/data/BIDS_test/derivatives/sub-02downsample/ses-01",
+  "output_dir": "../out/dceprep_run_example",
+  "checkpoint_dir": "../out/dceprep_run_example/checkpoints",
+  "backend": "cpu",
+  "write_xls": true,
+  "aif_mode": "fitted",
+  "dynamic_files": [
+    "dce/*_desc-bfcz_DCE.nii*"
+  ],
+  "aif_files": [
+    "dce/*label-AIF_T1map.nii*"
+  ],
+  "roi_files": [
+    "anat/*space-DCEref_label-brain_mask.nii*"
+  ],
+  "t1map_files": [
+    "anat/*space-DCEref_T1map.nii*"
+  ],
+  "noise_files": [],
+  "drift_files": [],
+  "model_flags": {
+    "tofts": 0,
+    "ex_tofts": 0,
+    "patlak": 1,
+    "tissue_uptake": 0,
+    "two_cxm": 0,
+    "fxr": 0,
+    "auc": 0,
+    "nested": 0,
+    "FXL_rr": 0
+  },
+  "stage_overrides": {
+    "stage_b_mode": "real",
+    "stage_d_mode": "real",
+    "rootname": "Dyn-1",
+    "start_t": 3,
+    "relaxivity": 5.7,
+    "dce_metadata_path": "../tests/data/BIDS_test/rawdata/sub-02downsample/ses-01/dce/sub-02downsample_ses-01_DCE.json"
+  }
+}

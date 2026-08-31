@@ -1,4 +1,9 @@
-# ROCKETSHIP v1.3
+# ROCKETSHIP v2.0.rc
+---
+[![OSIPI](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/ironictoo/b65ef98aadaa684f2d7d31e82137c4b4/raw/osipi.json)](https://github.com/petmri/ROCKETSHIP/actions/workflows/run_DCE.yml)
+[![CI](https://github.com/petmri/ROCKETSHIP/actions/workflows/run_DCE.yml/badge.svg?branch=dev)](https://github.com/petmri/ROCKETSHIP/actions/workflows/run_DCE.yml)
+[![Docs](https://github.com/petmri/ROCKETSHIP/actions/workflows/docs.yml/badge.svg)](https://petmri.github.io/ROCKETSHIP/)
+
 
 ROCKETSHIP is a toolbox for processing and analyzing parametric MRI and DCE-MRI data. It was developed at the Biological Imaging Center at the California Institute of Technology and Loma Linda University.
 
@@ -15,8 +20,9 @@ For documentation and how-to guides, use the project docs site:
 
 The GitHub Wiki is being migrated and will be kept for transition notices.
 
+If you are using ROCKETSHIP for DCE-MRI, please cite this paper, which also has detailed information about the DCE models used in this project:
 
-## ROCKETSHIP Papers
+Ng, T.S.C., et al. [ROCKETSHIP: a flexible and modular software tool for the planning, processing and analysis of dynamic MRI studies](https://doi.org/10.1186/s12880-015-0062-3). *BMC Medical Imaging*, 15, 19 (2015). PMID: 26076957
 
 If you are using ROCKETSHIP for DCE-MRI, please cite this paper, which also has detailed information about the DCE models used in this project:
 
@@ -42,7 +48,243 @@ Other publications using ROCKETSHIP (for a more complete list, see [Google Schol
 - Boehm-Sturm, P., et al. [Low-Molecular-Weight Iron Chelates May Be an Alternative to Gadolinium-based Contrast Agents for T1-weighted Contrast-enhanced MR Imaging](https://pubmed.ncbi.nlm.nih.gov/28880786/). *Radiology*, 286(2), 537-546 (2018). PMID: 28880786
 - Sta Maria, N.S., et al. [Low Dose Focused Ultrasound Induces Enhanced Tumor Accumulation of Natural Killer Cells](https://doi.org/10.1371/journal.pone.0142767). *PLOS ONE*, 10(11), e0142767 (2015). PMID: 26556731
 
-## ROCKETSHIP MATLAB
+## ROCKETSHIP Python 
+
+The newly developed Python module provides a command-line interface (CLI) and GUI for DCE-MRI and parametric mapping workflows, with optional GPU acceleration via `pyGpufit` and CPU fallback via `pyCpufit`. The Python scripts are designed to be modular and scriptable, allowing users to run the same core processing stages as the MATLAB version, but with more flexible configuration and automation options. The MATLAB scripts remain available for users who prefer that environment or have existing workflows built around it, but the Python module is the recommended path forward for new users and projects.
+
+### Automated setup, recommended for most users
+
+Recommended setup (default):
+
+```bash
+cd /path/to/ROCKETSHIP
+python3 install.py
+```
+
+What this script does:
+
+- creates/reuses `.venv` (use `--recreate-venv` to rebuild)
+- installs Python requirements (including GUI by default)
+- downloads latest stable release package from `ironictoo/Gpufit`
+- auto-detects host platform/arch and picks matching release asset
+- detects local CUDA version (when available) and prefers the closest matching CUDA asset for your host
+- falls back to CPU asset IDs when CUDA builds are not a good local match
+- installs both `pyCpufit` and `pyGpufit` into the venv
+- installs the MATLAB MEX files from the bundle and verifies them when MATLAB is on `PATH`
+  (if MATLAB is not found the installer warns and still finishes successfully)
+- verifies imports and reports CUDA availability
+- writes the `rocketship_dce.sh` and `rocketship_parametric.sh` launchers (`.bat` on Windows), which activate the
+  virtual environment and starts a GUI
+
+Common installer options:
+
+- `--release-tag <tag>`: pin to a specific Gpufit release
+- `--asset-id <id>`: force specific asset id
+- `--venv-path <path>`: custom venv path
+- `--no-gui`: skip GUI dependency install
+
+### Manual setup
+
+Use this path only if you do not want to use the automated installer.
+
+```bash
+cd /path/to/ROCKETSHIP
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip setuptools wheel
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m pip install -r requirements_gui.txt
+```
+
+Manual acceleration package install (from local wheel/source paths):
+
+```bash
+cd /path/to/ROCKETSHIP
+.venv/bin/python -m pip install /path/to/pyCpufit-*.whl
+.venv/bin/python -m pip install /path/to/pyGpufit-*.whl
+```
+
+### Run the Python DCE CLI
+
+Two example configs ship, one per data layout. Both run as they stand, from the ROCKETSHIP
+root:
+
+```bash
+source .venv/bin/activate
+
+# BIDS layout (tests/data/BIDS_test, subject sub-02downsample)
+python run_dce_python_cli.py --config python/dce_run_example_bids.json
+
+# Not BIDS -- a flat folder of NIfTIs (tests/data/BBB data p19)
+python run_dce_python_cli.py --config python/dce_run_example_nonbids.json
+```
+
+BIDS is not required, and the two examples show the difference. The BIDS one names two
+folders and no files: the images and masks are found by the dceprep naming convention, and
+the acquisition parameters come from the sidecar. The non-BIDS one names every file outright
+and states `tr_ms`, `fa_deg`, `time_resolution_sec` and `relaxivity` in `stage_overrides`,
+because there is no convention to read them from.
+
+Naming a file always wins over the convention, so a BIDS config can discover most of its
+inputs and override one. See `docs/dce_options.md` for the full comparison.
+
+Run with the built-in default config template:
+
+```bash
+source .venv/bin/activate
+python run_dce_python_cli.py
+```
+
+Default template location:
+
+- `/path/to/ROCKETSHIP/python/dce_run_example_bids.json`
+- This default is prewired to a conforming example session:
+  - `/path/to/ROCKETSHIP/tests/data/BIDS_test` (subject `sub-02downsample`, session `ses-01`)
+  - outputs to `/path/to/ROCKETSHIP/out/dce_run_example_bids`
+
+Optional runtime overrides:
+
+```bash
+python run_dce_python_cli.py \
+  --config tests/python/dce_cli_config.example.json \
+  --set voxel_MaxFunEvals=100 \
+  --set blood_t1_ms=1600
+```
+
+Runs print readable progress by default. Use `-v` for more detail (settings, per-scan value
+provenance, backend choice, every file written), `-vv` to add the raw event stream, or `-q`
+for errors only. Verbosity changes only what is printed -- the JSONL event log below always
+records the run in full. See `python/README.md` for the full table.
+
+Typical outputs:
+
+- Stage summary JSON: `<output_dir>/dce_pipeline_run.json`
+- Event log JSONL: `<output_dir>/dce_pipeline_events.jsonl`
+- Stage checkpoints (optional): `<checkpoint_dir>/a_out.json`, `b_out.json`, `d_out.json`
+- DCE model maps (NIfTI when possible; fallback `.npy`)
+- ROI spreadsheet output (`.xls`) for ROI-enabled runs
+- QC figures for Stage A/B real runs
+
+### Run the Python Parametric T1 CLI
+
+Run with built-in default config template:
+
+```bash
+source .venv/bin/activate
+python run_parametric_python_cli.py
+```
+
+Run a single subject/session with path-first input discovery:
+
+```bash
+source .venv/bin/activate
+python run_parametric_python_case.py \
+  --subject-source /path/to/rawdata/sub-01/ses-01 \
+  --subject-tp /path/to/derivatives/t1prep/sub-01/ses-01 \
+  --output-dir /path/to/output/sub-01/ses-01
+```
+
+Single-case discovery behavior:
+
+- prefers unified DCEref VFA stacks under `derivatives/.../anat/*space-DCEref_desc-bfczunified_VFA.nii*`
+- otherwise uses canonical per-flip DCEref VFA files under `derivatives/.../anat/*_flip-XX_space-DCEref_VFA.nii*`
+- falls back to raw VFA files under `rawdata/.../anat/*flip-*_VFA.nii*`
+- uses raw VFA sidecars for `FlipAngle` and `RepetitionTime` when available
+- auto-detects `B1_scaled_FAreg.nii[.gz]` in derivatives first, then raw anat
+- defaults to `t1_fa_fit`; override with `--fit-type` if needed
+
+Default template location:
+
+- `/path/to/ROCKETSHIP/python/parametric_run_example.json`
+
+Typical outputs:
+
+- Run summary JSON: `<output_dir>/parametric_t1_run.json`
+- Event log JSONL: `<output_dir>/parametric_t1_events.jsonl`
+- T1 map NIfTI: `<output_dir>/T1_map_<fit_type>_<label>.nii.gz`
+- R-squared map NIfTI: `<output_dir>/Rsquared_<fit_type>_<label>.nii.gz`
+
+Parametric input notes:
+
+- `fit_type` supports `t1_fa_linear_fit`, `t1_fa_fit`, and `t1_fa_two_point_fit`.
+- `b1_map_file` is optional; when provided, per-voxel effective flip angles are `flip_angles_deg * b1_scale`.
+- If `b1_map_file` is omitted, the pipeline auto-detects `B1_scaled_FAreg.nii` or `B1_scaled_FAreg.nii.gz` in the VFA directory.
+- `tr_ms` is optional only if VFA sidecars contain `RepetitionTime`; otherwise `tr_ms` must be provided explicitly.
+- `odd_echoes=true` keeps only odd-positioned samples from the VFA stack (indices `0,2,4,...`) before fitting, matching MATLAB workflow behavior.
+- `xy_smooth_sigma` (alias `xy_smooth_size`) applies optional per-frame XY Gaussian smoothing before fitting.
+
+### Discover BIDS datasets/sessions
+
+Generate a manifest of all discoverable sessions under a BIDS root:
+
+```bash
+cd /path/to/ROCKETSHIP
+source .venv/bin/activate
+python run_bids_discovery.py \
+  --bids-root tests/data/BIDS_test \
+  --output-json out/bids_manifest.json \
+  --print-json
+```
+
+This utility reads `rawdata/` and `derivatives/` and emits subject/session pairs that
+exist in both trees, so other tools can run over the same discovered set.
+
+### Python GUI (PySide6)
+
+If you used the automated installer, the quickest launch is the generated wrapper, which
+activates the virtual environment for you:
+
+```bash
+cd /path/to/ROCKETSHIP
+./rocketship_dce.sh          # DCE GUI
+./rocketship_parametric.sh   # parametric T1 GUI
+```
+
+On Windows the installer writes the matching `.bat` files, used the same way. The remaining commands
+in this section are the manual equivalents.
+
+Install GUI dependency:
+
+```bash
+cd /path/to/ROCKETSHIP
+source .venv/bin/activate
+python -m pip install -r requirements_gui.txt
+```
+
+Launch GUI:
+
+```bash
+cd /path/to/ROCKETSHIP
+source .venv/bin/activate
+python run_dce_python_gui.py
+```
+
+Launch parametric T1 GUI:
+
+```bash
+cd /path/to/ROCKETSHIP
+source .venv/bin/activate
+python run_parametric_python_gui.py
+```
+
+One-click test run:
+
+- Launch the GUI and click `Run DCE` without changing fields.
+- It uses `/path/to/ROCKETSHIP/python/dce_run_example_bids.json` (subject `sub-02downsample`) by default.
+
+Parametric T1 GUI:
+
+- Four tabs matching the DCE GUI: **Inputs**, **CLI Output**, **QC Figures**, **Results**.
+- Edits the run config (VFA files, flip angles, TR, fit method, backend, thresholds, mask,
+  B1 map, output controls). Fit method and backend are drop-downs of the values the
+  pipeline accepts, so an unsupported choice cannot be typed.
+- **Resolved Settings** shows every key with the value the run will use and where it came
+  from -- your config, `python/parametric_defaults.json`, or an edit made in the form.
+- Runs `run_parametric_python_cli.py` in a subprocess and renders its event stream through
+  the same reporter the CLIs use, so the log reads like a terminal run.
+- **QC Figures** previews the T1 histogram, R-squared histogram and T1 slice montage the run
+  writes; **Results** is a slice viewer over the fitted maps and the VFA images behind them.
+
+## ROCKETSHIP MATLAB, Legacy
 The MATLAB scripts are the original implementation of ROCKETSHIP and are still available in this repository for users who prefer that environment or have existing workflows built around it. However, the Python module is the recommended path forward for new users and projects, as it offers more flexible configuration, and automation options. New features and updates will primarily be developed in the Python module, while the MATLAB scripts will be maintained for compatibility but may not receive all new features or optimizations.
 
 ### Requirements:
@@ -62,7 +304,7 @@ The MATLAB scripts are the original implementation of ROCKETSHIP and are still a
 
 ### MATLAB Quick Start
 
-1. Clone ROCKETSHIP: `git clone --recursive https://github.com/petmri/ROCKETSHIP.git`
+1. Clone ROCKETSHIP: `git clone https://github.com/petmri/ROCKETSHIP.git`
 2. Add the ROCKETSHIP folder to the MATLAB path
 3. Calculate T1 maps with script run_parametric.m
 4. Check T1 maps with script run_analysis.m

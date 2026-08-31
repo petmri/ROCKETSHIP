@@ -1,0 +1,5 @@
+{
+  "_comment": "Default DCE parity gate thresholds. Pass a copy via --parity-thresholds <path> to override; only the keys you include are overlaid. The gate has exactly two knobs, applied uniformly to every gated model, parameter and region (tofts/patlak/ex_tofts x Ktrans/ve/vp x brain/GM/WM, cpu and auto vs MATLAB) after the bound-pinning identifiability filter. Metrics are Spearman rank correlation and RMSE normalized by the reference RMS (scale-free, so one bound is honest across parameters whose scales differ 50x). Measured worst case on sub-10bbbdownsample 2026-07-29: corr 0.9616 (tofts Ktrans/brain/cpu), nrmse 0.1423 (ex_tofts Ktrans/brain/cpu).",
+  "gate_corr_min": 0.95,
+  "gate_nrmse_max": 0.25
+}

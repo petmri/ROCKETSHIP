@@ -65,17 +65,20 @@ while flag
             [tok,rest]=strtok(rec,delimiter);
             tok = strtrim(tok);
             rest = strtrim(rest);
+            if isempty(tok)
+                continue
+            end
             % is this a comment (first character, minus whitespace, of token=='%')
             if ~strcmp(tok(1),comment)
                 % check to see if this was a keyword in the list
-                [key,ind]=which_valid_property(tok,keywords,verbose);
+                [key,~]=which_valid_property(tok,keywords,verbose);
                 if ~isempty(key)
                     % stuff the field with the remainder of the record
                     % after dropping any leading and trailing blanks.
-                    k=find(rest~=delimiter);
+                    k=find(rest~=delimiter,1,'first');
                     if isempty(k)
                         rest='';
-                    elseif k(1)>1
+                    elseif k>1
                         rest(1:(k-1))='';
                     end
                     rest = strtrim(rest);

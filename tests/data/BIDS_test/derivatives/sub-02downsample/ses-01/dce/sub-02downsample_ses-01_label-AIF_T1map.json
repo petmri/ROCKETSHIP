@@ -1,0 +1,4 @@
+{
+  "_comment": "SteadyStateEndTimeIndex counts acquired frames, before start_t/end_t trimming.",
+  "SteadyStateEndTimeIndex": 3
+}

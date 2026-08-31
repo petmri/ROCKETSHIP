@@ -15,8 +15,8 @@ end
 					% must point to valid nifti files
 json_list = dir(strcat(source_path,'/*VFA.json'));
 
-% use regex to find VFA files
-pattern = 'sub-\d+_ses-\d+_flip-\d+_VFA\.json';
+% use regex to find VFA files (BIDS entity labels are alphanumeric, not just digits)
+pattern = 'sub-[a-zA-Z0-9]+_ses-[a-zA-Z0-9]+_flip-\d+_VFA\.json';
 
 % Initialize a count for JSON files that match the pattern
 jsonFileCount = 0;

@@ -1,0 +1,4651 @@
+"""In-memory DCE A->B->D pipeline with non-GUI algorithm implementations."""
+
+from __future__ import annotations
+
+import ast
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from functools import lru_cache
+import inspect
+import json
+import math
+import re
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
+import warnings
+
+import numpy as np
+
+import dce_config
+from dce_config import DceConfigError
+import dce_file_discovery
+import run_reporting
+import version
+
+from dce_fit_backends import (
+    fit_2cxm_stage_d,
+    fit_ex_tofts_stage_d,
+    fit_patlak_stage_d,
+    fit_tissue_uptake_stage_d,
+    fit_tofts_stage_d,
+)
+from accel_backend import (
+    ALLOWED_BACKENDS,
+    load_fit_module_for_acceleration as _load_fit_module_for_acceleration,
+    probe_acceleration_backend,
+    resolve_backend_selection,
+)
+from dce_models import (
+    _loss_from_robust as _scipy_loss_from_robust,
+    cxm2_curve_batch,
+    model_extended_tofts_cfit_batch,
+    model_fxr_cfit_batch,
+    model_fxr_fit,
+    model_patlak_cfit_batch,
+    model_tissue_uptake_cfit_batch,
+    model_tofts_cfit_batch,
+)
+
+
+ALLOWED_AIF_MODES = {"fitted", "raw", "imported"}
+ALLOWED_STAGE_A_MODES = {"real", "scaffold"}
+ALLOWED_STAGE_B_MODES = {"real", "scaffold", "auto"}
+ALLOWED_STAGE_D_MODES = {"real", "scaffold", "auto"}
+ALLOWED_STEADY_STATE_AUTO_METHODS = {"none", "legacy_sobel", "piecewise_constant", "glr", "tv", "biexp_fit"}
+# Baseline-detector tunables. Bound at import from `dce_defaults.json` rather than written
+# here, so the file stays the only place a value lives. They are read at module scope
+# because the detectors take only a curve -- there is no `config` at their call sites --
+# and they are not per-run knobs. `TV_JUMP_THRESHOLD_SIGMA` is mirrored in
+# `dce/find_end_ss_tv.m`; keep the two in step.
+_DEFAULTS = dce_config.load_defaults()
+DEFAULT_STEADY_STATE_AUTO_METHOD = str(_DEFAULTS.default_for("steady_state_auto_method"))
+PIECEWISE_CONSTANT_BASELINE_FORWARD_DELTA_FRACTION = float(
+    _DEFAULTS.default_for("piecewise_constant_baseline_forward_delta_fraction")
+)
+TV_JUMP_THRESHOLD_SIGMA = float(_DEFAULTS.default_for("tv_jump_threshold_sigma"))
+
+MODEL_SELECTION_ORDER = [
+    ("tofts", "tofts"),
+    ("ex_tofts", "ex_tofts"),
+    ("fxr", "fxr"),
+    ("nested", "nested"),
+    ("patlak", "patlak"),
+    ("tissue_uptake", "tissue_uptake"),
+    ("two_cxm", "2cxm"),
+    ("auc", "auc"),
+    ("FXL_rr", "FXL_rr"),
+]
+
+MODEL_LAYOUTS: Dict[str, Dict[str, Any]] = {
+    "tofts": {
+        "headings": [
+            "ROI path",
+            "ROI",
+            "Ktrans",
+            "Ve",
+            "SSE",
+            "Ktrans 95% low",
+            "Ktrans 95% high",
+            "Ve 95% low",
+            "Ve 95% high",
+        ],
+        "param_names": ["Ktrans", "ve", "sse", "ktrans_ci_low", "ktrans_ci_high", "ve_ci_low", "ve_ci_high"],
+    },
+    "ex_tofts": {
+        "headings": [
+            "ROI path",
+            "ROI",
+            "Ktrans",
+            "Ve",
+            "Vp",
+            "SSE",
+            "Ktrans 95% low",
+            "Ktrans 95% high",
+            "Ve 95% low",
+            "Ve 95% high",
+            "Vp 95% low",
+            "Vp 95% high",
+        ],
+        "param_names": [
+            "Ktrans",
+            "ve",
+            "vp",
+            "sse",
+            "ktrans_ci_low",
+            "ktrans_ci_high",
+            "ve_ci_low",
+            "ve_ci_high",
+            "vp_ci_low",
+            "vp_ci_high",
+        ],
+    },
+    "patlak": {
+        "headings": [
+            "ROI path",
+            "ROI",
+            "Ktrans",
+            "Vp",
+            "SSE",
+            "Ktrans 95% low",
+            "Ktrans 95% high",
+            "Vp 95% low",
+            "Vp 95% high",
+        ],
+        "param_names": ["Ktrans", "vp", "sse", "ktrans_ci_low", "ktrans_ci_high", "vp_ci_low", "vp_ci_high"],
+    },
+    "tissue_uptake": {
+        "headings": [
+            "ROI path",
+            "ROI",
+            "Ktrans",
+            "Fp",
+            "Vp",
+            "SSE",
+            "Ktrans 95% low",
+            "Ktrans 95% high",
+            "Fp 95% low",
+            "Fp 95% high",
+            "Vp 95% low",
+            "Vp 95% high",
+        ],
+        "param_names": [
+            "Ktrans",
+            "fp",
+            "vp",
+            "sse",
+            "ktrans_ci_low",
+            "ktrans_ci_high",
+            "fp_ci_low",
+            "fp_ci_high",
+            "vp_ci_low",
+            "vp_ci_high",
+        ],
+    },
+    "2cxm": {
+        "headings": [
+            "ROI path",
+            "ROI",
+            "Ktrans",
+            "Ve",
+            "Vp",
+            "Fp",
+            "SSE",
+            "Ktrans 95% low",
+            "Ktrans 95% high",
+            "Ve 95% low",
+            "Ve 95% high",
+            "Vp 95% low",
+            "Vp 95% high",
+            "Fp 95% low",
+            "Fp 95% high",
+        ],
+        "param_names": [
+            "Ktrans",
+            "ve",
+            "vp",
+            "fp",
+            "sse",
+            "ktrans_ci_low",
+            "ktrans_ci_high",
+            "ve_ci_low",
+            "ve_ci_high",
+            "vp_ci_low",
+            "vp_ci_high",
+            "fp_ci_low",
+            "fp_ci_high",
+        ],
+    },
+    "fxr": {
+        "headings": [
+            "ROI path",
+            "ROI",
+            "Ktrans",
+            "Ve",
+            "Tau",
+            "SSE",
+            "Ktrans 95% low",
+            "Ktrans 95% high",
+            "Ve 95% low",
+            "Ve 95% high",
+            "Tau 95% low",
+            "Tau 95% high",
+        ],
+        "param_names": [
+            "Ktrans",
+            "ve",
+            "tau",
+            "sse",
+            "ktrans_ci_low",
+            "ktrans_ci_high",
+            "ve_ci_low",
+            "ve_ci_high",
+            "tau_ci_low",
+            "tau_ci_high",
+        ],
+    },
+    "auc": {
+        "headings": ["ROI path", "ROI", "AUC conc", "AUC sig", "NAUC conc", "NAUC sig"],
+        "param_names": ["AUCc", "AUCs", "NAUCc", "NAUCs"],
+    },
+}
+
+SUPPORTED_STAGE_D_MODELS = {"tofts", "ex_tofts", "patlak", "tissue_uptake", "2cxm", "fxr", "auc"}
+PREFERENCE_NUMERIC_CHARS = set("0123456789eE.+-*/^() ")
+
+
+def _to_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, np.integer)):
+        return int(value) != 0
+    if isinstance(value, (float, np.floating)):
+        if not math.isfinite(float(value)):
+            return default
+        return float(value) != 0.0
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"1", "true", "yes", "on"}:
+            return True
+        if text in {"0", "false", "no", "off", ""}:
+            return False
+    return default
+
+
+def _eval_numeric_expr(expr: str) -> float:
+    text = expr.strip()
+    if not text:
+        raise ValueError("Empty expression")
+    if any(ch not in PREFERENCE_NUMERIC_CHARS for ch in text):
+        raise ValueError(f"Unsafe numeric expression: {expr}")
+
+    node = ast.parse(text.replace("^", "**"), mode="eval")
+
+    def _eval(node_in: ast.AST) -> float:
+        if isinstance(node_in, ast.Expression):
+            return _eval(node_in.body)
+        if isinstance(node_in, ast.Constant):
+            if isinstance(node_in.value, (int, float)):
+                return float(node_in.value)
+            raise ValueError(f"Unsupported constant: {node_in.value!r}")
+        if isinstance(node_in, ast.UnaryOp) and isinstance(node_in.op, (ast.UAdd, ast.USub)):
+            inner = _eval(node_in.operand)
+            return inner if isinstance(node_in.op, ast.UAdd) else -inner
+        if isinstance(node_in, ast.BinOp):
+            left = _eval(node_in.left)
+            right = _eval(node_in.right)
+            if isinstance(node_in.op, ast.Add):
+                return left + right
+            if isinstance(node_in.op, ast.Sub):
+                return left - right
+            if isinstance(node_in.op, ast.Mult):
+                return left * right
+            if isinstance(node_in.op, ast.Div):
+                return left / right
+            if isinstance(node_in.op, ast.Pow):
+                return left**right
+        raise ValueError(f"Unsupported expression syntax: {expr}")
+
+    out = float(_eval(node))
+    if not math.isfinite(out):
+        raise ValueError(f"Non-finite numeric expression: {expr}")
+    return out
+
+
+def _parse_numeric_token(value: Any) -> Optional[float]:
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        out = float(value)
+        if math.isfinite(out):
+            return out
+        return None
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return _eval_numeric_expr(text)
+    except Exception:
+        return None
+
+
+def _json_sidecar_payload(config: "DcePipelineConfig") -> Dict[str, Any]:
+    """The DCE image's JSON sidecar, or {} when there isn't one.
+
+    Only `relaxivity` and `hematocrit` are read from here: they legitimately vary per
+    scan, so the sidecar outranks the run config for those two (see `dce_config`).
+    """
+    metadata_path, _ = _explicit_stage_override(config, ("dce_metadata_path",))
+    candidates: List[Path] = []
+    if metadata_path is not None:
+        candidates.append(Path(str(metadata_path)).expanduser().resolve())
+    for dynamic in config.dynamic_files:
+        sidecar = _json_sidecar_for(dynamic)
+        if sidecar is not None:
+            candidates.append(sidecar)
+    for candidate in candidates:
+        if candidate.exists():
+            return _load_json(candidate)
+    return {}
+
+
+def _resolve_path(raw: Any, base_dir: Optional[Path]) -> Path:
+    """Resolve one config path against `base_dir`, or the process cwd when there is none.
+
+    Entry points pass the directory of the config file they read, so a relative path means
+    the same thing wherever the run is launched from. `parametric_pipeline._resolve_path`
+    is the same function for the T1 side; the two interfaces are meant to agree.
+    """
+    path = Path(raw).expanduser()
+    if not path.is_absolute() and base_dir is not None:
+        path = base_dir / path
+    return path.resolve()
+
+
+def _to_path_list(values: Optional[List[str]], base_dir: Optional[Path] = None) -> List[Path]:
+    if not values:
+        return []
+    return [_resolve_path(v, base_dir) for v in values]
+
+
+def _json_sidecar_for(path: Path) -> Optional[Path]:
+    """Return the JSON sidecar path for a NIfTI file, or None if the name does not map to one."""
+    text = str(path)
+    if text.endswith(".nii.gz"):
+        return Path(text[:-7] + ".json")
+    if path.suffix.lower() == ".nii":
+        return path.with_suffix(".json")
+    return None
+
+
+def _json_default(value: Any) -> Any:
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.floating):
+        return float(value)
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.bool_):
+        return bool(value)
+    raise TypeError(f"Not JSON serializable: {type(value)}")
+
+
+def is_gpufit_available() -> bool:
+    """Return whether pygpufit is importable."""
+    probe = probe_acceleration_backend()
+    return bool(probe.get("pygpufit_imported", False))
+
+
+def _resolve_backend_selection(requested_backend: str) -> Dict[str, str]:
+    # The probe is passed as a thunk rather than called here so that it resolves
+    # through *this* module's namespace -- tests patch
+    # `dce_pipeline.probe_acceleration_backend` and expect selection to see it.
+    return resolve_backend_selection(requested_backend, lambda: probe_acceleration_backend())
+
+
+def resolve_backend(requested_backend: str) -> str:
+    """Resolve high-level backend choice (`cpu` or `gpufit`)."""
+    return _resolve_backend_selection(requested_backend)["selected_backend"]
+
+
+def _resolve_stage_d_backend(config: "DcePipelineConfig") -> Dict[str, str]:
+    requested_backend = str(config.backend).strip().lower()
+    force_cpu = _to_bool(_stage_override(config, "force_cpu"), False)
+    if requested_backend == "auto" and force_cpu:
+        return {
+            "requested_backend": "auto",
+            "selected_backend": "cpu",
+            "acceleration_backend": "none",
+            "reason": "force_cpu=1 overrides backend=auto to pure CPU fitting path",
+        }
+    return _resolve_backend_selection(requested_backend)
+
+
+def _discover_missing_file_lists(
+    data: Dict[str, Any], base_dir: Optional[Path]
+) -> Dict[str, List[str]]:
+    """Fill empty file lists from the BIDS session folders, using the dceprep convention.
+
+    Only empty lists are filled, so naming a file always wins over the convention. Without a
+    `subject_tp_path` there is nothing to search and the lists stay as they are -- which is
+    what makes this safe for non-BIDS runs, where the convention does not apply.
+
+    The same discovery already backs `run_dce_bids_batch.py` and the GUI's auto-find; doing
+    it here is what lets one BIDS config mean the same thing to all three.
+    """
+    filled: Dict[str, List[str]] = {}
+    if not data.get("subject_tp_path"):
+        return filled
+    if all(data.get(key) for key, _ in dce_file_discovery.DISCOVERABLE_FILE_LISTS):
+        return filled
+
+    derivatives = _resolve_path(data["subject_tp_path"], base_dir)
+    if not derivatives.is_dir():
+        return filled
+    rawdata = (
+        _resolve_path(data["subject_source_path"], base_dir)
+        if data.get("subject_source_path")
+        else None
+    )
+    found = dce_file_discovery.discover_dce_input_paths(
+        dce_file_discovery.session_from_paths(derivatives, rawdata)
+    )
+
+    for key, kind in dce_file_discovery.DISCOVERABLE_FILE_LISTS:
+        if data.get(key):
+            continue
+        path = found.get(kind)
+        if path is None:
+            continue
+        filled[key] = [str(path)]
+    return filled
+
+
+@dataclass
+class DcePipelineConfig:
+    """Configuration for a single end-to-end DCE CLI run.
+
+    Every input is named explicitly by `dynamic_files`, `aif_files`, `roi_files` and
+    `t1map_files`, so the pipeline never needs to know how a study is laid out on disk.
+    `subject_source_path` and `subject_tp_path` describe a BIDS session and are optional:
+    the first lets Stage A find a `dce/*DCE.json` sidecar by convention, the second is
+    recorded in the run summary. Data that is not in BIDS layout simply omits both.
+    """
+
+    output_dir: Path
+    subject_source_path: Optional[Path] = None
+    subject_tp_path: Optional[Path] = None
+    backend: str = "auto"
+    checkpoint_dir: Optional[Path] = None
+    write_xls: bool = True
+    aif_mode: str = "fitted"
+    imported_aif_path: Optional[Path] = None
+    dynamic_files: List[Path] = field(default_factory=list)
+    aif_files: List[Path] = field(default_factory=list)
+    roi_files: List[Path] = field(default_factory=list)
+    t1map_files: List[Path] = field(default_factory=list)
+    noise_files: List[Path] = field(default_factory=list)
+    drift_files: List[Path] = field(default_factory=list)
+    model_flags: Dict[str, int] = field(default_factory=dict)
+    stage_overrides: Dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any], base_dir: Optional[Path] = None) -> "DcePipelineConfig":
+        """Build a config, resolving relative paths against `base_dir`.
+
+        Callers that read a config file pass that file's own directory, so relative paths in
+        it keep their meaning wherever the run is launched from. Callers that build the
+        payload themselves already hold absolute paths and pass nothing, which leaves the
+        cwd as the anchor.
+        """
+        if "output_dir" not in data:
+            raise dce_config.DceConfigError(
+                "Run config is missing the required key 'output_dir' (where results are "
+                "written). See python/dce_run_example_bids.json for a worked example."
+            )
+        discovered = _discover_missing_file_lists(data, base_dir)
+        if discovered:
+            data = {**data, **discovered}
+            width = max(len(key) for key in discovered)
+            lines = "\n".join(
+                f"  {key.ljust(width)}  {Path(paths[0]).name}"
+                for key, paths in sorted(discovered.items())
+            )
+            run_reporting.notice(
+                f"Found by BIDS convention:\n{lines}", run_reporting.Verbosity.NORMAL
+            )
+
+        return cls(
+            output_dir=_resolve_path(data["output_dir"], base_dir),
+            subject_source_path=_resolve_path(data["subject_source_path"], base_dir)
+            if data.get("subject_source_path")
+            else None,
+            subject_tp_path=_resolve_path(data["subject_tp_path"], base_dir)
+            if data.get("subject_tp_path")
+            else None,
+            backend=str(data.get("backend", "auto")),
+            checkpoint_dir=_resolve_path(data["checkpoint_dir"], base_dir)
+            if data.get("checkpoint_dir")
+            else None,
+            write_xls=bool(data.get("write_xls", True)),
+            aif_mode=str(data.get("aif_mode", "fitted")),
+            imported_aif_path=_resolve_path(data["imported_aif_path"], base_dir)
+            if data.get("imported_aif_path")
+            else None,
+            dynamic_files=_to_path_list(data.get("dynamic_files"), base_dir),
+            aif_files=_to_path_list(data.get("aif_files"), base_dir),
+            roi_files=_to_path_list(data.get("roi_files"), base_dir),
+            t1map_files=_to_path_list(data.get("t1map_files"), base_dir),
+            noise_files=_to_path_list(data.get("noise_files"), base_dir),
+            drift_files=_to_path_list(data.get("drift_files"), base_dir),
+            model_flags=dict(data.get("model_flags", {})),
+            stage_overrides=dce_config.resolve_override_paths(
+                data.get("stage_overrides", {}), base_dir
+            ),
+        )
+
+    def validate(self) -> None:
+        backend = self.backend.strip().lower()
+        if backend not in ALLOWED_BACKENDS:
+            raise ValueError(f"Unsupported backend '{self.backend}'. Allowed: {sorted(ALLOWED_BACKENDS)}")
+
+        # Reject unrecognised preference keys up front. Before every default lived in one
+        # file there was nothing to check a key against, so a typo silently did nothing and
+        # the run completed with different numbers.
+        dce_config.validate_override_keys(self.stage_overrides)
+
+        override_import_path = None
+        for override_key, override_val in self.stage_overrides.items():
+            key_lc = str(override_key).strip().lower()
+            if key_lc == "import_aif_path" and str(override_val).strip():
+                override_import_path = str(override_val).strip()
+                break
+
+        mode = self.aif_mode.strip().lower()
+        if mode not in ALLOWED_AIF_MODES:
+            raise ValueError(f"Unsupported aif_mode '{self.aif_mode}'. Allowed: {sorted(ALLOWED_AIF_MODES)}")
+        if mode == "imported" and self.imported_aif_path is None and not override_import_path:
+            raise ValueError("aif_mode=imported requires imported_aif_path")
+
+        stage_a_mode = str(self.stage_overrides.get("stage_a_mode", "real")).strip().lower()
+        if stage_a_mode not in ALLOWED_STAGE_A_MODES:
+            raise ValueError(f"Unsupported stage_a_mode '{stage_a_mode}'. Allowed: {sorted(ALLOWED_STAGE_A_MODES)}")
+        stage_b_mode = str(self.stage_overrides.get("stage_b_mode", "auto")).strip().lower()
+        if stage_b_mode not in ALLOWED_STAGE_B_MODES:
+            raise ValueError(f"Unsupported stage_b_mode '{stage_b_mode}'. Allowed: {sorted(ALLOWED_STAGE_B_MODES)}")
+        stage_d_mode = str(self.stage_overrides.get("stage_d_mode", "auto")).strip().lower()
+        if stage_d_mode not in ALLOWED_STAGE_D_MODES:
+            raise ValueError(f"Unsupported stage_d_mode '{stage_d_mode}'. Allowed: {sorted(ALLOWED_STAGE_D_MODES)}")
+        # `aif_mode=auto` used to promote a supplied import path to imported mode on its own.
+        # With `auto` gone, an unused import path would silently fall through to a fitted-ROI
+        # run -- a wrong answer, not an error -- so say so instead of guessing.
+        if (self.imported_aif_path is not None or override_import_path) and mode != "imported":
+            raise ValueError(
+                f"An imported AIF path is set but aif_mode is '{mode}'. "
+                "Set aif_mode=imported to use it, or remove the path."
+            )
+        if _override_value_is_set(self.stage_overrides.get("aif_biexp_timing_method", None)):
+            raise ValueError(
+                "stage_overrides.aif_biexp_timing_method was removed. The Stage-B AIF fit now "
+                "always holds t_base_end at the resolved baseline end and always fits the upslope "
+                "duration; use stage_overrides.steady_state_auto_method to choose how the "
+                "baseline end is found."
+            )
+
+        # Port scope decision: ImageJ ROI input is intentionally not supported.
+        for roi_path in self.roi_files:
+            if roi_path.suffix.lower() == ".roi":
+                raise ValueError("ImageJ ROI (.roi) input is out of scope for the Python DCE CLI port")
+
+        if not self.dynamic_files:
+            raise ValueError("dynamic_files is required (non-empty)")
+        if not self.aif_files:
+            raise ValueError(
+                "aif_files is required (non-empty). Name a dedicated vascular ROI mask, or set "
+                "subject_tp_path to a BIDS session so it can be found by convention "
+                f"(dce/{dce_file_discovery.AIF_MASK_PATTERN})."
+            )
+        if self.roi_files:
+            roi_set = {Path(p).expanduser().resolve() for p in self.roi_files}
+            overlap = [p for p in self.aif_files if Path(p).expanduser().resolve() in roi_set]
+            if overlap:
+                raise ValueError(
+                    "AIF mask must be a dedicated vascular ROI and cannot reuse ROI mask file(s): "
+                    + ", ".join(str(Path(p).expanduser().resolve()) for p in overlap)
+                )
+        if not self.t1map_files:
+            raise ValueError("t1map_files is required (non-empty)")
+
+    def to_dict(self) -> Dict[str, Any]:
+        payload = asdict(self)
+        return json.loads(json.dumps(payload, default=_json_default))
+
+
+class DceStageRunner(Protocol):
+    """Execution contract for in-memory A/B/D stages."""
+
+    def run_a(
+        self, config: DcePipelineConfig, event_callback: Optional[Callable[[Dict[str, Any]], None]] = None
+    ) -> Dict[str, Any]:
+        ...
+
+    def run_b(
+        self,
+        config: DcePipelineConfig,
+        stage_a: Dict[str, Any],
+        event_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> Dict[str, Any]:
+        ...
+
+    def run_d(
+        self,
+        config: DcePipelineConfig,
+        stage_a: Dict[str, Any],
+        stage_b: Dict[str, Any],
+        event_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> Dict[str, Any]:
+        ...
+
+
+def _stage_override(config: DcePipelineConfig, key: str) -> Any:
+    """Resolve a preference: run config, then `dce_defaults.json`, then raise.
+
+    There is deliberately no `default` argument -- every default lives in the defaults
+    file, so a key missing from both sources is a `DceConfigError`, not a guess.
+    """
+    return dce_config.resolve(config, key)
+
+
+def _stage_override_optional(config: DcePipelineConfig, key: str, fallback: Any = None) -> Any:
+    """Resolve a preference whose absence is meaningful (auto-detection takes over)."""
+    return dce_config.resolve_optional(config, key, fallback)
+
+
+def _scan_override(config: DcePipelineConfig, key: str, sidecar: Optional[Dict[str, Any]]) -> Any:
+    """Resolve a per-scan value: image JSON sidecar first, then run config, then defaults."""
+    return dce_config.resolve_scan_value(config, key, sidecar)
+
+
+# How each per-scan source reads in the Stage-A log line.
+_SCAN_SOURCE_LABELS = {
+    "sidecar": "image sidecar",
+    "run_config": "run config",
+    "defaults_file": "dce_defaults.json",
+}
+
+
+def _run_config_value(config: DcePipelineConfig, key: str) -> Any:
+    """The run config's own value for `key`, case-insensitively; `None` when it sets none."""
+    overrides = config.stage_overrides or {}
+    lowered = str(key).strip().lower()
+    for candidate, value in overrides.items():
+        if str(candidate).strip().lower() == lowered:
+            return value
+    return None
+
+
+def _log_scan_value_sources(
+    config: DcePipelineConfig, resolved: Dict[str, Tuple[Any, str]]
+) -> Dict[str, str]:
+    """Report where each per-scan value came from, and say so when the sidecar outranked
+    the run config.
+
+    These two keys are the only ones a run config can lose, so a `relaxivity` set there and
+    then ignored is otherwise indistinguishable from one that was honoured.
+    """
+    summary = ", ".join(
+        f"{key}={float(value):g} ({_SCAN_SOURCE_LABELS.get(source, source)})"
+        for key, (value, source) in resolved.items()
+    )
+    run_reporting.notice(f"Per-scan values: {summary}")
+
+    for key, (value, source) in resolved.items():
+        if source != "sidecar":
+            continue
+        requested = _run_config_value(config, key)
+        if requested is None:
+            continue
+        # Losing a value you set is worth saying out loud even in a quiet run.
+        run_reporting.notice(
+            f"{key}: run config set {float(requested):g}, not used. "
+            f"The image sidecar's {float(value):g} wins for per-scan values.",
+            run_reporting.Verbosity.NORMAL,
+        )
+
+    return {f"{key}_source": source for key, (_, source) in resolved.items()}
+
+
+def _override_value_is_set(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str) and value.strip() == "":
+        return False
+    return True
+
+
+def _explicit_stage_override(config: DcePipelineConfig, keys: Tuple[str, ...]) -> Tuple[Optional[Any], Optional[str]]:
+    for key in keys:
+        if key in config.stage_overrides:
+            value = config.stage_overrides[key]
+            if _override_value_is_set(value):
+                return value, str(key)
+        key_lc = key.lower()
+        for override_key, override_val in config.stage_overrides.items():
+            if str(override_key).lower() == key_lc and _override_value_is_set(override_val):
+                return override_val, str(override_key)
+    return None, None
+
+
+def _load_json(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        raise FileNotFoundError(path)
+    return json.loads(path.read_text())
+
+
+def _load_nifti_data(path: Path) -> np.ndarray:
+    try:
+        import nibabel as nib  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("nibabel is required for Stage-A NIfTI loading") from exc
+
+    image = nib.load(str(path))
+    return np.asarray(image.get_fdata(), dtype=np.float64)
+
+
+def _resolve_dynamic_metadata(
+    config: DcePipelineConfig,
+    n_timepoints: int,
+    *,
+    n_timepoints_raw: Optional[int] = None,
+) -> Dict[str, Any]:
+    metadata_path, _ = _explicit_stage_override(config, ("dce_metadata_path",))
+    candidates: List[Path] = []
+    if metadata_path is not None:
+        candidates.append(Path(str(metadata_path)).expanduser().resolve())
+
+    for dynamic in config.dynamic_files:
+        sidecar = _json_sidecar_for(dynamic)
+        if sidecar is not None:
+            candidates.append(sidecar)
+
+    # BIDS convenience: with a session folder given, Stage A finds the sidecar by layout.
+    # Non-BIDS runs name it with stage_overrides.dce_metadata_path, or put it beside the image.
+    if config.subject_source_path is not None:
+        candidates.extend(sorted((config.subject_source_path / "dce").glob("*DCE.json")))
+
+    payload: Dict[str, Any] = {}
+    metadata_source_path: Optional[str] = None
+    for candidate in candidates:
+        if candidate.exists():
+            payload = _load_json(candidate)
+            metadata_source_path = str(candidate)
+            break
+
+    tr_ms_raw, tr_ms_key = _explicit_stage_override(config, ("tr_ms",))
+    time_resolution_raw, time_resolution_key = _explicit_stage_override(
+        config, ("time_resolution_sec",)
+    )
+    fa_raw, fa_key = _explicit_stage_override(config, ("fa_deg",))
+
+    manual_tr = tr_ms_raw is not None
+    manual_fa = fa_raw is not None
+    manual_time = time_resolution_raw is not None
+    manual_any = manual_tr or manual_fa or manual_time
+    manual_all = manual_tr and manual_fa and manual_time
+
+    if metadata_source_path is None and not manual_all:
+        raise ValueError(
+            "DCE metadata JSON not found. Provide stage_overrides.tr_ms, "
+            "stage_overrides.fa_deg, and stage_overrides.time_resolution_sec."
+        )
+    if metadata_source_path is not None and manual_any and not manual_all:
+        raise ValueError(
+            "Partial manual DCE metadata override is not allowed when metadata JSON is present. "
+            "Provide all of tr_ms + fa_deg + time_resolution_sec, or provide none."
+        )
+
+    tr_ms: Optional[float] = None
+    time_resolution_sec: Optional[float] = None
+    fa_deg: Optional[float] = None
+    metadata_sources: Dict[str, str] = {}
+
+    if tr_ms_raw is not None:
+        tr_ms = float(tr_ms_raw)
+        metadata_sources["tr_ms"] = f"stage_overrides.{tr_ms_key}"
+
+    if time_resolution_raw is not None:
+        time_resolution_sec = float(time_resolution_raw)
+        metadata_sources["time_resolution_sec"] = f"stage_overrides.{time_resolution_key}"
+
+    if fa_raw is not None:
+        fa_deg = float(fa_raw)
+        metadata_sources["fa_deg"] = f"stage_overrides.{fa_key}"
+
+    source_prefix = f"json:{metadata_source_path}" if metadata_source_path else "json"
+
+    def _payload_lookup(keys: Tuple[str, ...]) -> Tuple[Optional[Any], Optional[str]]:
+        for raw_key in keys:
+            if "." not in raw_key:
+                if raw_key in payload:
+                    return payload[raw_key], raw_key
+                continue
+            cur: Any = payload
+            ok = True
+            for part in raw_key.split("."):
+                if not isinstance(cur, dict) or part not in cur:
+                    ok = False
+                    break
+                cur = cur[part]
+            if ok:
+                return cur, raw_key
+        return None, None
+
+    if tr_ms is None:
+        if "tr_ms" in payload:
+            tr_ms = float(payload["tr_ms"])
+            metadata_sources["tr_ms"] = f"{source_prefix}.tr_ms"
+        elif "tr_sec" in payload:
+            tr_ms = float(payload["tr_sec"]) * 1000.0
+            metadata_sources["tr_ms"] = f"{source_prefix}.tr_sec"
+        elif "RepetitionTimeExcitation" in payload:
+            tr_ms = float(payload["RepetitionTimeExcitation"]) * 1000.0
+            metadata_sources["tr_ms"] = f"{source_prefix}.RepetitionTimeExcitation"
+        elif "RepetitionTime" in payload:
+            tr_ms = float(payload["RepetitionTime"]) * 1000.0
+            metadata_sources["tr_ms"] = f"{source_prefix}.RepetitionTime"
+
+    if time_resolution_sec is None:
+        if "time_resolution_sec" in payload:
+            time_resolution_sec = float(payload["time_resolution_sec"])
+            metadata_sources["time_resolution_sec"] = f"{source_prefix}.time_resolution_sec"
+        elif "TemporalResolution" in payload:
+            time_resolution_sec = float(payload["TemporalResolution"])
+            metadata_sources["time_resolution_sec"] = f"{source_prefix}.TemporalResolution"
+        elif "RepetitionTimeExcitation" in payload and "RepetitionTime" in payload:
+            # MATLAB run_dce_cli.m branch:
+            # if RepetitionTimeExcitation exists, time_resolution is taken from RepetitionTime.
+            time_resolution_sec = float(payload["RepetitionTime"])
+            metadata_sources["time_resolution_sec"] = (
+                f"{source_prefix}.RepetitionTime@RepetitionTimeExcitation"
+            )
+        elif "AcquisitionDuration" in payload:
+            # MATLAB run_dce_cli.m branch:
+            # time_resolution = AcquisitionDuration.
+            time_resolution_sec = float(payload["AcquisitionDuration"])
+            metadata_sources["time_resolution_sec"] = f"{source_prefix}.AcquisitionDuration"
+        elif "TriggerDelayTime" in payload:
+            # MATLAB run_dce_cli.m branch:
+            # time_resolution = TriggerDelayTime / n_reps / 1000.
+            # TriggerDelayTime is in ms and n_reps is full dynamic frame count.
+            n_reps = int(n_timepoints_raw) if n_timepoints_raw is not None else int(n_timepoints)
+            if n_reps <= 0:
+                raise ValueError(f"TriggerDelayTime requires positive frame count; got {n_reps}")
+            time_resolution_sec = float(payload["TriggerDelayTime"]) / float(n_reps) / 1000.0
+            metadata_sources["time_resolution_sec"] = f"{source_prefix}.TriggerDelayTime/{n_reps}/1000"
+
+    if time_resolution_sec is None:
+        pref_time = _stage_override_optional(config, "time_resolution_sec")
+        if _override_value_is_set(pref_time):
+            time_resolution_sec = float(pref_time)
+            metadata_sources["time_resolution_sec"] = "preferences_or_stage_overrides.time_resolution_sec"
+
+    if (
+        time_resolution_sec is not None
+        and "NumberOfAverages" in payload
+        and metadata_sources.get("time_resolution_sec", "").startswith(source_prefix)
+    ):
+        time_resolution_sec = float(time_resolution_sec) * float(payload["NumberOfAverages"])
+        metadata_sources["time_resolution_sec"] = metadata_sources["time_resolution_sec"] + "*NumberOfAverages"
+
+    if fa_deg is None:
+        if "fa_deg" in payload:
+            fa_deg = float(payload["fa_deg"])
+            metadata_sources["fa_deg"] = f"{source_prefix}.fa_deg"
+        elif "FlipAngle" in payload:
+            fa_deg = float(payload["FlipAngle"])
+            metadata_sources["fa_deg"] = f"{source_prefix}.FlipAngle"
+
+    def _payload_field(name: str, keys: Tuple[str, ...], cast: Callable[[Any], Any] = float) -> Any:
+        # Resolving the value and recording its provenance together is what keeps
+        # `metadata_sources` from drifting out of step with the values it describes.
+        value, key = _payload_lookup(keys)
+        if value is None:
+            return None
+        metadata_sources[name] = f"{source_prefix}.{key}"
+        return cast(value)
+
+    relaxivity = _payload_field(
+        "relaxivity",
+        (
+            "relaxivity",
+            "Relaxivity_per_mM_per_s",
+            "contrast_relaxivity",
+            "ContrastRelaxivity_per_mM_per_s",
+            "SyntheticPhantom.relaxivity",
+            "SyntheticPhantom.Relaxivity_per_mM_per_s",
+        ),
+    )
+
+    hematocrit = _payload_field(
+        "hematocrit",
+        (
+            "hematocrit",
+            "Hematocrit",
+            "SyntheticPhantom.hematocrit",
+            "SyntheticPhantom.Hematocrit",
+            "SyntheticPhantom.RecommendedROCKETSHIPHematocrit",
+        ),
+    )
+
+    aif_concentration_kind = _payload_field(
+        "aif_concentration_kind",
+        (
+            "AIFConcentrationKind",
+            "SyntheticPhantom.AIFConcentrationKind",
+        ),
+        cast=lambda value: str(value).strip().lower(),
+    )
+
+    if tr_ms is None:
+        raise ValueError("Unable to determine TR; set stage_overrides.tr_ms or provide DCE metadata JSON")
+    if time_resolution_sec is None:
+        raise ValueError(
+            "Unable to determine DCE frame spacing (time resolution); set stage_overrides.time_resolution_sec "
+            "or provide DCE metadata JSON with one of: time_resolution_sec, TemporalResolution, "
+            "RepetitionTime (when RepetitionTimeExcitation is present), AcquisitionDuration, TriggerDelayTime."
+        )
+    if fa_deg is None:
+        raise ValueError("Unable to determine flip angle; set stage_overrides.fa_deg or provide DCE metadata JSON")
+    if float(tr_ms) <= 0.0:
+        raise ValueError(f"Resolved TR must be positive, got {tr_ms}")
+    if float(time_resolution_sec) <= 0.0:
+        raise ValueError(f"Resolved time resolution must be positive, got {time_resolution_sec}")
+    if float(fa_deg) <= 0.0:
+        raise ValueError(f"Resolved flip angle must be positive, got {fa_deg}")
+    if relaxivity is not None and float(relaxivity) <= 0.0:
+        raise ValueError(f"Resolved relaxivity must be positive, got {relaxivity}")
+    if hematocrit is not None and not (0.0 <= float(hematocrit) < 1.0):
+        raise ValueError(f"Resolved hematocrit must be in [0, 1), got {hematocrit}")
+
+    return {
+        "tr_ms": float(tr_ms),
+        "time_resolution_sec": float(time_resolution_sec),
+        "time_resolution_min": float(time_resolution_sec) / 60.0,
+        "fa_deg": float(fa_deg),
+        "relaxivity": (float(relaxivity) if relaxivity is not None else None),
+        "hematocrit": (float(hematocrit) if hematocrit is not None else None),
+        "aif_concentration_kind": aif_concentration_kind,
+        "metadata_source_keys": sorted(payload.keys()),
+        "metadata_source_path": metadata_source_path,
+        "metadata_sources": metadata_sources,
+    }
+
+
+def _resolve_timepoint_window(
+    config: DcePipelineConfig,
+    n_timepoints: int,
+) -> Tuple[int, int, Dict[str, Any]]:
+    if n_timepoints < 1:
+        raise ValueError("Stage-A requires at least one dynamic timepoint")
+
+    start_raw = _stage_override_optional(config, "start_t")
+    end_raw = _stage_override_optional(config, "end_t")
+    start_is_set = _override_value_is_set(start_raw)
+    end_is_set = _override_value_is_set(end_raw)
+
+    def _frame_override(raw: Any, is_set: bool, key: str, fallback: int) -> int:
+        """Parse a 1-based frame override, falling back for non-positive values."""
+        if not is_set:
+            return fallback
+        try:
+            value = int(float(raw))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"stage_overrides.{key} must be numeric, got {raw!r}") from exc
+        return fallback if value <= 0 else value
+
+    start_1b = _frame_override(start_raw, start_is_set, "start_t", 1)
+    end_1b = _frame_override(end_raw, end_is_set, "end_t", n_timepoints)
+
+    start_1b = max(1, min(start_1b, n_timepoints))
+    end_1b = max(1, min(end_1b, n_timepoints))
+    if end_1b < start_1b:
+        raise ValueError(
+            f"Invalid Stage-A timepoint window: start_t={start_1b} must be <= end_t={end_1b}"
+        )
+
+    source = "default_full_range"
+    if start_is_set or end_is_set:
+        source = "start_t/end_t"
+    info = {
+        "source": source,
+        "start_1b": int(start_1b),
+        "end_1b": int(end_1b),
+        "n_timepoints_input": int(n_timepoints),
+        "n_timepoints_output": int(end_1b - start_1b + 1),
+    }
+    return start_1b - 1, end_1b, info
+
+
+def _matlab_moving_average_smooth_1d(values: np.ndarray, span: int) -> np.ndarray:
+    """Approximate MATLAB smooth(x, span, 'moving') endpoint behavior.
+
+    MATLAB ``smooth(..., 'moving')`` uses progressively smaller odd window
+    sizes at the boundaries (1,3,5,...,span) instead of fixed-width
+    edge-truncated windows. This helper mirrors that behavior for 1D vectors
+    and is used for legacy Sobel baseline detection parity.
+    """
+    arr = np.asarray(values, dtype=np.float64).reshape(-1)
+    if arr.size == 0:
+        return arr.copy()
+    span = max(1, int(span))
+    if span % 2 == 0:
+        span += 1
+    if span == 1 or arr.size == 1:
+        return arr.copy()
+
+    half = span // 2
+    n = int(arr.size)
+    out = np.empty_like(arr, dtype=np.float64)
+    for i in range(n):
+        if i < half:
+            win = 2 * i + 1
+        elif i > n - half - 1:
+            win = 2 * (n - i) - 1
+        else:
+            win = span
+        local_half = win // 2
+        lo = i - local_half
+        hi = i + local_half + 1
+        out[i] = float(np.mean(arr[lo:hi]))
+    return out
+
+
+def _gaussian_smooth_1d(values: np.ndarray, sigma: float) -> np.ndarray:
+    arr = np.asarray(values, dtype=np.float64).reshape(-1)
+    if arr.size == 0:
+        return arr.copy()
+    sigma = float(sigma)
+    if sigma <= 0.0 or arr.size == 1:
+        return arr.copy()
+    radius = max(1, int(math.ceil(3.0 * sigma)))
+    x = np.arange(-radius, radius + 1, dtype=np.float64)
+    kernel = np.exp(-(x**2) / (2.0 * sigma * sigma))
+    kernel /= np.sum(kernel)
+    padded = np.pad(arr, (radius, radius), mode="edge")
+    return np.convolve(padded, kernel, mode="valid")
+
+
+def _normalize_zero_one(values: np.ndarray) -> np.ndarray:
+    arr = np.asarray(values, dtype=np.float64)
+    if arr.size == 0:
+        return arr.copy()
+    # An all-nonfinite input fills to zeros, which the vmax <= vmin guard below
+    # then turns into the same all-zero result the old inline branch returned.
+    filled = _fill_nonfinite_1d(arr)
+    vmin = float(np.min(filled))
+    vmax = float(np.max(filled))
+    if not math.isfinite(vmin) or not math.isfinite(vmax) or vmax <= vmin:
+        return np.zeros_like(filled, dtype=np.float64)
+    return (filled - vmin) / (vmax - vmin)
+
+
+def _linear_fit_r2(x: np.ndarray, y: np.ndarray) -> float:
+    x = np.asarray(x, dtype=np.float64).reshape(-1)
+    y = np.asarray(y, dtype=np.float64).reshape(-1)
+    if x.size != y.size or x.size < 2:
+        return 0.0
+    x_mean = float(np.mean(x))
+    y_mean = float(np.mean(y))
+    x_center = x - x_mean
+    denom = float(np.sum(x_center * x_center))
+    if denom <= 0.0:
+        return 0.0
+    slope = float(np.sum(x_center * (y - y_mean)) / denom)
+    intercept = y_mean - slope * x_mean
+    y_hat = slope * x + intercept
+    ss_res = float(np.sum((y - y_hat) ** 2))
+    ss_tot = float(np.sum((y - y_mean) ** 2))
+    if ss_tot <= 0.0:
+        return 1.0 if ss_res <= 1e-15 else 0.0
+    r2 = 1.0 - (ss_res / ss_tot)
+    return float(max(-1.0, min(1.0, r2)))
+
+
+def _normalize_steady_state_auto_method(value: Any) -> str:
+    if value is None:
+        return "none"
+    text = str(value).strip().lower()
+    if text in {"", "none", "off", "disabled", "manual", "false", "0"}:
+        return "none"
+    aliases = {
+        "legacy": "legacy_sobel",
+        "legacy_sobel": "legacy_sobel",
+        "sobel": "legacy_sobel",
+        "matlab_legacy": "legacy_sobel",
+        "dce_auto_aif": "legacy_sobel",
+        "piecewise": "piecewise_constant",
+        "piecewise_constant": "piecewise_constant",
+        "piecewise-constant": "piecewise_constant",
+        "find_end_ss": "piecewise_constant",
+        "bruteforce_piecewise": "piecewise_constant",
+        "glr": "glr",
+        "edge": "glr",
+        "glr_edge": "glr",
+        "find_end_ss_edge": "glr",
+        "tv": "tv",
+        "tv_denoise": "tv",
+        "tv_denoising": "tv",
+        "find_end_ss_tv": "tv",
+        "biexp": "biexp_fit",
+        "biexp_fit": "biexp_fit",
+        "biexp-fit": "biexp_fit",
+        "aif_biexp_fit": "biexp_fit",
+        "find_end_ss_biexp": "biexp_fit",
+    }
+    if text in aliases:
+        return aliases[text]
+    raise ValueError(
+        f"Unsupported stage_overrides.steady_state_auto_method '{value}'. "
+        f"Allowed: {sorted(ALLOWED_STEADY_STATE_AUTO_METHODS)}"
+    )
+
+
+def _legacy_sobel_baseline_end(stlv: np.ndarray) -> Dict[str, Any]:
+    curves = np.asarray(stlv, dtype=np.float64)
+    if curves.ndim == 1:
+        curves = curves[:, np.newaxis]
+    if curves.ndim != 2 or curves.shape[0] < 2:
+        return {
+            "method": "legacy_sobel",
+            "end_ss_1b": 1,
+            "global_edge_index_1b": 1,
+            "slope_at_edge": 0.0,
+            "linefit_r2_threshold": 0.95,
+        }
+
+    global_dyn = np.mean(curves, axis=1)
+    # MATLAB parity: smooth(global_dyn, 9, 'moving') uses truncated endpoint
+    # windows (not edge-padded moving averages).
+    global_smooth = _matlab_moving_average_smooth_1d(global_dyn, span=9)
+    global_smooth = _normalize_zero_one(global_smooth)
+    if global_smooth.size < 2:
+        return {
+            "method": "legacy_sobel",
+            "end_ss_1b": 1,
+            "global_edge_index_1b": 1,
+            "slope_at_edge": 0.0,
+            "linefit_r2_threshold": 0.95,
+        }
+
+    # MATLAB parity for a 1-column vector:
+    # op = fspecial('sobel')/8; bx = imfilter(global_smooth, op, 'replicate');
+    # With replicate padding in the singleton dimension this reduces to a
+    # central difference: (prev - next) / 2.
+    padded = np.pad(global_smooth, (1, 1), mode="edge")
+    bx = (padded[:-2] - padded[2:]) / 2.0
+    i0 = int(np.argmin(bx))  # MATLAB: [~, i] = min(bx)
+    end_ss_1b = max(1, min(i0, global_smooth.size))  # MATLAB end_ss = i-1, clamped to valid 1-based index
+
+    r2_threshold = 0.95
+    if i0 >= 2:
+        # MATLAB: for n=2:(i-1); fit((n:i)', y(n:i), 'poly1'); if rsquare>0.95, end_ss=n; break
+        x_all = np.arange(1, global_smooth.size + 1, dtype=np.float64)
+        i_1b = i0 + 1
+        for n_1b in range(2, i_1b):
+            seg = slice(n_1b - 1, i_1b)
+            r2 = _linear_fit_r2(x_all[seg], global_smooth[seg])
+            if r2 > r2_threshold:
+                end_ss_1b = n_1b
+                break
+
+    end_ss_1b = max(1, min(int(end_ss_1b), global_smooth.size))
+    return {
+        "method": "legacy_sobel",
+        "end_ss_1b": int(end_ss_1b),
+        "global_edge_index_1b": int(i0 + 1),
+        "slope_at_edge": float(bx[i0]) if bx.size > 0 else 0.0,
+        "linefit_r2_threshold": float(r2_threshold),
+    }
+
+
+def _glr_baseline_end(stlv: np.ndarray) -> Dict[str, Any]:
+    curves = np.asarray(stlv, dtype=np.float64)
+    if curves.ndim == 1:
+        curves = curves[:, np.newaxis]
+    if curves.ndim != 2 or curves.shape[0] < 2:
+        return {
+            "method": "glr",
+            "end_ss_1b": 1,
+            "mode": "fallback_short_signal",
+        }
+
+    global_time_curve = np.mean(curves, axis=1)
+    mean_si = float(np.mean(global_time_curve))
+    n = int(global_time_curve.size)
+    min_before = 3
+    min_after = 5
+
+    # Early-jump guard for immediate contrast arrival (ported from end_baseline_detect.py).
+    early_threshold = None
+    early_detected_0b = None
+    if n >= 3:
+        first_jumps = np.diff(global_time_curve[:3])
+        if n > 10:
+            tail_segment = global_time_curve[max(0, n - 10) : n]
+            tail_jumps = np.diff(tail_segment)
+            baseline_jump_std = float(np.std(tail_jumps)) if tail_jumps.size > 0 else float(np.std(tail_segment))
+        else:
+            baseline_jump_std = float(np.std(first_jumps)) if first_jumps.size > 1 else float(np.std(global_time_curve[:3]))
+        if baseline_jump_std < 1e-10:
+            baseline_jump_std = 0.01 * (float(np.mean(global_time_curve[:3])) + 1e-10)
+        early_threshold = 3.0 * baseline_jump_std
+        for idx, jump in enumerate(first_jumps):
+            if float(jump) > early_threshold:
+                early_detected_0b = int(idx)
+                return {
+                    "method": "glr",
+                    "end_ss_1b": int(early_detected_0b + 1),
+                    "mode": "early_jump",
+                    "early_jump_index_1b": int(early_detected_0b + 1),
+                    "early_jump_threshold": float(early_threshold),
+                    "early_jump_value": float(jump),
+                }
+
+    max_score = -math.inf
+    best_changepoint_0b = max(0, min_before - 1)
+    best_k_1b = min_before
+    for k in range(min_before, n - min_after + 1):
+        before = global_time_curve[:k]
+        after = global_time_curve[k : k + min_after]
+        if before.size == 0 or after.size == 0:
+            continue
+        mean_before = float(np.mean(before))
+        mean_after = float(np.mean(after))
+        if mean_after <= mean_before:
+            continue
+        var_before = float(np.var(before))
+        baseline_flatness = var_before / (mean_before + mean_si * 0.001)
+        mean_increase = mean_after - mean_before
+        score = mean_increase / (baseline_flatness + mean_si * 0.001)
+        if k < 10:
+            score *= 0.6 + (k / 10.0)
+        if score > max_score:
+            max_score = score
+            best_k_1b = int(k)
+            best_changepoint_0b = int(k - 1)  # last baseline point
+
+    end_ss_1b = int(max(1, min(best_changepoint_0b + 1, n)))
+    return {
+        "method": "glr",
+        "end_ss_1b": end_ss_1b,
+        "mode": "glr_score",
+        "best_split_k_1b": int(best_k_1b),
+        "glr_score": (float(max_score) if math.isfinite(max_score) else None),
+        "min_before": int(min_before),
+        "min_after": int(min_after),
+        "early_jump_threshold": (float(early_threshold) if early_threshold is not None else None),
+    }
+
+
+def _tv_baseline_end(stlv: np.ndarray) -> Dict[str, Any]:
+    curves = np.asarray(stlv, dtype=np.float64)
+    if curves.ndim == 1:
+        curves = curves[:, np.newaxis]
+    if curves.ndim != 2 or curves.shape[0] < 2:
+        return {
+            "method": "tv",
+            "end_ss_1b": 1,
+            "mode": "fallback_short_signal",
+        }
+
+    global_time_curve = np.mean(curves, axis=1).astype(np.float64, copy=False)
+    n = int(global_time_curve.size)
+    if n < 3:
+        return {
+            "method": "tv",
+            "end_ss_1b": 1,
+            "mode": "fallback_short_signal",
+        }
+
+    diff = np.diff(global_time_curve)
+    mad = float(np.median(np.abs(diff - np.median(diff)))) if diff.size > 0 else 0.0
+    lambda_tv = 2.0 * mad
+    if mad < 1e-6:
+        lambda_tv = 0.1
+
+    x = global_time_curve.copy()
+    n_iter = 0
+    for iteration in range(50):
+        n_iter = iteration + 1
+        x_old = x.copy()
+        d = np.diff(x)
+        d_thresh = np.sign(d) * np.maximum(np.abs(d) - lambda_tv / n, 0.0)
+        x[0] = global_time_curve[0]
+        for i in range(1, n):
+            x[i] = 0.5 * (x[i - 1] + d_thresh[i - 1]) + 0.5 * global_time_curve[i]
+        if float(np.max(np.abs(x - x_old))) < 1e-6:
+            break
+
+    jumps = np.diff(x)
+    # The threshold has to be calibrated on baseline noise, so it must not be measured over a
+    # stretch that contains contrast. A leading window (`min(n, max(5, 0.2*n))`, previously used
+    # here) is not that stretch: it spans 12 frames of a 64-frame series, and the bolus usually
+    # peaks well inside it. Calibrating there measures the bolus instead of the noise -- on
+    # sub-1102140_ses-01 it returned a MAD of 76.0 against a true baseline scatter of 2.5,
+    # inflating the threshold ~40x, which pushed the real onset jump (231.5) below it and left
+    # the detector with no jump to report at all. The MAD over *all* jumps is robust for the
+    # same reason `lambda_tv` above uses it: contrast frames are a small minority of a DCE
+    # series, so the median absolute deviation still reflects the flat part of the curve.
+    if jumps.size > 0:
+        jump_median = float(np.median(jumps))
+        jump_mad = float(np.median(np.abs(jumps - jump_median)))
+    else:
+        jump_median = 0.0
+        jump_mad = 0.0
+    if jump_mad < 1e-6:
+        jump_mad = 0.01 * float(np.std(global_time_curve))
+        if jump_mad < 1e-6:
+            jump_mad = 0.01
+
+    jump_threshold = jump_median + TV_JUMP_THRESHOLD_SIGMA * jump_mad
+    significant_jumps = np.where(jumps > jump_threshold)[0]
+    valid_jumps: List[int] = []
+    for idx in significant_jumps:
+        i = int(idx)
+        if i < jumps.size - 1:
+            next_jump = float(jumps[i + 1])
+            if next_jump > -jump_mad or float(jumps[i]) > 2.0 * jump_threshold:
+                valid_jumps.append(i)
+        else:
+            if float(jumps[i]) > 1.5 * jump_threshold:
+                valid_jumps.append(i)
+
+    # Finding no jump at all is a *failure to detect*, not a detection of frame 1. Reporting it
+    # as `tv_jump` with end_ss=1 made the two indistinguishable to every caller, so a detector
+    # that had given up looked exactly like one that had confidently found a bolus arriving on
+    # the second frame -- and end_ss=1 is a plausible enough answer that nothing downstream
+    # would question it. The distinct `fallback_*` mode (matching the convention used by the
+    # other detectors) lets callers tell the two apart; `strength` is pinned to 0.0 so the
+    # confidence signal agrees with the mode instead of being derived from a jump of 0.0
+    # against whole-curve scatter. The returned `end_ss_1b` is unchanged -- 1 is still the
+    # safest guess when nothing was found, it just no longer claims to be a measurement.
+    no_jump_found = len(valid_jumps) == 0
+    if no_jump_found:
+        end_ss_0b = 0
+        detected_jump = 0.0
+    else:
+        end_ss_0b = int(valid_jumps[0])  # index before the first accepted jump
+        detected_jump = float(jumps[end_ss_0b])
+
+    end_ss_1b = int(max(1, min(end_ss_0b + 1, n)))
+    baseline_noise = (
+        float(np.std(global_time_curve[: min(10, max(1, n // 4))])) if end_ss_0b > 0 else float(np.std(global_time_curve))
+    )
+    if baseline_noise < 1e-6:
+        baseline_noise = 1e-6
+    raw_strength = detected_jump / baseline_noise
+    strength = 0.0 if no_jump_found else float(np.clip(1.0 - np.exp(-raw_strength / 2.0), 0.0, 1.0))
+
+    return {
+        "method": "tv",
+        "end_ss_1b": end_ss_1b,
+        "mode": "fallback_no_jump_detected" if no_jump_found else "tv_jump",
+        "lambda_tv": float(lambda_tv),
+        "tv_iterations": int(n_iter),
+        "jump_mad": float(jump_mad),
+        "jump_threshold": float(jump_threshold),
+        "detected_jump": float(detected_jump),
+        "strength": float(strength),
+        "valid_jump_count": int(len(valid_jumps)),
+    }
+
+
+def _piecewise_constant_baseline_end(stlv: np.ndarray) -> Dict[str, Any]:
+    curves = np.asarray(stlv, dtype=np.float64)
+    if curves.ndim == 1:
+        curves = curves[:, np.newaxis]
+    if curves.ndim != 2 or curves.shape[0] < 3:
+        return {
+            "method": "piecewise_constant",
+            "end_ss_1b": 1,
+            "transition_index_1b": 1,
+            "local_max_index_1b": 1,
+        }
+
+    x = np.mean(curves, axis=1)
+    x = _gaussian_smooth_1d(x, sigma=1.0)
+    n = x.size
+    best_t_1b = 2
+    best_mse = math.inf
+
+    # MATLAB branch brute-force split: two piecewise constants with transition at t.
+    # n >= 3 and 2 <= t_1b <= n-1 hold by construction, so both slices are non-empty.
+    for t_1b in range(2, n):
+        before = x[: t_1b - 1]
+        after = x[t_1b:]
+        before_mean = float(np.mean(before))
+        after_mean = float(np.mean(after))
+        pred = np.empty_like(x)
+        pred[: t_1b - 1] = before_mean
+        pred[t_1b - 1 :] = after_mean
+        mse = float(np.mean((x - pred) ** 2))
+        if mse < best_mse:
+            best_mse = mse
+            best_t_1b = t_1b
+
+    local_min_1b = best_t_1b
+    while local_min_1b > 1 and x[local_min_1b - 1] >= x[local_min_1b - 2]:
+        local_min_1b -= 1
+
+    # Flat/noiseless baselines can make the backtrack run all the way to frame 1.
+    # Step forward again while values remain within a small tolerance of the local minimum.
+    mean_aif = float(np.mean(x)) if x.size > 0 else 0.0
+    delta_abs = abs(mean_aif) * float(PIECEWISE_CONSTANT_BASELINE_FORWARD_DELTA_FRACTION)
+    anchor_value = float(x[local_min_1b - 1])
+    local_min_forward_1b = local_min_1b
+    while local_min_forward_1b < best_t_1b:
+        next_value = float(x[local_min_forward_1b])  # 1-based -> next sample
+        if abs(next_value - anchor_value) <= delta_abs:
+            local_min_forward_1b += 1
+            continue
+        break
+    local_min_1b = local_min_forward_1b
+
+    local_max_1b = best_t_1b
+    while local_max_1b < n and x[local_max_1b - 1] <= x[local_max_1b]:
+        local_max_1b += 1
+
+    return {
+        "method": "piecewise_constant",
+        "end_ss_1b": int(max(1, min(local_min_1b, n))),
+        "transition_index_1b": int(max(1, min(best_t_1b, n))),
+        "local_max_index_1b": int(max(1, min(local_max_1b, n))),
+        "transition_mse": (float(best_mse) if math.isfinite(best_mse) else None),
+        "flat_forward_delta_fraction": float(PIECEWISE_CONSTANT_BASELINE_FORWARD_DELTA_FRACTION),
+        "flat_forward_delta_abs": float(delta_abs),
+    }
+
+
+def _biexp_fit_baseline_end(stlv: np.ndarray, config: "DcePipelineConfig") -> Dict[str, Any]:
+    """Baseline end from a 6-parameter biexponential fit to the mean AIF signal curve.
+
+    The baseline end is what *defines* the window that converts signal to R1, so it cannot be
+    read off a concentration curve -- Cp does not exist until this has answered. This fits the
+    **signal** curve instead, which breaks the cycle without restructuring Stage A. Only the two
+    transition times are kept; both are invariant to the affine rescaling below, so nothing that
+    survives the fit is distorted by working in signal units. ``A, B, c, d`` are discarded,
+    because signal saturation does distort amplitudes and decay rates.
+
+    The curve is baseline-subtracted and max-normalised before fitting -- the same preparation
+    ``dce_auto_aif.m`` already applies -- so the fit runs with ``fitting_au=False`` and the
+    amplitude bounds derived from ``maxer`` stay on a familiar scale.
+
+    Weighting is uniform; a noise-inflated peak is handled by the robust estimator
+    (``aif_Robust``) rather than by discarding frames. See
+    ``project-management/projects/archived/batch-parity/aif_fitting_parity.md``.
+    """
+    curves = np.asarray(stlv, dtype=np.float64)
+    if curves.ndim == 1:
+        curves = curves[:, np.newaxis]
+
+    # The `tv` detector supplies the provisional baseline mean and injection window this fit is
+    # seeded from, and is the fallback whenever the fit cannot run or does not converge.
+    seed = _tv_baseline_end(curves)
+    seed_end_ss_1b = max(1, int(seed.get("end_ss_1b", 1)))
+    details: Dict[str, Any] = {
+        "method": "biexp_fit",
+        "end_ss_1b": seed_end_ss_1b,
+        "seed_method": "tv",
+        "seed_end_ss_1b": seed_end_ss_1b,
+    }
+
+    if curves.ndim != 2 or curves.shape[0] < 4:
+        details["mode"] = "fallback_short_signal"
+        return details
+
+    n = int(curves.shape[0])
+    seed_end_ss_1b = max(1, min(seed_end_ss_1b, n))
+    global_curve = np.mean(curves, axis=1)
+
+    baseline_mean = float(np.mean(global_curve[:seed_end_ss_1b]))
+    normalized = global_curve - baseline_mean
+    scale = float(np.max(normalized)) if normalized.size > 0 else 0.0
+    if not math.isfinite(scale) or scale <= 0.0:
+        details["mode"] = "fallback_no_enhancement"
+        return details
+    normalized = normalized / scale
+
+    # Frame units, matching dce_auto_aif.m's `timer = 0:time_points-1`. `t_base_end` therefore
+    # comes back as a 0-based frame position, and `end_ss` (1-based) is one more than it.
+    timer = np.arange(n, dtype=np.float64)
+    start_injection = float(seed_end_ss_1b - 1)
+    peak_idx_0b = int(np.argmax(normalized))
+    end_injection = float(max(peak_idx_0b, start_injection))
+
+    try:
+        fit = _fit_aif_biexp(
+            config,
+            timer=timer,
+            curve=normalized,
+            start_injection_min=start_injection,
+            end_injection_min=end_injection,
+            fitting_au=False,
+            fit_pass="timing",
+        )
+    except Exception as exc:  # scipy missing, or a degenerate curve
+        details["mode"] = "fallback_fit_error"
+        details["fit_error"] = f"{type(exc).__name__}: {exc}"
+        return details
+
+    t_base_end = float(fit["t_base_end"])
+    t0_exp = float(fit["t0_exp"])
+    if not fit["fit_success"] or not (math.isfinite(t_base_end) and math.isfinite(t0_exp)):
+        details["mode"] = "fallback_fit_not_converged"
+        details["fit_success"] = bool(fit["fit_success"])
+        return details
+
+    end_ss_1b = int(max(1, min(int(round(t_base_end)) + 1, n)))
+    # `end_injection` stays fractional on purpose: it becomes the Stage-B fit's start point for
+    # the upslope duration, and snapping it to a frame would throw that away.
+    end_injection_1b = float(min(max(t0_exp + 1.0, float(end_ss_1b)), float(n)))
+
+    details.update(
+        {
+            "mode": "fit",
+            "end_ss_1b": end_ss_1b,
+            "end_injection_1b": end_injection_1b,
+            "fit_t_base_end_frames": t_base_end,
+            "fit_t0_exp_frames": t0_exp,
+            "fit_delta_frames": float(fit["delta"]),
+            "fit_rsquare_adj": float(fit["rsquare_adj"]),
+            # [A, B, c, d, t_base_end, t0_exp] on the normalised curve, in frame units. Kept
+            # only so a caller can re-evaluate the fitted curve for QC plotting (see
+            # tests/python/baseline_end_reliability_helpers.py); the pipeline itself uses just
+            # the two transition times, since signal saturation distorts the amplitudes and
+            # decay rates. Reverse the normalisation with `normalization_scale`/`baseline_mean`.
+            "fit_params": [float(v) for v in np.asarray(fit["params"], dtype=np.float64)],
+            "baseline_mean": baseline_mean,
+            "normalization_scale": scale,
+        }
+    )
+    return details
+
+
+def _resolve_aif_sidecar_steady_state_end(config: DcePipelineConfig) -> Tuple[Optional[int], Optional[str]]:
+    """Look up a manually-pinned baseline end from the AIF file's JSON sidecar.
+
+    Mirrors the DCE dynamic-file sidecar discovery in `_resolve_dynamic_metadata`: same
+    basename as `config.aif_files[0]` with `.nii`/`.nii.gz` swapped for `.json`. This is
+    the documented mechanism for fixed/predictable runs (e.g. phantom ground-truth
+    alignment, benchmark determinism) — used in place of ad hoc stage_overrides pins.
+    Returns (end_1b, sidecar_path), or (None, None) when no sidecar or key is present.
+    """
+    if not config.aif_files:
+        return None, None
+    sidecar_path = _json_sidecar_for(Path(config.aif_files[0]))
+    if sidecar_path is None:
+        return None, None
+
+    if not sidecar_path.exists():
+        return None, None
+
+    payload = _load_json(sidecar_path)
+    if "SteadyStateEndTimeIndex" not in payload:
+        return None, None
+    return int(payload["SteadyStateEndTimeIndex"]), str(sidecar_path)
+
+
+def _resolve_baseline_window(
+    config: DcePipelineConfig,
+    n_timepoints: int,
+    stlv: Optional[np.ndarray] = None,
+    window_start_0b: int = 0,
+) -> Tuple[int, int, Dict[str, Any]]:
+    """Resolve the baseline (pre-contrast) frame window.
+
+    `n_timepoints` and the returned indices are in *analysed* coordinates -- i.e. after
+    Stage A has trimmed the series with `start_t`/`end_t`. `window_start_0b` is how many
+    frames that trim removed from the front, which the AIF sidecar's index has to be
+    corrected by (see below).
+    """
+    sentinel = object()
+    start_raw = _stage_override(config, "steady_state_start")
+    end_raw = _stage_override_optional(config, "steady_state_end", sentinel)
+    auto_method_raw, auto_method_source = dce_config.resolve_with_source(
+        config, "steady_state_auto_method"
+    )
+    auto_method_requested = _normalize_steady_state_auto_method(auto_method_raw)
+
+    start_is_set = start_raw is not sentinel and _override_value_is_set(start_raw)
+    end_is_set = end_raw is not sentinel and _override_value_is_set(end_raw)
+
+    start_1b = 1 if not start_is_set else int(start_raw)
+    used_method = "manual" if end_is_set else "default"
+    auto_details: Optional[Dict[str, Any]] = None
+    end_source: str
+    sidecar_end_1b, sidecar_path = (None, None) if end_is_set else _resolve_aif_sidecar_steady_state_end(config)
+    if end_is_set:
+        end_1b = int(end_raw)
+        end_source = "steady_state_end"
+    elif sidecar_end_1b is not None:
+        # The sidecar describes the acquired series, so its index counts from the first
+        # acquired frame -- not from the first frame Stage A kept. Subtract the trim, or the
+        # pinned frame would slide every time `start_t` changed, which is the opposite of the
+        # fixed, reproducible baseline this mechanism exists to provide.
+        end_1b = int(sidecar_end_1b) - int(window_start_0b)
+        if end_1b < 1:
+            raise ValueError(
+                f"AIF sidecar SteadyStateEndTimeIndex={int(sidecar_end_1b)} is before the "
+                f"first analysed frame (start_t={int(window_start_0b) + 1}), so the timepoint "
+                f"window trims away the whole baseline. Lower start_t, or repin the sidecar "
+                f"(the index counts acquired frames, before trimming). Sidecar: {sidecar_path}"
+            )
+        used_method = "aif_sidecar"
+        end_source = f"aif_sidecar:SteadyStateEndTimeIndex:{sidecar_path}"
+    else:
+        auto_method = auto_method_requested if auto_method_requested != "none" else DEFAULT_STEADY_STATE_AUTO_METHOD
+        if stlv is None:
+            raise ValueError(
+                "stage_overrides.steady_state_auto_method requires Stage-A AIF signal data to estimate baseline end"
+            )
+        detector_map: Dict[str, Callable[[np.ndarray], Dict[str, Any]]] = {
+            "legacy_sobel": _legacy_sobel_baseline_end,
+            "piecewise_constant": _piecewise_constant_baseline_end,
+            "glr": _glr_baseline_end,
+            "tv": _tv_baseline_end,
+            # Needs the aif_* fit preferences, unlike the purely signal-shape detectors.
+            "biexp_fit": lambda curves: _biexp_fit_baseline_end(curves, config),
+        }
+        detector = detector_map[auto_method]
+        auto_details = detector(stlv)
+        end_1b = int(auto_details["end_ss_1b"])
+        used_method = auto_method
+        # "did the user ask for this method, or did it default?" used to be inferred from a
+        # "none" sentinel, which only existed because the code had a built-in fallback. Now
+        # every value has a defaults-file entry, so ask the resolver where it came from.
+        if auto_method_requested == "none" or auto_method_source == "defaults_file":
+            end_source = f"default_auto_method:{auto_method}"
+        else:
+            end_source = f"steady_state_auto_method:{auto_method}"
+
+    start_1b = max(1, min(start_1b, n_timepoints))
+    end_1b = max(start_1b, min(end_1b, n_timepoints))
+    info = {
+        "method_requested": auto_method_requested,
+        "method_used": used_method,
+        "start_1b": int(start_1b),
+        "end_1b": int(end_1b),
+        "source": end_source,
+    }
+    if sidecar_end_1b is not None:
+        # Both coordinate systems, so a run log shows what the sidecar said as well as
+        # where that landed once the timepoint window was applied.
+        info["aif_sidecar_end_1b_acquired"] = int(sidecar_end_1b)
+        info["window_start_0b"] = int(window_start_0b)
+    if auto_details is not None:
+        info["auto_details"] = auto_details
+    return start_1b - 1, end_1b, info
+
+
+def _clean_ab(
+    ab: np.ndarray,
+    t1_values: np.ndarray,
+    roi_indices: np.ndarray,
+    threshold_fraction: float,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    n_time = ab.shape[0]
+    keep = np.ones(ab.shape[1], dtype=bool)
+    cleaned = ab.copy()
+
+    # MATLAB cleanAB.m uses TEST < 1 as the bad-point criterion. Screening every
+    # column at once keeps the scalar interpolation loop below to the few columns
+    # that actually have bad points.
+    with np.errstate(invalid="ignore"):
+        bad_mask = cleaned < 1.0
+    bad_counts = bad_mask.sum(axis=0)
+    over_threshold = bad_counts > threshold_fraction * n_time
+    keep[over_threshold] = False
+
+    for col in np.where((bad_counts > 0) & ~over_threshold)[0]:
+        # A basic column slice is a view, so repairs below land in `cleaned` directly;
+        # there is no write-back step. Columns abandoned mid-repair are dropped by `keep`.
+        vec = cleaned[:, col]
+        col_bad = bad_mask[:, col]
+        bad = np.where(col_bad)[0]
+        for raw_idx in bad:
+            idx = int(raw_idx)
+            start = max(0, idx - 5)
+            end = min(n_time, idx + 6)
+            neighbors = np.arange(start, end, dtype=np.int64)
+            neighbors = neighbors[neighbors != idx]
+            # `bad` is exactly where(col_bad), so indexing the mask selects the
+            # same neighbours in the same order as np.isin, without the scan.
+            neighbors = neighbors[~col_bad[neighbors]]
+            if neighbors.size < 2:
+                keep[col] = False
+                break
+            rel = neighbors - idx
+            if not np.any(rel > 0) or not np.any(rel < 0):
+                keep[col] = False
+                break
+            vec[idx] = float(
+                np.interp(
+                    float(idx),
+                    np.asarray(neighbors, dtype=np.float64),
+                    np.asarray(vec[neighbors], dtype=np.float64),
+                )
+            )
+
+    return cleaned[:, keep], t1_values[keep], roi_indices[keep]
+
+
+def _clean_r1(
+    r1: np.ndarray,
+    t1_values: np.ndarray,
+    roi_indices: np.ndarray,
+    threshold_fraction: float,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    n_time = r1.shape[0]
+    keep = np.ones(r1.shape[1], dtype=bool)
+    cleaned = r1.copy()
+
+    # MATLAB's log of a negative AB ratio is complex, which is what the imag
+    # screen below is for; numpy's is NaN, so for the real arrays Stage A actually
+    # produces that screen is a no-op and the bad-point mask can be computed for
+    # every column at once. Complex input keeps the original per-column screen.
+    if np.iscomplexobj(cleaned):
+        bad_mask = None
+        candidate_columns: Any = range(cleaned.shape[1])
+    else:
+        with np.errstate(invalid="ignore"):
+            bad_mask = (~np.isfinite(cleaned)) | (cleaned > 100.0)
+        bad_counts = bad_mask.sum(axis=0)
+        over_threshold = bad_counts > threshold_fraction * n_time
+        keep[over_threshold] = False
+        candidate_columns = np.where((bad_counts > 0) & ~over_threshold)[0]
+
+    for col in candidate_columns:
+        vec = cleaned[:, col]
+        if bad_mask is None:
+            imag_bad = np.where(np.imag(vec) > 0)[0]
+            if imag_bad.size > threshold_fraction * n_time:
+                keep[col] = False
+                continue
+            if imag_bad.size > 0:
+                vec = np.real(vec)
+
+            bad = np.where((~np.isfinite(vec)) | (vec > 100.0))[0]
+            if bad.size > threshold_fraction * n_time:
+                keep[col] = False
+                continue
+        else:
+            bad = np.where(bad_mask[:, col])[0]
+        for idx in bad:
+            start = max(0, int(idx) - 3)
+            end = min(n_time, int(idx) + 4)
+            neighbors = np.arange(start, end, dtype=np.int64)
+            neighbors = neighbors[neighbors != int(idx)]
+            if neighbors.size < 2:
+                keep[col] = False
+                break
+            replacement = float(np.interp(float(idx), neighbors.astype(np.float64), np.asarray(vec[neighbors], dtype=np.float64)))
+            vec[int(idx)] = replacement
+            if not math.isfinite(replacement):
+                keep[col] = False
+                break
+        if keep[col]:
+            cleaned[:, col] = np.asarray(vec, dtype=np.float64)
+
+    return cleaned[:, keep], t1_values[keep], roi_indices[keep]
+
+
+def _signal_to_r1(
+    signal: np.ndarray,
+    t1_values: np.ndarray,
+    indices: np.ndarray,
+    *,
+    baseline_slice: slice,
+    tr_sec: float,
+    fa_deg: float,
+    ab_threshold: float,
+    r1_threshold: float,
+    label: str,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """SPGR signal -> R1 for one voxel set, re-anchored to the baseline 1/T1.
+
+    Shared by the AIF and ROI paths, which differ only in their cleaning
+    thresholds. Returns `(signal, baseline_mean, r1, t1_values, indices)`.
+
+    Note the asymmetry, which is deliberate and pre-existing: `signal` and
+    `baseline_mean` are filtered only by the zero-baseline screen, while
+    `r1`/`t1_values`/`indices` are additionally filtered by the AB and R1
+    cleaners. Callers depend on both forms, so they are returned separately.
+    """
+    baseline_mean = np.mean(signal[baseline_slice, :], axis=0)
+
+    # Filter out voxels with zero/near-zero baseline signal to prevent divide-by-zero
+    valid_baseline = baseline_mean > 1e-10
+    if not np.any(valid_baseline):
+        raise ValueError(f"All {label} voxels have zero baseline signal")
+    signal = signal[:, valid_baseline]
+    t1_values = t1_values[valid_baseline]
+    indices = indices[valid_baseline]
+    baseline_mean = baseline_mean[valid_baseline]
+
+    # Operation order below is load-bearing: this is a parity port, and folding
+    # the two products into a shared sub-expression reassociates the arithmetic
+    # and shifts results in the last bits.
+    cos_fa = np.cos(np.deg2rad(fa_deg))
+    exp_tr = np.exp(-tr_sec / t1_values)
+    sstar = (1.0 - exp_tr) / (1.0 - cos_fa * exp_tr)
+    a = 1.0 - cos_fa * sstar[np.newaxis, :] * signal / baseline_mean[np.newaxis, :]
+    b = 1.0 - sstar[np.newaxis, :] * signal / baseline_mean[np.newaxis, :]
+    ab = a / b
+
+    ab, t1_values, indices = _clean_ab(ab, t1_values, indices, threshold_fraction=ab_threshold)
+    if t1_values.size == 0:
+        raise ValueError(f"All {label} voxels removed after AB cleaning")
+
+    r1 = (1.0 / tr_sec) * np.log(ab)
+    r1, t1_values, indices = _clean_r1(r1, t1_values, indices, threshold_fraction=r1_threshold)
+    if t1_values.size == 0:
+        raise ValueError(f"All {label} voxels removed after R1 cleaning")
+
+    r1 = r1 + ((1.0 / t1_values) - np.mean(r1[baseline_slice, :], axis=0))[np.newaxis, :]
+    return signal, baseline_mean, r1, t1_values, indices
+
+
+def _save_stage_a_qc_figures(
+    output_dir: Path,
+    dynamic: np.ndarray,
+    roi_mask: np.ndarray,
+    aif_mask: np.ndarray,
+    noise_mask: np.ndarray,
+    ct: np.ndarray,
+    cp: np.ndarray,
+    r1_toi: np.ndarray,
+    r1_lv: np.ndarray,
+) -> Dict[str, str]:
+    plt = _require_pyplot("QC figure saving")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    figure_paths: Dict[str, str] = {}
+
+    timecurves_png = output_dir / "dce_timecurves.png"
+    fig = plt.figure(figsize=(10, 8))
+    ax1 = fig.add_subplot(2, 2, 1)
+    ax2 = fig.add_subplot(2, 2, 2)
+    ax3 = fig.add_subplot(2, 2, 3)
+    ax4 = fig.add_subplot(2, 2, 4)
+    ax1.plot(np.median(r1_toi, axis=1), "r")
+    ax1.set_title("R1 ROI")
+    ax2.plot(np.median(r1_lv, axis=1), "b")
+    ax2.set_title("R1 AIF")
+    ax3.plot(np.mean(ct, axis=1), "r")
+    ax3.set_title("Ct mean")
+    ax4.plot(np.mean(cp, axis=1), "b")
+    ax4.set_title("Cp mean")
+    fig.tight_layout()
+    fig.savefig(timecurves_png, dpi=150)
+    plt.close(fig)
+    figure_paths["timecurves_png"] = str(timecurves_png)
+
+    roi_png = output_dir / "dce_roi_overview.png"
+    z_mid = dynamic.shape[2] // 2
+    base = dynamic[:, :, z_mid, 0]
+    fig2 = plt.figure(figsize=(8, 8))
+    ax = fig2.add_subplot(1, 1, 1)
+    ax.imshow(base.T, cmap="gray", origin="lower")
+    ax.contour(roi_mask[:, :, z_mid].T.astype(float), levels=[0.5], colors=["red"], linewidths=0.8)
+    ax.contour(aif_mask[:, :, z_mid].T.astype(float), levels=[0.5], colors=["cyan"], linewidths=0.8)
+    ax.contour(noise_mask[:, :, z_mid].T.astype(float), levels=[0.5], colors=["yellow"], linewidths=0.8)
+    ax.set_title("ROI(red) AIF(cyan) Noise(yellow)")
+    fig2.tight_layout()
+    fig2.savefig(roi_png, dpi=150)
+    plt.close(fig2)
+    figure_paths["roi_overview_png"] = str(roi_png)
+
+    return figure_paths
+
+
+def _require_pyplot(purpose: str) -> Any:
+    """Import pyplot on the headless Agg backend, or raise naming what needed it."""
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt  # type: ignore
+    except Exception as exc:
+        raise RuntimeError(f"matplotlib is required for {purpose}") from exc
+    return plt
+
+
+def _as_spatial_volume(img: np.ndarray, spatial: Tuple[int, ...], label: str) -> np.ndarray:
+    """Conform a loaded map to the dynamic's 3-D spatial grid.
+
+    Drops a trailing singleton 4th dimension and promotes 2-D input when the dynamic
+    is single-slice, then enforces the shape match. `label` names the map in the error.
+    """
+    if img.ndim == 4:
+        img = img[..., 0]
+    if spatial[2] == 1 and img.ndim == 2:
+        img = img[..., np.newaxis]
+    if img.shape != spatial:
+        raise ValueError(f"{label} shape {img.shape} does not match dynamic spatial shape {spatial}")
+    return img
+
+
+def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
+    dynamic = _load_nifti_data(config.dynamic_files[0])
+    if dynamic.ndim != 4:
+        raise ValueError(f"Expected 4D dynamic input, got shape {dynamic.shape}")
+    n_timepoints_input = int(dynamic.shape[3])
+    time_start_0b, time_end_0b_exclusive, time_window_info = _resolve_timepoint_window(config, n_timepoints_input)
+    dynamic = dynamic[..., time_start_0b:time_end_0b_exclusive]
+    if dynamic.shape[3] < 1:
+        raise ValueError("Stage-A timepoint window produced an empty dynamic series")
+
+    if not config.roi_files:
+        raise ValueError("Stage-A real mode requires at least one ROI mask file")
+    spatial = dynamic.shape[:3]
+    aif_mask_img = _as_spatial_volume(_load_nifti_data(config.aif_files[0]), spatial, "AIF mask")
+    roi_mask_img = _as_spatial_volume(_load_nifti_data(config.roi_files[0]), spatial, "ROI mask")
+    t1map_img = _as_spatial_volume(_load_nifti_data(config.t1map_files[0]), spatial, "T1 map")
+
+    # MATLAB A_make_R1maps_func converts T1 maps from ms->s when values are large.
+    # Keep the same unit behavior to avoid 1000x concentration scaling errors.
+    t1_pos = t1map_img[np.isfinite(t1map_img) & (t1map_img > 0)]
+    if t1_pos.size > 0 and float(np.median(t1_pos)) > 20.0:
+        t1map_img = t1map_img / 1000.0
+
+    aif_mask = aif_mask_img > 0
+    roi_mask = roi_mask_img > 0
+    if not np.any(aif_mask):
+        raise ValueError("AIF mask has no positive voxels")
+    if not np.any(roi_mask):
+        raise ValueError("ROI mask has no positive voxels")
+    if np.array_equal(aif_mask, roi_mask):
+        raise ValueError("AIF mask must be a dedicated vascular ROI and cannot be identical to ROI mask")
+
+    if config.noise_files:
+        noise_mask_img = _as_spatial_volume(
+            _load_nifti_data(config.noise_files[0]), spatial, "Noise mask"
+        )
+        noise_mask = noise_mask_img > 0
+    else:
+        noise_mask = np.zeros(spatial, dtype=bool)
+        noise_size = int(_stage_override(config, "noise_pixsize"))
+        noise_mask[:noise_size, :noise_size, :] = True
+
+    # Match MATLAB linear indexing (column-major) for voxel ordering.
+    dyn_2d = dynamic.reshape((-1, dynamic.shape[3]), order="F").T
+    t1_flat = t1map_img.reshape(-1, order="F")
+
+    lvind = np.where(aif_mask.reshape(-1, order="F"))[0]
+    tumind = np.where(roi_mask.reshape(-1, order="F"))[0]
+    noiseind = np.where(noise_mask.reshape(-1, order="F"))[0]
+    if noiseind.size == 0:
+        raise ValueError("Noise mask has no positive voxels")
+
+    stlv = dyn_2d[:, lvind]
+    sttum = dyn_2d[:, tumind]
+    dynam_noise = np.std(dyn_2d[:, noiseind], axis=1)
+    noise_mean = float(np.mean(dynam_noise))
+    if noise_mean < 0:
+        raise ValueError("Noise estimate is negative (internal error)")
+
+    snr_filter = float(_stage_override(config, "snr_filter"))
+    
+    # Skip SNR filtering if noise is effectively zero (e.g., synthetic/perfect data)
+    if noise_mean > 1e-12 and snr_filter > 0:
+        voxel_snr = np.mean(stlv, axis=0) / noise_mean
+        keep_snr = voxel_snr >= snr_filter
+        if not np.any(keep_snr):
+            raise ValueError("SNR filter removed all AIF voxels; lower snr_filter or noise threshold")
+        lvind = lvind[keep_snr]
+        stlv = stlv[:, keep_snr]
+    
+    t1_lv = t1_flat[lvind].astype(np.float64)
+    blood_t1_override = _stage_override_optional(config, "blood_t1_ms")
+    blood_t1_override_sec: Optional[float] = None
+    if blood_t1_override is not None:
+        blood_t1_ms = float(blood_t1_override)
+        # The unit is the key name, not the magnitude. This used to divide anything above
+        # 20 by 1000, which meant the suffix was decoration: blood_t1_sec=1500 became 1.5 s
+        # and blood_t1_ms=15 stayed 15 s, both silently. Refuse implausible values instead,
+        # since a wrong blood T1 rescales every AIF concentration without any other symptom.
+        # The floor sits well above any plausible seconds value (blood T1 is ~1.6-2.1 s) and
+        # well below any plausible millisecond one, so a unit mix-up lands outside it.
+        if not 50.0 <= blood_t1_ms <= 20000.0:
+            raise ValueError(
+                f"stage_overrides.blood_t1_ms={blood_t1_ms:g} is out of range (50-20000 ms). "
+                "The value is in milliseconds -- blood T1 is roughly 1600-2100 ms at 3T -- "
+                "so a value in seconds needs multiplying by 1000."
+            )
+        blood_t1_override_sec = blood_t1_ms / 1000.0
+        t1_lv = np.full_like(t1_lv, blood_t1_override_sec, dtype=np.float64)
+
+    t1_tum = t1_flat[tumind].astype(np.float64)
+
+    n_time = dynamic.shape[3]
+    timing = _resolve_dynamic_metadata(config, n_time, n_timepoints_raw=n_timepoints_input)
+    tr_ms = float(timing["tr_ms"])
+    tr_sec = tr_ms / 1000.0
+    fa_deg = float(timing["fa_deg"])
+    time_resolution_min = float(timing["time_resolution_min"])
+
+    # Per-scan values: the image JSON sidecar outranks the run config for these two, unlike
+    # every other key. They legitimately differ between scans and the sidecar is the per-scan
+    # record -- `dce2bids` writes them there. `timing` already carries what the sidecar said.
+    # `relaxivity` has no default anywhere, so a run with none configured stops here.
+    relaxivity_resolved = dce_config.resolve_scan_value_with_source(config, "relaxivity", timing)
+    hematocrit_resolved = dce_config.resolve_scan_value_with_source(config, "hematocrit", timing)
+    scan_value_sources = _log_scan_value_sources(
+        config, {"relaxivity": relaxivity_resolved, "hematocrit": hematocrit_resolved}
+    )
+    relaxivity = float(relaxivity_resolved[0])
+    hematocrit = float(hematocrit_resolved[0])
+    if relaxivity <= 0.0:
+        raise ValueError(f"relaxivity must be positive, got {relaxivity}")
+    if not (0.0 <= hematocrit < 1.0):
+        raise ValueError(f"hematocrit must be in [0, 1), got {hematocrit}")
+
+    ss_start, ss_end, baseline_info = _resolve_baseline_window(
+        config, n_time, stlv=stlv, window_start_0b=time_start_0b
+    )
+    baseline_slice = slice(ss_start, ss_end)
+
+    # AIF path to R1
+    stlv, sss, r1_lv, t1_lv, lvind = _signal_to_r1(
+        stlv,
+        t1_lv,
+        lvind,
+        baseline_slice=baseline_slice,
+        tr_sec=tr_sec,
+        fa_deg=fa_deg,
+        ab_threshold=0.05,
+        r1_threshold=0.005,
+        label="AIF",
+    )
+
+    # ROI path to R1
+    sttum, ss_tum, r1_toi, t1_tum, tumind = _signal_to_r1(
+        sttum,
+        t1_tum,
+        tumind,
+        baseline_slice=baseline_slice,
+        tr_sec=tr_sec,
+        fa_deg=fa_deg,
+        ab_threshold=0.7,
+        r1_threshold=0.7,
+        label="ROI",
+    )
+
+    blood_t1_source = "override" if blood_t1_override_sec is not None else "aif_t1_map"
+    blood_t1_mean_sec = float(np.mean(t1_lv)) if t1_lv.size > 0 else None
+    blood_t1_median_sec = float(np.median(t1_lv)) if t1_lv.size > 0 else None
+
+    cp = (r1_lv - (1.0 / t1_lv)[np.newaxis, :]) / (relaxivity * (1.0 - hematocrit))
+    ct = (r1_toi - (1.0 / t1_tum)[np.newaxis, :]) / relaxivity
+
+    delta_r1_lv = r1_lv - np.mean(r1_lv[baseline_slice, :], axis=0)[np.newaxis, :]
+    delta_r1_toi = r1_toi - np.mean(r1_toi[baseline_slice, :], axis=0)[np.newaxis, :]
+
+    timer = np.arange(n_time, dtype=np.float64) * time_resolution_min
+    # MATLAB auto-find-injection parity:
+    # start_injection := end_ss (baseline detector output)
+    # end_injection   := mean(argmax(DYNAMLV, axis=time))
+    start_injection = float(ss_end)
+    # The biexp_fit detector fits both transition times together, so it reports the end of the
+    # injection directly (fractional, and used as the Stage-B upslope-duration start point).
+    # Every other detector only answers where the baseline ends, so the injection end falls back
+    # to the mean per-voxel peak frame.
+    detector_end_injection = (baseline_info.get("auto_details") or {}).get("end_injection_1b", None)
+    if detector_end_injection is not None and math.isfinite(float(detector_end_injection)):
+        end_injection = float(detector_end_injection)
+    else:
+        peak_indices_1b = np.argmax(stlv, axis=0).astype(np.float64) + 1.0
+        end_injection = float(np.mean(peak_indices_1b)) if peak_indices_1b.size > 0 else float(start_injection)
+    if not math.isfinite(end_injection):
+        end_injection = float(start_injection)
+    if end_injection < start_injection:
+        end_injection = float(start_injection)
+    # Both are 1-based frame numbers, but `timer` is 0-based (`timer[i] = i * dt`), so frame
+    # f sits at (f - 1) * dt. Scaling the frame number straight through lands a full frame
+    # late: it would put the end of the baseline on the *first contrast* frame, and Stage-B
+    # bounds the fitted AIF's `t_base_end` below by that time -- forcing the AIF to zero on a
+    # frame that already carries contrast. Mirrors dce/B_AIF_fitting_func.m.
+    start_injection_min_auto = float(max(0.0, (start_injection - 1.0) * time_resolution_min))
+    end_injection_min_auto = float(max(0.0, (end_injection - 1.0) * time_resolution_min))
+
+    figures = _save_stage_a_qc_figures(
+        config.output_dir,
+        dynamic,
+        roi_mask,
+        aif_mask,
+        noise_mask,
+        ct,
+        cp,
+        r1_toi,
+        r1_lv,
+    )
+
+    return {
+        "stage": "A",
+        "status": "ok",
+        "impl": "real",
+        "rootname": str(_stage_override(config, "rootname")),
+        "image_shape": [int(v) for v in spatial],
+        "quant": True,
+        "tr_ms": tr_ms,
+        "fa_deg": fa_deg,
+        "time_resolution_min": time_resolution_min,
+        "relaxivity": relaxivity,
+        "hematocrit": hematocrit,
+        **scan_value_sources,
+        "aif_concentration_kind": timing.get("aif_concentration_kind"),
+        "metadata_source_path": timing.get("metadata_source_path"),
+        "metadata_sources": timing.get("metadata_sources"),
+        "timepoint_window": time_window_info,
+        "blood_t1_override_sec": blood_t1_override_sec,
+        "blood_t1_source": blood_t1_source,
+        "blood_t1_voxel_count": int(t1_lv.size),
+        "blood_t1_mean_sec": blood_t1_mean_sec,
+        "blood_t1_mean_ms": (float(blood_t1_mean_sec) * 1000.0 if blood_t1_mean_sec is not None else None),
+        "blood_t1_median_sec": blood_t1_median_sec,
+        "blood_t1_median_ms": (float(blood_t1_median_sec) * 1000.0 if blood_t1_median_sec is not None else None),
+        "steady_state_time": [ss_start + 1, ss_end],
+        "steady_state_auto": baseline_info,
+        "start_injection": start_injection,
+        "end_injection": end_injection,
+        "start_injection_min_auto": start_injection_min_auto,
+        "end_injection_min_auto": end_injection_min_auto,
+        "figure_paths": figures,
+        "arrays": {
+            "Cp": cp,
+            "Ct": ct,
+            "Stlv": stlv,
+            "Sttum": sttum,
+            "Sss": sss,
+            "Ssstum": ss_tum,
+            "R1tLV": r1_lv,
+            "R1tTOI": r1_toi,
+            "deltaR1LV": delta_r1_lv,
+            "deltaR1TOI": delta_r1_toi,
+            "T1LV": t1_lv,
+            "T1TUM": t1_tum,
+            "timer": timer,
+            "lvind": lvind.astype(np.int64),
+            "tumind": tumind.astype(np.int64),
+            "noiseind": noiseind.astype(np.int64),
+        },
+    }
+
+
+def _as_time_by_voxel(data: Any, name: str) -> np.ndarray:
+    arr = np.asarray(data, dtype=np.float64)
+    if arr.ndim == 1:
+        arr = arr[:, np.newaxis]
+    if arr.ndim != 2:
+        raise ValueError(f"{name} must be 1D/2D, got shape {arr.shape}")
+    return arr
+
+
+def _as_1d_float(data: Any, name: str) -> np.ndarray:
+    arr = np.asarray(data, dtype=np.float64).squeeze()
+    if arr.ndim != 1:
+        raise ValueError(f"{name} must be a vector, got shape {arr.shape}")
+    if arr.size == 0:
+        raise ValueError(f"{name} must be non-empty")
+    return arr
+
+
+def _nearest_index(timer: np.ndarray, value: float) -> int:
+    return int(np.argmin(np.abs(timer - float(value))))
+
+
+def _fill_nonfinite_1d(values: np.ndarray) -> np.ndarray:
+    out = np.asarray(values, dtype=np.float64).copy()
+    finite = np.isfinite(out)
+    if np.all(finite):
+        return out
+    if not np.any(finite):
+        return np.zeros_like(out)
+    idx = np.arange(out.size, dtype=np.float64)
+    out[~finite] = np.interp(idx[~finite], idx[finite], out[finite])
+    return out
+
+
+def _load_vector_from_path(path: Path, key: str = "timer") -> np.ndarray:
+    suffix = path.suffix.lower()
+    if path.name.lower().endswith(".nii.gz"):
+        suffix = ".nii.gz"
+
+    if suffix == ".json":
+        payload = _load_json(path)
+        if key in payload:
+            return _as_1d_float(payload[key], key)
+        raise ValueError(f"JSON file {path} missing key '{key}'")
+
+    if suffix in {".csv", ".txt", ".tsv"}:
+        delimiter = "," if suffix == ".csv" else None
+        data = np.loadtxt(path, delimiter=delimiter)
+        data = np.asarray(data, dtype=np.float64)
+        if data.ndim == 1:
+            return _as_1d_float(data, key)
+        return _as_1d_float(data[:, 0], key)
+
+    if suffix == ".npy":
+        return _as_1d_float(np.load(path), key)
+
+    if suffix == ".npz":
+        with np.load(path) as payload:
+            if key in payload:
+                return _as_1d_float(payload[key], key)
+            if len(payload.files) == 1:
+                return _as_1d_float(payload[payload.files[0]], key)
+            raise ValueError(f"NPZ file {path} missing key '{key}'")
+
+    if suffix == ".mat":
+        try:
+            from scipy.io import loadmat  # type: ignore
+        except Exception as exc:
+            raise RuntimeError("scipy is required to read MATLAB .mat files") from exc
+
+        payload = loadmat(str(path), squeeze_me=True, struct_as_record=False)
+        if key in payload:
+            return _as_1d_float(payload[key], key)
+        raise ValueError(f"MAT file {path} missing variable '{key}'")
+
+    raise ValueError(f"Unsupported vector file format for {path}")
+
+
+def _configured_time_step_min(config: DcePipelineConfig, stage_a: Dict[str, Any]) -> Optional[float]:
+    """Frame spacing in minutes from the run config or stage A, or None if unspecified.
+
+    Deliberately without a fallback: a guessed spacing silently rescales every time axis
+    downstream, so callers raise instead of proceeding on a made-up number.
+    """
+    # Stage A has already folded any `time_resolution_sec` override into its own value, so
+    # reading that first preserves the old precedence without a second override key.
+    step = stage_a.get("time_resolution_min", None)
+    if step is None:
+        seconds = _stage_override_optional(config, "time_resolution_sec")
+        if seconds is None:
+            return None
+        step = float(seconds) / 60.0
+    return float(step)
+
+
+def _resolve_stage_b_timer(config: DcePipelineConfig, stage_a: Dict[str, Any], n_time: int) -> np.ndarray:
+    time_vector_path = _stage_override_optional(config, "time_vector_path")
+    timer_path = _stage_override_optional(config, "timer_path")
+    legacy_timevectpath = _stage_override_optional(config, "timevectpath")
+    use_legacy_timevect = True
+    timevectyn = _stage_override_optional(config, "timevectyn")
+    if timevectyn is not None:
+        use_legacy_timevect = _to_bool(timevectyn, False)
+
+    path_value = time_vector_path or timer_path
+    if path_value is None and use_legacy_timevect:
+        path_value = legacy_timevectpath
+
+    timer: Optional[np.ndarray] = None
+    if path_value:
+        timer = _load_vector_from_path(Path(path_value).expanduser().resolve(), key="timer")
+    elif isinstance(stage_a.get("arrays"), dict) and "timer" in stage_a["arrays"]:
+        timer = _as_1d_float(stage_a["arrays"]["timer"], "timer")
+
+    if timer is None:
+        time_resolution = _configured_time_step_min(config, stage_a)
+        if time_resolution is None:
+            raise ValueError("Stage-B requires timer data; set stage_overrides.time_resolution_sec")
+        timer = np.arange(n_time, dtype=np.float64) * float(time_resolution)
+
+    if timer.size > n_time:
+        timer = timer[:n_time]
+    elif timer.size < n_time:
+        # Extend at the timer's own spacing; the configured one is only a fallback for a
+        # degenerate tail. `_as_1d_float` squeezes, so it has already rejected <2 samples.
+        if timer.size < 2:
+            raise ValueError(f"Resolved timer vector has {timer.size} sample(s); cannot extend it")
+        step = float(timer[-1] - timer[-2])
+        if not math.isfinite(step) or step <= 0:
+            configured = _configured_time_step_min(config, stage_a)
+            if configured is None or not math.isfinite(configured) or configured <= 0:
+                raise ValueError(
+                    f"Timer vector has {timer.size} sample(s) for {n_time} frames and the frame "
+                    "spacing cannot be determined; set stage_overrides.time_resolution_sec"
+                )
+            step = configured
+        extension = timer[-1] + step * np.arange(1, n_time - timer.size + 1, dtype=np.float64)
+        timer = np.concatenate([timer, extension])
+
+    if np.nanmax(timer) > 100.0:
+        timer = timer / 60.0
+    return _fill_nonfinite_1d(timer)
+
+
+def _resolve_stage_b_limits(config: DcePipelineConfig) -> Tuple[float, float]:
+    # Minutes on the timer axis, not frame indices: these restrict the curve window Stage B
+    # fits, and unlike `start_t`/`end_t` they do not discard data or move the baseline.
+    start_time = float(_stage_override(config, "restrict_fit_start_min"))
+    end_time = float(_stage_override(config, "restrict_fit_end_min"))
+    return start_time, end_time
+
+
+def _restrict_timer_window(timer: np.ndarray, start_time: float, end_time: float) -> Tuple[int, int]:
+    if timer.size < 2:
+        raise ValueError("Timer vector must have at least 2 elements for Stage-B")
+
+    start_idx = _nearest_index(timer, start_time) if start_time > 0 else 0
+    end_idx = _nearest_index(timer, end_time) + 1 if end_time > 0 else timer.size
+    start_idx = max(0, min(start_idx, timer.size - 1))
+    end_idx = max(start_idx + 1, min(end_idx, timer.size))
+    return start_idx, end_idx
+
+
+def _resolve_stage_b_aif_mode(config: DcePipelineConfig) -> str:
+    # One setting, one place: the top-level `aif_mode` config field. It used to also be
+    # settable as `stage_overrides.aif_curve_mode`, which outranked it, so a config carrying
+    # both ran the override and left the visible field reading as dead text.
+    mode = str(config.aif_mode).strip().lower()
+    if mode in {"1", "fitted", "fit"}:
+        mode = "fitted"
+    elif mode in {"2", "raw"}:
+        mode = "raw"
+    elif mode in {"3", "import", "imported"}:
+        mode = "imported"
+    if mode not in {"fitted", "raw", "imported"}:
+        raise ValueError(f"Unsupported Stage-B AIF mode '{mode}'")
+    if mode == "imported" and _resolve_imported_aif_path(config) is None:
+        raise ValueError("Stage-B imported mode requires imported_aif_path")
+    return mode
+
+
+def _resolve_imported_aif_path(config: DcePipelineConfig) -> Optional[Path]:
+    if config.imported_aif_path is not None:
+        return config.imported_aif_path.expanduser().resolve()
+    path_val = _stage_override_optional(config, "import_aif_path")
+    if path_val is None:
+        return None
+    path_text = str(path_val).strip()
+    if not path_text:
+        return None
+    return Path(path_text).expanduser().resolve()
+
+
+def _resolve_stage_b_injection_window(
+    config: DcePipelineConfig,
+    stage_a: Dict[str, Any],
+    timer_full: np.ndarray,
+) -> Tuple[float, float]:
+    auto_find_raw = _stage_override_optional(config, "auto_find_injection")
+    auto_find_set = _override_value_is_set(auto_find_raw)
+    auto_find_enabled = _to_bool(auto_find_raw, False) if auto_find_set else False
+
+    # The injection start is *defined* as the end of the baseline -- Stage A sets
+    # `start_injection := ss_end` -- so it has no override of its own. Letting it be set
+    # independently is what allowed the two to drift apart and masked the Stage-B AIF difference
+    # this workstream is about (see docs/.../batch-parity/aif_fitting_parity.md). Use the
+    # steady-state precedence (`steady_state_end`, the AIF sidecar, or
+    # `steady_state_auto_method`) to move it.
+    for legacy_key in ("start_injection_min", "start_injection"):
+        # Reads the run config only: these keys are removed, so they are absent from
+        # `dce_defaults.json` and resolving them would raise "unknown key" instead of this
+        # message, which explains what to use instead.
+        legacy_value, _ = _explicit_stage_override(config, (legacy_key,))
+        if _override_value_is_set(legacy_value):
+            raise ValueError(
+                f"stage_overrides.{legacy_key} was removed. The injection start is always the "
+                "resolved baseline end; set stage_overrides.steady_state_end (or the AIF "
+                "sidecar's SteadyStateEndTimeIndex, or steady_state_auto_method) instead."
+            )
+
+    end_override = _stage_override_optional(config, "end_injection_min")
+    end_override_is_set = _override_value_is_set(end_override)
+
+    # MATLAB CLI parity: auto_find_injection=1 enforces Stage-A auto timing.
+    if auto_find_enabled:
+        end_override_is_set = False
+
+    if _override_value_is_set(stage_a.get("start_injection_min_auto", None)):
+        start_val = float(stage_a["start_injection_min_auto"])
+    else:
+        source = float(stage_a.get("start_injection", 1.0))
+        if abs(source - round(source)) < 1e-8 and 1 <= int(round(source)) <= timer_full.size:
+            start_val = float(timer_full[int(round(source)) - 1])
+        else:
+            start_val = source
+
+    if end_override_is_set:
+        end_val = float(end_override)
+    elif _override_value_is_set(stage_a.get("end_injection_min_auto", None)):
+        end_val = float(stage_a["end_injection_min_auto"])
+    else:
+        source = float(stage_a.get("end_injection", start_val))
+        if abs(source - round(source)) < 1e-8 and 1 <= int(round(source)) <= timer_full.size:
+            end_val = float(timer_full[int(round(source)) - 1])
+        else:
+            end_val = source
+
+    if end_val < start_val:
+        end_val = start_val
+    return start_val, end_val
+
+
+def _aif_biexp_con(
+    timer: np.ndarray,
+    a: float,
+    b: float,
+    c: float,
+    d: float,
+    t_base_end: float,
+    t0_exp: float,
+    fitting_au: bool,
+    baseline: float,
+) -> np.ndarray:
+    time = np.asarray(timer, dtype=np.float64).reshape(-1)
+    out = np.zeros(time.size, dtype=np.float64)
+    base = float(baseline) if fitting_au else 0.0
+    if time.size == 0:
+        return out
+
+    t_base = float(t_base_end)
+    t_exp = max(float(t0_exp), t_base + np.finfo(np.float64).eps)
+
+    pre = time < t_base
+    slope = (time >= t_base) & (time < t_exp)
+    post = time >= t_exp
+
+    # `base` is an offset the whole curve sits on: the ramp climbs `a + b` above it and the
+    # decay relaxes back to it. Writing the ramp as `(a - base) + (b - base)` and omitting
+    # `base` from the decay (as this did, and AIFbiexpcon.m still did) leaves the curve
+    # discontinuous at t0_exp by exactly `base` and decaying to 0 instead of to the baseline.
+    # `base` is 0 whenever fitting_au is false, so the concentration fit is unaffected either
+    # way; only the arbitrary-units Stlv fit ever saw the broken form.
+    out[pre] = base
+
+    if np.any(slope):
+        duration = max(np.finfo(np.float64).eps, t_exp - t_base)
+        frac = (time[slope] - t_base) / duration
+        out[slope] = base + (a + b) * frac
+
+    if np.any(post):
+        dt = np.maximum(0.0, time[post] - t_exp)
+        out[post] = base + a * np.exp(-c * dt) + b * np.exp(-d * dt)
+
+    return out
+
+
+# Bound from `dce_defaults.json` at import; see the note on the baseline tunables above.
+AIF_PEAK_WEIGHT_FLOOR = float(_DEFAULTS.default_for("aif_peak_weight_floor"))
+
+
+def _aif_peak_weight(curve: np.ndarray, max_idx: int, exponent: float) -> float:
+    """Prior de-weighting of the AIF peak sample, computed from the data, not the residuals.
+
+    The peak has leverage 1 in this model -- it is the only sample in ``[t_base_end, t0_exp)``
+    and the model's maximum ``A + B`` can be placed exactly on it -- so a noise-inflated peak is
+    interpolated rather than flagged and ends up with a *small* residual. No residual-based
+    robust scheme can see that (the classic masking problem), which is why this weight comes
+    from the curve's own shape instead.
+
+    Left at full weight the peak drags the fit: one exponential is spent reaching that single
+    sample and is no longer available to describe the washout, so every other frame fits worse.
+    Measured on sub-10bbbdownsample, releasing the peak drops ``A`` 0.97 -> 0.88 and ``c``
+    0.91 -> 0.74 and improves SSE over the remaining frames by ~4.6%.
+
+    The weight is the peak's excess over the median relative to the next largest sample's
+    excess, which makes it dimensionless -- a raw ``1 / (peak - median)`` would change with the
+    concentration units and can exceed 1. A peak barely above the rest of the curve keeps full
+    weight; a spike far above it is de-weighted hard. It never reaches 0: at exactly zero the
+    sample stops constraining the upslope duration at all and the fit jumps to a different
+    solution, so the floor keeps it on the continuous side of that cliff.
+    """
+    values = np.asarray(curve, dtype=np.float64).reshape(-1)
+    n = values.size
+    if n < 3 or not (0 <= max_idx < n) or not np.all(np.isfinite(values)):
+        return 1.0
+
+    median = float(np.median(values))
+    excess_peak = float(values[max_idx]) - median
+    if not math.isfinite(excess_peak) or excess_peak <= 0.0:
+        return 1.0
+
+    excess_ref = float(np.max(np.delete(values, max_idx))) - median
+    if not math.isfinite(excess_ref) or excess_ref <= 0.0:
+        return AIF_PEAK_WEIGHT_FLOOR
+
+    ratio = excess_ref / excess_peak
+    weight = float(ratio ** float(exponent))
+    if not math.isfinite(weight):
+        return AIF_PEAK_WEIGHT_FLOOR
+    return float(min(max(weight, AIF_PEAK_WEIGHT_FLOOR), 1.0))
+
+
+TUKEY_TUNING_CONSTANT = 4.685
+TUKEY_MAX_ITERATIONS = 50
+TUKEY_WEIGHT_TOLERANCE = 1e-6
+
+
+def _lsq_result_usable(result: Any) -> bool:
+    """Whether a ``least_squares`` result should be accepted as a fit.
+
+    ``result.success`` is just ``status > 0``: it demands that one of the tolerance tests fired.
+    That is the wrong question for this fit. ``aif_TolFun`` and ``aif_TolX`` are inherited from
+    MATLAB at 1e-20 and 1e-23, below the machine epsilon they get clamped to, so no tolerance test
+    can ever fire and ``trf`` always terminates at ``status == 0`` -- "maximum number of function
+    evaluations is exceeded" -- returning its best point. That point is routinely an excellent fit:
+    on ``sub-10bbbdownsample`` the rejected one had cost 0.0146, ``t_base_end`` and ``t0_exp`` on
+    exact frame boundaries, and adjusted R^2 0.9826, and ``_biexp_fit_baseline_end`` threw it away
+    and fell back to ``tv``. Budget exhaustion is the *expected* terminal state here, not a failure.
+
+    MATLAB never had this gate -- ``AIFbiexpfithelp.m`` ignores ``exitflag`` and uses whatever
+    coefficients come back -- so this was a Python-only divergence.
+
+    A negative status (improper input) or a non-finite solution is still a real failure. This does
+    not certify fit *quality*; callers that care judge that from ``rsquare_adj``.
+    """
+    if result is None:
+        return False
+    if int(getattr(result, "status", -1)) < 0:
+        return False
+    return bool(np.all(np.isfinite(np.asarray(result.x, dtype=np.float64))))
+
+
+def _tukey_irls(
+    residual_fn: Callable[[np.ndarray], np.ndarray],
+    x0: np.ndarray,
+    base_weights: np.ndarray,
+    lsq_kwargs: Dict[str, Any],
+) -> Tuple[np.ndarray, float, int, bool]:
+    """Tukey biweight IRLS, matching MATLAB's ``fitoptions('Robust','Bisquare')``.
+
+    Each iteration solves an ordinary weighted least-squares problem, then rebuilds the weights
+    from the residuals: ``w = (1 - u^2)^2`` for ``|u| < 1`` and 0 beyond, with
+    ``u = r / (4.685 * s * sqrt(1 - h))``. ``s = 1.4826 * MAD(r)`` is recomputed every iteration,
+    so the scale adapts as the fit moves -- this is what scipy's fixed ``f_scale`` cannot do.
+
+    ``h`` is the leverage. Without it this estimator would be nearly blind to the case it exists
+    for here: the AIF peak is a high-leverage sample (the model's maximum, ``A + B`` at
+    ``t0_exp``, can sit exactly on it), so a noise-inflated peak drags the curve to itself and
+    ends up with a *small* residual. That is the classic masking problem -- M-estimators are
+    robust to vertical outliers at low leverage, not to high-leverage points. Dividing by
+    ``sqrt(1 - h)`` inflates residuals where the fit is most able to chase the data, which is
+    what lets the peak be recognised at all.
+
+    Returns ``(params, scale, iterations, success)``. The final per-sample weights stay internal:
+    ``scale`` and ``iterations`` are what the QC output records about how the estimator behaved.
+    """
+    from scipy.optimize import least_squares  # type: ignore
+
+    base = np.asarray(base_weights, dtype=np.float64)
+    robust = np.ones_like(base)
+    params = np.asarray(x0, dtype=np.float64).copy()
+    scale = float("nan")
+    success = False
+    iterations = 0
+
+    for iterations in range(1, TUKEY_MAX_ITERATIONS + 1):
+        sqrt_w = np.sqrt(base * robust)
+        result = least_squares(lambda p: residual_fn(p) * sqrt_w, x0=params, **lsq_kwargs)
+        params = np.asarray(result.x, dtype=np.float64)
+        success = _lsq_result_usable(result)
+
+        resid = np.asarray(residual_fn(params), dtype=np.float64)
+        finite = np.isfinite(resid)
+        if not np.any(finite):
+            break
+
+        mad = float(np.median(np.abs(resid[finite] - np.median(resid[finite]))))
+        scale = 1.4826 * mad
+        if not math.isfinite(scale) or scale <= 0.0:
+            # Residuals are degenerate (an essentially exact fit); nothing to down-weight.
+            robust = np.ones_like(base)
+            break
+
+        leverage = _jacobian_leverage(np.asarray(result.jac, dtype=np.float64), resid.size)
+        denom = TUKEY_TUNING_CONSTANT * scale * np.sqrt(np.maximum(1.0 - leverage, 1e-12))
+        u = np.divide(resid, denom, out=np.zeros_like(resid), where=denom > 0)
+        updated = np.where(np.abs(u) < 1.0, (1.0 - u**2) ** 2, 0.0)
+        updated[~finite] = 0.0
+
+        if not np.any(base * updated > 0):
+            # Everything rejected; keep the previous weights rather than a null objective.
+            break
+
+        # Damp the update. Samples whose weight lands on the steep part of the bisquare curve
+        # -- here the frames just after the peak, where the measured curve is non-monotonic and
+        # a biexponential cannot fit both -- otherwise drive a limit cycle: the weight swings,
+        # which swings the fit, which swings the residual, and the loop never settles.
+        damped = 0.5 * (robust + updated)
+        converged = float(np.max(np.abs(damped - robust))) < TUKEY_WEIGHT_TOLERANCE
+        robust = damped
+        if converged:
+            break
+
+    return params, scale, iterations, success
+
+
+def _jacobian_leverage(jac: np.ndarray, n: int) -> np.ndarray:
+    """Hat-matrix diagonal from a Jacobian, clipped into ``[0, 1)``."""
+    if jac.ndim != 2 or jac.shape[0] != n or jac.size == 0:
+        return np.zeros(n, dtype=np.float64)
+    try:
+        q, _ = np.linalg.qr(jac)
+    except np.linalg.LinAlgError:
+        return np.zeros(n, dtype=np.float64)
+    h = np.einsum("ij,ij->i", q, q)
+    return np.clip(np.nan_to_num(h, nan=0.0), 0.0, 1.0 - 1e-9)
+
+
+def _timer_step(timer: np.ndarray) -> float:
+    """Nominal frame time, used as the floor on the biexponential's upslope duration."""
+    time = np.asarray(timer, dtype=np.float64).reshape(-1)
+    if time.size < 2:
+        return 1.0
+    diffs = np.diff(time)
+    positive = diffs[diffs > 0]
+    if positive.size == 0:
+        return 1.0
+    return float(np.median(positive))
+
+
+def _parse_4float_override(config: DcePipelineConfig, key: str) -> np.ndarray:
+    value = _stage_override(config, key)
+    if isinstance(value, str):
+        parts = value.replace(",", " ").split()
+        parsed: List[float] = []
+        for token in parts:
+            num = _parse_numeric_token(token)
+            if num is None:
+                raise ValueError(f"{key} contains non-numeric token '{token}'")
+            parsed.append(float(num))
+        arr = np.array(parsed, dtype=np.float64)
+    else:
+        arr = np.asarray(value, dtype=np.float64).reshape(-1)
+    if arr.size != 4:
+        raise ValueError(f"{key} must contain exactly 4 numeric values")
+    return arr
+
+
+def _adjusted_rsquare(y_true: np.ndarray, y_fit: np.ndarray, n_params: int) -> float:
+    y = np.asarray(y_true, dtype=np.float64)
+    yhat = np.asarray(y_fit, dtype=np.float64)
+    mask = np.isfinite(y) & np.isfinite(yhat)
+    if np.count_nonzero(mask) <= (n_params + 1):
+        return float("nan")
+
+    y = y[mask]
+    yhat = yhat[mask]
+    ss_res = float(np.sum((y - yhat) ** 2))
+    ss_tot = float(np.sum((y - np.mean(y)) ** 2))
+    if ss_tot <= 0:
+        return 1.0
+    r2 = 1.0 - (ss_res / ss_tot)
+    n = float(y.size)
+    p = float(n_params)
+    return 1.0 - (1.0 - r2) * ((n - 1.0) / max(1.0, (n - p - 1.0)))
+
+
+AIF_FIT_PASSES = ("production", "timing")
+
+
+def _fit_aif_biexp(
+    config: DcePipelineConfig,
+    timer: np.ndarray,
+    curve: np.ndarray,
+    start_injection_min: float,
+    end_injection_min: float,
+    fitting_au: bool,
+    fit_pass: str = "production",
+) -> Dict[str, Any]:
+    """Fit the biexponential-with-linear-upslope AIF model.
+
+    ``fit_pass`` selects between the two passes this serves, which differ along one axis, not two:
+
+    - ``"production"`` (Stage B) takes ``t_base_end`` as an input -- the baseline-end precedence
+      upstream owns it -- and de-weights the peak, whose *height* is noise-inflated.
+    - ``"timing"`` (the Stage-A ``biexp_fit`` detector) fits ``t_base_end`` as a sixth parameter
+      and weights the peak fully, because the peak's *position* is the evidence it is built on.
+
+    The two settings are not independent: de-weighting the peak while fitting ``t_base_end`` drags
+    the baseline end earlier (measured on sub-10bbbdownsample it moved the fitted end from 1.80
+    frames to 1.16, i.e. end_ss 3 -> 2, which is simply wrong for that series). One named pass
+    keeps that coupling in the signature instead of leaving it to a comment.
+    """
+    if fit_pass not in AIF_FIT_PASSES:
+        raise ValueError(f"Unsupported fit_pass '{fit_pass}'. Allowed: {sorted(AIF_FIT_PASSES)}")
+    fit_t_base_end = fit_pass == "timing"
+
+    try:
+        from scipy.optimize import least_squares  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("scipy is required for Stage-B fitted AIF mode") from exc
+
+    timer = _as_1d_float(timer, "timer")
+    curve = _fill_nonfinite_1d(_as_1d_float(curve, "curve"))
+
+    start_idx = _nearest_index(timer, start_injection_min)
+    end_idx = _nearest_index(timer, end_injection_min)
+    if end_idx < start_idx:
+        end_idx = start_idx
+
+    step = np.zeros(timer.size, dtype=np.float64)
+    step[start_idx : end_idx + 1] = 1.0
+
+    weighted = curve * step
+    max_idx = int(np.argmax(weighted))
+    # The injection-window onset is `start_idx` by construction: truncating `step` at
+    # `max_idx` either leaves [start_idx, min(end_idx, max_idx)] non-empty, or empties it
+    # entirely (max_idx < start_idx, which happens when the windowed curve never exceeds
+    # zero) and restores the untruncated window. Either way the first set frame is start_idx.
+    baseline = float(np.mean(curve[: start_idx + 1]))
+    maxer = float(curve[max_idx])
+    if not math.isfinite(maxer) or maxer <= 0:
+        maxer = float(np.max(curve))
+        max_idx = int(np.argmax(curve))
+
+    lower = _parse_4float_override(config, "aif_lower_limits")
+    upper = _parse_4float_override(config, "aif_upper_limits")
+    initial = _parse_4float_override(config, "aif_initial_values")
+
+    upper[0] = max(1e-12, maxer * 2.0)
+    upper[1] = max(1e-12, maxer * 2.0)
+    initial[0] = max(1e-12, maxer * 0.5)
+    initial[1] = max(1e-12, maxer * 0.5)
+    initial = np.minimum(np.maximum(initial, lower + 1e-12), upper - 1e-12)
+
+    dt = _timer_step(timer)
+
+    # `t_base_end` is the end of the baseline: `timer[end_ss - 1]`, i.e. `start_injection_min`.
+    # The timing pass ranges over the whole pre-peak span rather than the injection window, which
+    # can collapse to a single point when the window spans one frame gap.
+    t_base_end_fixed = float(timer[start_idx])
+    t_base_end_lower = t_base_end_upper = t_base_end_fixed
+    if fit_t_base_end:
+        t_base_end_lower = float(timer[0])
+        t_base_end_upper = float(timer[max(0, max_idx - 1)])
+        if t_base_end_upper <= t_base_end_lower:
+            t_base_end_upper = min(float(timer[-1]), t_base_end_lower + dt)
+
+    # `t0_exp = t_base_end + delta`. The reparameterisation keeps the peak strictly after the
+    # baseline end for *any* fitted `t_base_end`; MATLAB's constant floor did not. `delta` bottoms
+    # out at one frame because `t_base_end` sits on the last baseline sample, so the earliest the
+    # peak can sit is the next one -- a curve that jumps straight from baseline to max in a single
+    # frame is exactly `delta == dt`, with no interior samples on the ramp.
+    t0_exp_upper_idx = min(timer.size - 1, end_idx + max(1, int(round(0.2 * timer.size))))
+    t0_exp_upper = float(timer[t0_exp_upper_idx])
+
+    delta_lower = dt
+    delta_upper = max(delta_lower, t0_exp_upper - t_base_end_lower)
+    # Seed from the *unsnapped* injection window. Stage A reports a fractional `end_injection`
+    # (the fitted `t0_exp` of the timing pass); snapping it to `timer[end_idx]` would discard it.
+    delta_init = float(np.clip(end_injection_min - start_injection_min, delta_lower, delta_upper))
+
+    aif_maxiter = int(_safe_float(_stage_override(config, "aif_MaxIter"), 1000))
+    max_nfev = int(_safe_float(_stage_override(config, "aif_MaxFunEvals"), aif_maxiter))
+    aif_tol_fun = max(_safe_float(_stage_override(config, "aif_TolFun"), 1e-20), np.finfo(np.float64).eps)
+    aif_tol_x = max(_safe_float(_stage_override(config, "aif_TolX"), 1e-23), np.finfo(np.float64).eps)
+    # Default matches dce_preferences.txt / dce_defaults.json. `Bisquare` was the default while
+    # the peak prior was the only guard against a noise-inflated peak; measured across 265
+    # sessions it made the production fit worse, not better -- adjusted R² mean 0.882 against
+    # 0.944 with it off, 106 sessions below 0.90 against 30, and a worst case of -1.46 (a fit
+    # worse than a horizontal line) against +0.57. It is still selectable. See S11 in
+    # project-management/projects/archived/batch-parity/aif_fitting_parity.md.
+    aif_robust_raw = _stage_override(config, "aif_Robust")
+    if fit_pass == "timing":
+        # The timing pass can opt out separately, and had to while `aif_Robust` defaulted to
+        # Bisquare: what is unreliable about the peak is its *height*, and rejecting it costs
+        # the timing pass its primary evidence for the peak's *position*, pulling both
+        # transition times early (S10). Now that both default to off this only matters when
+        # someone re-enables `aif_Robust` and wants the timing pass left alone.
+        aif_robust_raw = _stage_override_optional(config, "aif_Robust_timing", aif_robust_raw)
+    aif_robust_mode = str(aif_robust_raw).strip().lower()
+
+    # Every sample carries equal weight except the peak, which the production pass de-weights by a
+    # prior derived from how far it stands above the rest of the curve. That has to be data-based
+    # rather than residual-based: the peak has leverage 1 here, so the robust estimator
+    # (aif_Robust) cannot see it. See _aif_peak_weight, the `fit_pass` note above, and
+    # project-management/projects/archived/batch-parity/aif_fitting_parity.md.
+    peak_weight = 1.0
+    if fit_pass == "production":
+        peak_weight = _aif_peak_weight(
+            curve,
+            max_idx,
+            _safe_float(
+                _stage_override(config, "aif_peak_weight_exponent"),
+                float(_DEFAULTS.default_for("aif_peak_weight_exponent")),
+            ),
+        )
+    weights = np.ones(curve.size, dtype=np.float64)
+    weights[max_idx] = peak_weight
+    sqrt_weights = np.sqrt(weights)
+
+    # The timing pass carries `t_base_end` as a sixth parameter ahead of `delta`; the production
+    # pass holds it fixed and fits five.
+    if fit_t_base_end:
+        timing_lower = [t_base_end_lower, delta_lower]
+        timing_upper = [t_base_end_upper, delta_upper]
+        timing_initial = [float(np.clip(t_base_end_fixed, t_base_end_lower, t_base_end_upper)), delta_init]
+    else:
+        timing_lower = [delta_lower]
+        timing_upper = [delta_upper]
+        timing_initial = [delta_init]
+    param_lower = np.concatenate([lower, np.array(timing_lower, dtype=np.float64)])
+    param_upper = np.concatenate([upper, np.array(timing_upper, dtype=np.float64)])
+    param_initial = np.clip(
+        np.concatenate([initial, np.array(timing_initial, dtype=np.float64)]), param_lower, param_upper
+    )
+    fit_param_count = int(param_initial.size)
+
+    def unpack_timing(params: np.ndarray) -> Tuple[float, float]:
+        if fit_t_base_end:
+            return float(params[4]), float(params[5])
+        return t_base_end_fixed, float(params[4])
+
+    def predict(params: np.ndarray) -> np.ndarray:
+        t_base_end, delta_t = unpack_timing(params)
+        return _aif_biexp_con(
+            timer,
+            float(params[0]),
+            float(params[1]),
+            float(params[2]),
+            float(params[3]),
+            t_base_end,
+            t_base_end + delta_t,
+            fitting_au=fitting_au,
+            baseline=baseline,
+        )
+
+    robust_scale = float("nan")
+    robust_iterations = 0
+
+    fit_success = True
+    params = param_initial.copy()
+    try:
+        lsq_kwargs: Dict[str, Any] = {
+            "bounds": (param_lower, param_upper),
+            "method": "trf",
+            "max_nfev": max_nfev,
+            "ftol": aif_tol_fun,
+            "xtol": aif_tol_x,
+        }
+
+        if aif_robust_mode == "bisquare":
+            # Match MATLAB's `fitoptions('Robust','Bisquare')` explicitly rather than reaching
+            # for one of scipy's `loss=` functions. They are not the same estimator: scipy's
+            # `f_scale` (the residual magnitude where the loss starts biting) defaults to 1.0,
+            # which on concentration-scale residuals leaves the loss quadratic everywhere, and
+            # even with a MAD-derived `f_scale` a Cauchy rho never rejects a sample outright the
+            # way a bisquare does. Measured on sub-10bbbdynamic that gap moved `tissue_uptake`'s
+            # ROI-xls error from 0.049 to 0.099.
+            params, robust_scale, robust_iterations, fit_success = _tukey_irls(
+                residual_fn=lambda p: predict(p) - curve,
+                x0=param_initial,
+                base_weights=weights,
+                lsq_kwargs=lsq_kwargs,
+            )
+        else:
+            aif_loss = _scipy_loss_from_robust(aif_robust_raw)
+            if aif_loss != "linear":
+                lsq_kwargs["loss"] = aif_loss
+            result = least_squares(
+                lambda p: (predict(p) - curve) * sqrt_weights, x0=param_initial, **lsq_kwargs
+            )
+            params = np.asarray(result.x, dtype=np.float64)
+            fit_success = _lsq_result_usable(result)
+    except Exception:
+        fit_success = False
+
+    fitted = predict(params)
+    t_base_end_fit, delta_fit = unpack_timing(params)
+    t0_exp_fit = t_base_end_fit + delta_fit
+    # Always report all six coefficients, matching MATLAB's `x = [A B c d t_base_end t0_exp]`,
+    # even though `t_base_end` was held fixed here.
+    fit_params = np.array(
+        [float(params[0]), float(params[1]), float(params[2]), float(params[3]), t_base_end_fit, t0_exp_fit],
+        dtype=np.float64,
+    )
+
+    # Diagnostic: delta's start point comes from the Stage-A timing pass, which fitted both
+    # transition times on the signal curve. Now that every sample is weighted, the upslope is
+    # weighted here too and delta is genuinely identified -- so a large move away from that
+    # start point means the concentration curve and the signal curve disagree about the timing,
+    # which is worth surfacing rather than a flat-direction artefact. Flag drift over a frame.
+    delta_drift = float(delta_fit) - float(delta_init)
+    t0_exp_drifted = bool(abs(delta_drift) > dt)
+
+    fit_step_window = np.array([t_base_end_fit, t0_exp_fit], dtype=np.float64)
+    return {
+        "curve": fitted,
+        "params": fit_params,
+        "step": fit_step_window,
+        "baseline": baseline,
+        "max_index": max_idx,
+        "fit_t_base_end": bool(fit_t_base_end),
+        "peak_weight": float(peak_weight),
+        "robust_mode": aif_robust_mode,
+        "robust_scale": robust_scale,
+        "robust_iterations": robust_iterations,
+        "t0_exp_drifted": t0_exp_drifted,
+        "delta_init": float(delta_init),
+        "delta_drift": delta_drift,
+        "t_base_end": t_base_end_fit,
+        "t0_exp": t0_exp_fit,
+        "delta": float(delta_fit),
+        "fit_seed_window": np.array([float(timer[start_idx]), float(timer[end_idx])], dtype=np.float64),
+        "rsquare_adj": _adjusted_rsquare(curve, fitted, n_params=fit_param_count),
+        "fit_success": fit_success,
+    }
+
+
+def _load_imported_aif(path: Path) -> Dict[str, Any]:
+    p = path.expanduser().resolve()
+    suffix = p.suffix.lower()
+
+    def _normalize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+        for key in ("Bdata", "bdata"):
+            nested = payload.get(key)
+            if isinstance(nested, dict):
+                payload = nested
+                break
+
+        cp_use = payload.get("Cp_use", payload.get("cp_use"))
+        stlv_use = payload.get("Stlv_use", payload.get("stlv_use"))
+        timer = payload.get("timer", payload.get("Timer"))
+        start_injection = payload.get("start_injection", payload.get("start_injection_min"))
+        return {
+            "Cp_use": _as_1d_float(cp_use, "Cp_use") if cp_use is not None else None,
+            "Stlv_use": _as_1d_float(stlv_use, "Stlv_use") if stlv_use is not None else None,
+            "timer": _as_1d_float(timer, "timer") if timer is not None else None,
+            "start_injection": float(start_injection) if start_injection is not None else None,
+        }
+
+    if suffix == ".json":
+        payload = _load_json(p)
+        out = _normalize_payload(payload)
+        if out["Cp_use"] is None:
+            raise ValueError(f"Imported AIF JSON {p} missing Cp_use")
+        return out
+
+    if suffix in {".csv", ".txt", ".tsv"}:
+        delimiter = "," if suffix == ".csv" else None
+        data = np.loadtxt(p, delimiter=delimiter)
+        data = np.asarray(data, dtype=np.float64)
+        if data.ndim == 1:
+            return {"Cp_use": _as_1d_float(data, "Cp_use"), "Stlv_use": None, "timer": None, "start_injection": None}
+        if data.shape[1] == 1:
+            return {
+                "Cp_use": _as_1d_float(data[:, 0], "Cp_use"),
+                "Stlv_use": None,
+                "timer": None,
+                "start_injection": None,
+            }
+        stlv_col = data[:, 2] if data.shape[1] > 2 else None
+        return {
+            "Cp_use": _as_1d_float(data[:, 1], "Cp_use"),
+            "Stlv_use": _as_1d_float(stlv_col, "Stlv_use") if stlv_col is not None else None,
+            "timer": _as_1d_float(data[:, 0], "timer"),
+            "start_injection": None,
+        }
+
+    if suffix == ".npy":
+        arr = np.asarray(np.load(p), dtype=np.float64)
+        if arr.ndim == 1:
+            return {"Cp_use": _as_1d_float(arr, "Cp_use"), "Stlv_use": None, "timer": None, "start_injection": None}
+        if arr.ndim == 2 and arr.shape[1] >= 2:
+            stlv_col = arr[:, 2] if arr.shape[1] > 2 else None
+            return {
+                "Cp_use": _as_1d_float(arr[:, 1], "Cp_use"),
+                "Stlv_use": _as_1d_float(stlv_col, "Stlv_use") if stlv_col is not None else None,
+                "timer": _as_1d_float(arr[:, 0], "timer"),
+                "start_injection": None,
+            }
+        raise ValueError(f"Unsupported NPY AIF array shape {arr.shape}")
+
+    if suffix == ".npz":
+        with np.load(p) as payload:
+            cp_key = next((k for k in ("Cp_use", "cp_use", "Cp", "cp") if k in payload), None)
+            if cp_key is None:
+                if len(payload.files) == 1:
+                    cp_key = payload.files[0]
+                else:
+                    raise ValueError(f"NPZ imported AIF {p} missing Cp_use")
+            timer_key = next((k for k in ("timer", "Timer", "time") if k in payload), None)
+            stlv_key = next((k for k in ("Stlv_use", "stlv_use", "Stlv", "stlv") if k in payload), None)
+            start_key = next((k for k in ("start_injection", "start_injection_min") if k in payload), None)
+            start_injection = float(payload[start_key]) if start_key is not None else None
+            return {
+                "Cp_use": _as_1d_float(payload[cp_key], "Cp_use"),
+                "Stlv_use": _as_1d_float(payload[stlv_key], "Stlv_use") if stlv_key is not None else None,
+                "timer": _as_1d_float(payload[timer_key], "timer") if timer_key is not None else None,
+                "start_injection": start_injection,
+            }
+
+    if suffix == ".mat":
+        try:
+            from scipy.io import loadmat  # type: ignore
+        except Exception as exc:
+            raise RuntimeError("scipy is required to read imported AIF .mat files") from exc
+
+        raw = loadmat(str(p), squeeze_me=True, struct_as_record=False)
+        payload: Dict[str, Any] = {}
+        for key, value in raw.items():
+            if key.startswith("__"):
+                continue
+            payload[key] = value
+        if "Bdata" in payload and not isinstance(payload["Bdata"], dict):
+            bdata = payload["Bdata"]
+            for key in ("Cp_use", "Stlv_use", "timer", "start_injection"):
+                if hasattr(bdata, key):
+                    payload[key] = getattr(bdata, key)
+        out = _normalize_payload(payload)
+        if out["Cp_use"] is None:
+            raise ValueError(f"Imported AIF MAT {p} missing Cp_use")
+        return out
+
+    raise ValueError(f"Unsupported imported AIF format: {p}")
+
+
+def _resample_or_pad_curve(curve: np.ndarray, dst_timer: np.ndarray, src_timer: Optional[np.ndarray]) -> np.ndarray:
+    target = np.asarray(dst_timer, dtype=np.float64)
+    source = _as_1d_float(curve, "curve")
+
+    if src_timer is not None:
+        src = _as_1d_float(src_timer, "src_timer")
+        if src.size == source.size:
+            order = np.argsort(src)
+            src_sorted = src[order]
+            source_sorted = source[order]
+            return np.interp(target, src_sorted, source_sorted, left=source_sorted[0], right=source_sorted[-1])
+
+    if source.size == target.size:
+        return source
+    if source.size > target.size:
+        return source[: target.size]
+
+    out = np.empty(target.size, dtype=np.float64)
+    out[: source.size] = source
+    out[source.size :] = source[-1]
+    return out
+
+
+def _align_imported_curve(
+    curve: np.ndarray,
+    import_timer: Optional[np.ndarray],
+    import_start: Optional[float],
+    timer: np.ndarray,
+    data_start: float,
+) -> Tuple[np.ndarray, int]:
+    out = _as_1d_float(curve, "curve").copy()
+    if import_timer is None or import_start is None or out.size != timer.size:
+        return out, 0
+
+    aif_start_idx = _nearest_index(import_timer, import_start)
+    data_start_idx = _nearest_index(timer, data_start)
+    shift = int(data_start_idx - aif_start_idx)
+    if shift == 0:
+        return out, 0
+
+    shifted = np.roll(out, shift)
+    n = shifted.size
+    if shift < 0:
+        pad = -shift
+        if pad >= n:
+            shifted[:] = shifted[0]
+        else:
+            fill = shifted[n - pad - 1]
+            shifted[n - pad :] = fill
+    else:
+        if shift >= n:
+            shifted[:] = 0.0
+        else:
+            shifted[:shift] = 0.0
+    return shifted, shift
+
+
+def _mark_aif_transition_times(ax: Any, t_base_end: Optional[float], t0_exp: Optional[float]) -> None:
+    """Draw the AIF transition times as vertical lines spanning the axes.
+
+    Counterpart to MATLAB's ``plot_aif_transition_lines``. Drawn as event markers rather than as a
+    data series that is zero everywhere with a spike at each location -- which is what this
+    replaced, and which rescaled the y axis and looked like a signal. ``axvline`` spans the axes in
+    axes coordinates, so it stays full-height and contributes nothing to the y data limits.
+    """
+    for value, style, color, label in (
+        (t_base_end, "--", "#d95319", "End of baseline (t_base_end)"),
+        (t0_exp, ":", "#7e2f8e", "End of injection (t0_exp)"),
+    ):
+        if value is not None and math.isfinite(float(value)):
+            ax.axvline(float(value), linestyle=style, color=color, linewidth=1.5, label=label)
+
+
+def _save_stage_b_qc_figure(
+    output_dir: Path,
+    timer: np.ndarray,
+    cp_roi: np.ndarray,
+    cp_use: np.ndarray,
+    stlv_roi: np.ndarray,
+    stlv_use: np.ndarray,
+    t_base_end: Optional[float] = None,
+    t0_exp: Optional[float] = None,
+) -> Dict[str, str]:
+    plt = _require_pyplot("Stage-B QC figure saving")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    fig = plt.figure(figsize=(10, 4))
+    ax1 = fig.add_subplot(1, 2, 1)
+    ax2 = fig.add_subplot(1, 2, 2)
+
+    ax1.plot(timer, cp_roi, "r.", label="Original Plasma Curve")
+    ax1.plot(timer, cp_use, "b", label="Selected Curve")
+    _mark_aif_transition_times(ax1, t_base_end, t0_exp)
+    ax1.set_xlabel("Time (min)")
+    ax1.set_ylabel("Concentration (mM)")
+    ax1.legend(loc="best", fontsize="small")
+
+    ax2.plot(timer, stlv_roi, "r.", label="Original Plasma Curve: Raw data")
+    ax2.plot(timer, stlv_use, "b", label="Selected Curve")
+    _mark_aif_transition_times(ax2, t_base_end, t0_exp)
+    ax2.set_xlabel("Time (min)")
+    ax2.set_ylabel("Signal (a.u)")
+    ax2.legend(loc="best", fontsize="small")
+
+    fig.tight_layout()
+    out_path = output_dir / "dceAIF_fitting.png"
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+    return {"aif_fitting_png": str(out_path)}
+
+
+def _run_stage_b_real(config: DcePipelineConfig, stage_a: Dict[str, Any]) -> Dict[str, Any]:
+    arrays = stage_a.get("arrays")
+    if not isinstance(arrays, dict):
+        raise ValueError("Stage-B real mode requires Stage-A arrays")
+
+    cp_all = _as_time_by_voxel(arrays["Cp"], "Cp")
+    ct_all = _as_time_by_voxel(arrays["Ct"], "Ct")
+    stlv_all = _as_time_by_voxel(arrays["Stlv"], "Stlv")
+    sttum_all = _as_time_by_voxel(arrays["Sttum"], "Sttum")
+
+    n_time = cp_all.shape[0]
+    if ct_all.shape[0] != n_time or stlv_all.shape[0] != n_time or sttum_all.shape[0] != n_time:
+        raise ValueError("Stage-A arrays Cp/Ct/Stlv/Sttum must have matching time dimension")
+
+    timer_full = _resolve_stage_b_timer(config, stage_a, n_time)
+    restrict_fit_start_min, restrict_fit_end_min = _resolve_stage_b_limits(config)
+    start_idx, end_idx = _restrict_timer_window(timer_full, restrict_fit_start_min, restrict_fit_end_min)
+    timer = timer_full[start_idx:end_idx]
+
+    cp = cp_all[start_idx:end_idx, :]
+    ct = ct_all[start_idx:end_idx, :]
+    stlv = stlv_all[start_idx:end_idx, :]
+    sttum = sttum_all[start_idx:end_idx, :]
+    cp_roi = np.mean(cp, axis=1)
+    stlv_roi = np.mean(stlv, axis=1)
+
+    start_injection_min, end_injection_min = _resolve_stage_b_injection_window(config, stage_a, timer_full)
+    start_injection_min = float(np.clip(start_injection_min, timer[0], timer[-1]))
+    end_injection_min = float(np.clip(end_injection_min, start_injection_min, timer[-1]))
+
+    aif_mode = _resolve_stage_b_aif_mode(config)
+    fit_info: Dict[str, Any] = {}
+    import_shift = 0
+
+    if aif_mode == "fitted":
+        fit_cp = _fit_aif_biexp(
+            config,
+            timer=timer,
+            curve=cp_roi,
+            start_injection_min=start_injection_min,
+            end_injection_min=end_injection_min,
+            fitting_au=False,
+        )
+        fit_stlv = _fit_aif_biexp(
+            config,
+            timer=timer,
+            curve=stlv_roi,
+            start_injection_min=start_injection_min,
+            end_injection_min=end_injection_min,
+            fitting_au=True,
+        )
+        cp_use = fit_cp["curve"]
+        stlv_use = fit_stlv["curve"]
+        fit_info = {
+            "fit_peak_weight_cp": float(fit_cp["peak_weight"]),
+            "fit_peak_weight_stlv": float(fit_stlv["peak_weight"]),
+            "fit_robust_mode_cp": str(fit_cp["robust_mode"]),
+            "fit_robust_scale_cp": float(fit_cp["robust_scale"]),
+            "fit_robust_iterations_cp": int(fit_cp["robust_iterations"]),
+            "fit_robust_mode_stlv": str(fit_stlv["robust_mode"]),
+            "fit_robust_scale_stlv": float(fit_stlv["robust_scale"]),
+            "fit_robust_iterations_stlv": int(fit_stlv["robust_iterations"]),
+            "fit_delta_cp": float(fit_cp["delta"]),
+            "fit_delta_stlv": float(fit_stlv["delta"]),
+            # The fit's own seed, i.e. after clipping to the delta bounds -- so `fit_delta_cp`
+            # minus this is exactly the drift the warning below reports. The raw
+            # `end_injection_min - start_injection_min` would not match when clipping bit.
+            "fit_delta_init": float(fit_cp["delta_init"]),
+            "fit_t0_exp_drifted_cp": bool(fit_cp["t0_exp_drifted"]),
+            "fit_t0_exp_drifted_stlv": bool(fit_stlv["t0_exp_drifted"]),
+            "fit_success_cp": bool(fit_cp["fit_success"]),
+            "fit_success_stlv": bool(fit_stlv["fit_success"]),
+            "fit_rsquared_cp_adj": float(fit_cp["rsquare_adj"]),
+            "fit_rsquared_stlv_adj": float(fit_stlv["rsquare_adj"]),
+            "fit_params_cp": fit_cp["params"],
+            "fit_params_stlv": fit_stlv["params"],
+            "fit_t_base_end_cp": float(fit_cp["t_base_end"]),
+            "fit_t0_exp_cp": float(fit_cp["t0_exp"]),
+            "fit_t_base_end_stlv": float(fit_stlv["t_base_end"]),
+            "fit_t0_exp_stlv": float(fit_stlv["t0_exp"]),
+        }
+        if fit_cp["t0_exp_drifted"]:
+            warnings.warn(
+                "Stage-B AIF fit moved the upslope duration by "
+                f"{float(fit_cp['delta_drift']):+.4f} min, from {float(fit_cp['delta_init']):.4f} "
+                f"to {float(fit_cp['delta']):.4f}. The start point came from the Stage-A timing "
+                "fit on the signal curve, so a move this large means the concentration curve "
+                "disagrees with it about the bolus timing. Check the baseline-end and "
+                "injection-window detection.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        aif_name = "fitted"
+    elif aif_mode == "raw":
+        cp_use = cp_roi.copy()
+        stlv_use = stlv_roi.copy()
+        aif_name = "raw"
+    else:
+        # `_resolve_stage_b_aif_mode` already rejects imported mode without a path, so
+        # this cannot be None; falling back to Path("") only buried that error message.
+        imported_path = _resolve_imported_aif_path(config)
+        assert imported_path is not None
+        imported = _load_imported_aif(imported_path)
+        cp_use = _resample_or_pad_curve(imported["Cp_use"], timer, imported["timer"])
+        imported_stlv = imported["Stlv_use"] if imported["Stlv_use"] is not None else imported["Cp_use"]
+        stlv_use = _resample_or_pad_curve(imported_stlv, timer, imported["timer"])
+        cp_use, import_shift = _align_imported_curve(
+            cp_use,
+            import_timer=imported["timer"],
+            import_start=imported["start_injection"],
+            timer=timer,
+            data_start=start_injection_min,
+        )
+        stlv_use, _ = _align_imported_curve(
+            stlv_use,
+            import_timer=imported["timer"],
+            import_start=imported["start_injection"],
+            timer=timer,
+            data_start=start_injection_min,
+        )
+        aif_name = "imported"
+
+    # Only the fitted mode has transition times to mark; raw/imported curves have none.
+    figure_paths: Dict[str, str] = {}
+    if _to_bool(_stage_override(config, "save_aif_figure"), True):
+        figure_paths = _save_stage_b_qc_figure(
+            output_dir=config.output_dir,
+            timer=timer,
+            cp_roi=cp_roi,
+            cp_use=cp_use,
+            stlv_roi=stlv_roi,
+            stlv_use=stlv_use,
+            t_base_end=fit_info.get("fit_t_base_end_cp"),
+            t0_exp=fit_info.get("fit_t0_exp_cp"),
+        )
+
+    step = np.array([start_injection_min, end_injection_min], dtype=np.float64)
+    time_resolution_min = float(stage_a.get("time_resolution_min", np.median(np.diff(timer_full))))
+    result: Dict[str, Any] = {
+        "stage": "B",
+        "status": "ok",
+        "impl": "real",
+        "aif_mode": aif_mode,
+        "aif_name": aif_name,
+        "quant": bool(stage_a.get("quant", True)),
+        "start_time_index": int(start_idx + 1),  # 1-based for MATLAB compatibility
+        "end_time_index": int(end_idx),  # 1-based inclusive end
+        "start_injection_min": start_injection_min,
+        "end_injection_min": end_injection_min,
+        "time_resolution_min": time_resolution_min,
+        "numvoxels": int(ct.shape[1]),
+        "import_shift": int(import_shift),
+        "figure_paths": figure_paths,
+        "arrays": {
+            "CpROI": cp_roi,
+            "Cp_use": cp_use,
+            "StlvROI": stlv_roi,
+            "Stlv_use": stlv_use,
+            "timer": timer,
+            "Ct": ct,
+            "Sttum": sttum,
+            "step": step,
+        },
+    }
+
+    if fit_info:
+        result.update(fit_info)
+
+    for name in ("R1tTOI", "R1tLV", "deltaR1LV", "deltaR1TOI"):
+        if name in arrays:
+            result["arrays"][name] = _as_time_by_voxel(arrays[name], name)[start_idx:end_idx, :]
+    for name in ("T1TUM", "tumind", "Sss", "Ssstum"):
+        if name in arrays:
+            result["arrays"][name] = np.asarray(arrays[name])
+
+    return result
+
+
+def _sanitize_name(text: str) -> str:
+    out = re.sub(r"[^A-Za-z0-9._-]+", "_", text.strip())
+    return out.strip("_") or "roi"
+
+
+def _safe_float(value: Any, default: float) -> float:
+    parsed = _parse_numeric_token(value)
+    if parsed is not None and math.isfinite(parsed):
+        return float(parsed)
+    return float(default)
+
+
+def _stage_d_fit_prefs(config: DcePipelineConfig) -> Dict[str, Any]:
+    """Stage-D fit settings for this run: the defaults file, with run-config overrides.
+
+    The `voxel_*` -> backend-setting-name mapping lives in `dce_config` so the pipeline,
+    the fit backends and the tests all resolve one set of numbers.
+    """
+    return dce_config.stage_d_prefs(config)
+
+
+def _apply_model_specific_prefs(prefs: Dict[str, Any], model_name: str) -> Dict[str, Any]:
+    out = dict(prefs)
+    prefix = f"{model_name}_"
+    for key, raw in prefs.items():
+        if not key.startswith(prefix):
+            continue
+        base = key[len(prefix) :]
+        if raw is None:
+            continue
+        if base in {"max_iter", "max_nfev", "gpu_max_n_iterations"}:
+            try:
+                out[base] = int(float(raw))
+            except Exception:
+                continue
+        else:
+            parsed = _parse_numeric_token(raw)
+            out[base] = float(parsed) if parsed is not None else raw
+    return out
+
+
+def _stage_d_selected_models(config: DcePipelineConfig) -> Tuple[List[str], List[str]]:
+    selected: List[str] = []
+    for flag_key, model_name in MODEL_SELECTION_ORDER:
+        if int(config.model_flags.get(flag_key, 0)) == 1 and model_name not in selected:
+            selected.append(model_name)
+    if not selected:
+        selected = ["tofts"]
+
+    supported: List[str] = []
+    skipped: List[str] = []
+    for model in selected:
+        if model in SUPPORTED_STAGE_D_MODELS:
+            supported.append(model)
+        else:
+            skipped.append(model)
+    return supported, skipped
+
+
+def _smooth_time_matrix(data: np.ndarray, mode: str, window: int) -> np.ndarray:
+    """Zero-padded ``mode="same"`` moving average down the time axis.
+
+    The per-column loop stays: the batched alternatives (`uniform_filter1d`'s
+    running sum, or `sliding_window_view @ kernel` dispatching to BLAS) both
+    reassociate the additions and so drift from the MATLAB reference.
+    """
+    if mode == "none" or window <= 1:
+        return np.asarray(data, dtype=np.float64)
+
+    source = np.asarray(data, dtype=np.float64)
+    smoothed = np.empty_like(source)
+    kernel = np.ones(int(window), dtype=np.float64) / float(window)
+    for col in range(source.shape[1]):
+        smoothed[:, col] = np.convolve(source[:, col], kernel, mode="same")
+    return smoothed
+
+
+def _try_load_reference_nifti(config: DcePipelineConfig) -> Optional[Dict[str, Any]]:
+    try:
+        import nibabel as nib  # type: ignore
+    except Exception:
+        return None
+
+    candidates = config.dynamic_files + config.t1map_files + config.aif_files
+    for path in candidates:
+        try:
+            image = nib.load(str(path))
+            shape = tuple(int(v) for v in image.shape[:3])
+            header = image.header.copy()
+            return {"shape": shape, "affine": image.affine, "header": header}
+        except Exception:
+            continue
+    return None
+
+
+def _write_tsv_xls(path: Path, rows: List[List[Any]]) -> None:
+    lines: List[str] = []
+    for row in rows:
+        cells: List[str] = []
+        for value in row:
+            if isinstance(value, (float, np.floating)):
+                cells.append(f"{float(value):.10g}")
+            else:
+                cells.append(str(value))
+        lines.append("\t".join(cells))
+    path.write_text("\n".join(lines) + "\n")
+
+
+def _save_map_volume(
+    config: DcePipelineConfig,
+    out_base: str,
+    volume: np.ndarray,
+    reference: Optional[Dict[str, Any]],
+) -> str:
+    """Write one scalar map as NIfTI in the reference geometry, falling back to .npy.
+
+    Shared by the parameter and QoF map writers so a header/affine fix lands in
+    one place instead of two.
+    """
+    if reference is not None:
+        try:
+            import nibabel as nib  # type: ignore
+
+            header = reference["header"].copy()
+            header.set_data_dtype(np.float32)
+            out_path = config.output_dir / f"{out_base}.nii.gz"
+            nib.save(nib.Nifti1Image(volume, reference["affine"], header), str(out_path))
+            return str(out_path)
+        except Exception:
+            pass
+
+    out_path = config.output_dir / f"{out_base}.npy"
+    np.save(out_path, volume)
+    return str(out_path)
+
+
+def _scatter_to_volume(
+    values: np.ndarray,
+    coords: Tuple[np.ndarray, ...],
+    spatial_shape: Tuple[int, int, int],
+    fill: float,
+) -> np.ndarray:
+    """Scatter per-voxel values back into a spatial volume, filling the rest with `fill`.
+
+    `fill` differs by caller on purpose -- parameter maps use 0.0, QoF maps NaN --
+    so it stays an explicit argument rather than a default.
+    """
+    volume = np.full(spatial_shape, fill, dtype=np.float32)
+    volume[coords] = np.asarray(values, dtype=np.float32)
+    return volume
+
+
+def _write_param_maps(
+    config: DcePipelineConfig,
+    rootname: str,
+    model_name: str,
+    param_names: List[str],
+    fit_values: np.ndarray,
+    tumind: np.ndarray,
+    spatial_shape: Optional[Tuple[int, int, int]],
+    reference: Optional[Dict[str, Any]] = None,
+) -> Dict[str, str]:
+    write_maps = _to_bool(_stage_override(config, "write_param_maps"), True)
+    if not write_maps or spatial_shape is None:
+        return {}
+
+    if reference is None:
+        reference = _try_load_reference_nifti(config)
+    paths: Dict[str, str] = {}
+    coords = np.unravel_index(tumind.astype(np.int64), spatial_shape, order="F")
+
+    for idx, param in enumerate(param_names):
+        if idx >= fit_values.shape[1]:
+            break
+        volume = _scatter_to_volume(fit_values[:, idx], coords, spatial_shape, 0.0)
+        paths[param] = _save_map_volume(
+            config, f"{rootname}_{model_name}_fit_{param}", volume, reference
+        )
+
+    return paths
+
+
+def _write_qof_maps(
+    config: DcePipelineConfig,
+    rootname: str,
+    model_name: str,
+    ct_voxel: np.ndarray,
+    voxel_results: np.ndarray,
+    tumind: np.ndarray,
+    spatial_shape: Optional[Tuple[int, int, int]],
+    timer: np.ndarray,
+    start_injection_min: float,
+    end_injection_min: Optional[float],
+    reference: Optional[Dict[str, Any]] = None,
+) -> Dict[str, str]:
+    """Write per-voxel quality-of-fit maps (σ, reduced χ², reliable mask) next to the param maps.
+
+    Opt-in via ``stage_overrides.write_qof_maps``. Uses estimator-B σ with eBayes variance
+    moderation (`dce_qof`); ``reliable ⟺ χ²_ν ≤ qof_chi2_max`` (default 6.0). No-op when disabled,
+    the model is unsupported, or there is no spatial reference — never fails the pipeline.
+    """
+    if not _to_bool(_stage_override(config, "write_qof_maps"), False):
+        return {}
+    if spatial_shape is None:
+        return {}
+    try:
+        import dce_qof  # local import: optional feature, keeps startup light
+
+        ct_arr = np.asarray(ct_voxel, dtype=np.float64)
+        n_obs = int(ct_arr.shape[0])
+        dt = float(timer[1] - timer[0]) if np.asarray(timer).size > 1 else 0.0
+        t0 = float(timer[0]) if np.asarray(timer).size else 0.0
+        window = dce_qof.bolus_window_from_timing(
+            start_injection_min, end_injection_min, dt, n_obs, t0
+        )
+
+        chi2_max = _safe_float(_stage_override(config, "qof_chi2_max"), 6.0)
+        res = dce_qof.compute_qof_arrays(
+            model_name, ct_arr, np.asarray(voxel_results, dtype=np.float64),
+            window=window, n_obs=n_obs, shrink_sigma=True, chi2_reliable_max=chi2_max,
+        )
+    except Exception:
+        # QoF is a best-effort diagnostic; an unsupported model or numeric edge case must not
+        # break the fit outputs.
+        return {}
+
+    if reference is None:
+        reference = _try_load_reference_nifti(config)
+    coords = np.unravel_index(np.asarray(tumind, dtype=np.int64), spatial_shape, order="F")
+    layers = {
+        "qof_sigma": res["sigma"],
+        "qof_chi2nu": res["chi2v"],
+        "qof_reliable": res["reliable"].astype(np.float32),
+    }
+    paths: Dict[str, str] = {}
+    for name, values in layers.items():
+        volume = _scatter_to_volume(values, coords, spatial_shape, np.nan)
+        paths[name] = _save_map_volume(
+            config, f"{rootname}_{model_name}_fit_{name}", volume, reference
+        )
+    return paths
+
+
+def _fit_fxr_curve(
+    model_name: str,
+    ct: np.ndarray,
+    cp: np.ndarray,
+    timer: np.ndarray,
+    prefs: Dict[str, Any],
+    r1o: Optional[float],
+    relaxivity: float,
+    fw: float,
+) -> np.ndarray:
+    """Per-voxel fxr fit -- the one model outside the shared batched Stage-D architecture.
+
+    fxr's per-voxel R1 baseline (`r1o`) can't be batched the way the five
+    models in `_stage_d_fit_funcs()` are, so it keeps the older
+    one-voxel-at-a-time calling convention. `model_name` is still checked
+    (rather than assumed) so a future model accidentally routed here -- e.g.
+    because it wasn't added to `_MODEL_SPECS` -- fails loudly instead of
+    silently mis-fitting.
+    """
+    if model_name != "fxr":
+        raise ValueError(f"Unsupported model '{model_name}'")
+    if r1o is None:
+        raise ValueError("FXR fitting requires R1 baseline values")
+    # `model_fxr_fit` takes Iterable[float] and rebuilds its own float lists, so
+    # converting here just does the work twice -- once per voxel.
+    return np.asarray(
+        model_fxr_fit(
+            ct,
+            cp,
+            timer,
+            float(r1o),
+            float(r1o),
+            float(relaxivity),
+            float(fw),
+            prefs,
+        ),
+        dtype=np.float64,
+    )
+
+
+# Each fitted parameter contributes a value column plus a CI low/high pair, and every
+# layout carries one SSE column, so n_params == (len(param_names) - 1) / 3. Deriving it
+# keeps this from drifting out of step with MODEL_LAYOUTS. The model set stays explicit:
+# `auc` has a layout but no forward model in `_predict_curves_batch`, and must keep
+# resolving to None there so its voxels return NaN rather than entering the fxr branch.
+_CFIT_MIN_PARAMS = {
+    name: (len(MODEL_LAYOUTS[name]["param_names"]) - 1) // 3
+    for name in ("tofts", "patlak", "ex_tofts", "tissue_uptake", "fxr", "2cxm")
+}
+
+
+def _predict_curves_batch(
+    model_name: str,
+    fit_results: np.ndarray,
+    cp: np.ndarray,
+    timer: np.ndarray,
+    *,
+    r1o_vector: Optional[np.ndarray],
+    relaxivity: float,
+    fw: float,
+) -> np.ndarray:
+    """Forward curve for every fitted voxel at once; returns (n_time, n_voxels).
+
+    Voxels with unusable parameters get a NaN column instead of aborting the batch.
+    Nothing here depends on which backend produced `fit_results` -- the post-fit
+    path re-evaluates every voxel in Python even on gpufit/cpufit runs.
+    """
+    n_time = int(timer.size)
+    n_voxels, n_params = fit_results.shape
+    need = _CFIT_MIN_PARAMS.get(model_name)
+    if need is None or n_params < need:
+        return np.full((n_time, n_voxels), np.nan, dtype=np.float64)
+
+    # A non-finite among the leading parameters makes the voxel unusable.
+    usable = np.all(np.isfinite(fit_results[:, : min(4, n_params)]), axis=1)
+    col = [fit_results[:, j] for j in range(n_params)]
+
+    with np.errstate(all="ignore"):
+        if model_name == "tofts":
+            pred = model_tofts_cfit_batch(col[0], col[1], cp, timer)
+        elif model_name == "ex_tofts":
+            pred = model_extended_tofts_cfit_batch(col[0], col[1], col[2], cp, timer)
+        elif model_name == "patlak":
+            pred = model_patlak_cfit_batch(col[0], col[1], cp, timer)
+        elif model_name == "tissue_uptake":
+            ktrans, fp, vp = col[0], col[1], col[2]
+            # The runners store Vp = (Fp + PS) * Tp with PS = Ktrans*Fp/(Fp - Ktrans),
+            # i.e. Vp = Tp * Fp^2 / (Fp - Ktrans); invert that to recover the Tp the
+            # forward model takes. Voxels at the runner's PS-saturation edge
+            # (Ktrans >= Fp) carry no recoverable Tp, so they stay unusable.
+            usable &= (np.abs(fp) > 1e-12) & ((fp - ktrans) > 1e-12)
+            tp = vp * (fp - ktrans) / np.where(usable, fp * fp, 1.0)
+            usable &= np.isfinite(tp) & (tp > 0.0)
+            pred = model_tissue_uptake_cfit_batch(
+                ktrans, fp, np.where(usable, tp, 1.0), cp, timer
+            )
+        elif model_name == "2cxm":
+            pred = cxm2_curve_batch(col[0], col[1], col[2], col[3], cp, timer)
+        else:  # fxr
+            r1o = np.full(n_voxels, np.nan, dtype=np.float64)
+            if r1o_vector is not None:
+                supplied = np.asarray(r1o_vector, dtype=np.float64).reshape(-1)[:n_voxels]
+                r1o[: supplied.size] = supplied
+            usable &= np.isfinite(r1o)
+            pred = model_fxr_cfit_batch(
+                col[0], col[1], col[2], cp, timer, r1o, r1o, float(relaxivity), float(fw)
+            )
+
+    pred[:, ~usable] = np.nan
+    return pred
+
+
+def _compute_fit_residuals(
+    *,
+    model_name: str,
+    ct: np.ndarray,
+    fit_results: np.ndarray,
+    cp: np.ndarray,
+    timer: np.ndarray,
+    r1o_vector: Optional[np.ndarray],
+    relaxivity: float,
+    fw: float,
+) -> Optional[np.ndarray]:
+    if model_name == "auc":
+        return None
+    ct_use = np.asarray(ct, dtype=np.float64)
+    fit_use = np.asarray(fit_results, dtype=np.float64)
+    if ct_use.ndim != 2 or fit_use.ndim != 2:
+        return None
+    if ct_use.shape[1] != fit_use.shape[0]:
+        return None
+
+    residuals = np.full_like(ct_use, np.nan, dtype=np.float64)
+    pred = _predict_curves_batch(
+        model_name,
+        fit_use,
+        np.asarray(cp, dtype=np.float64).reshape(-1),
+        np.asarray(timer, dtype=np.float64).reshape(-1),
+        r1o_vector=r1o_vector,
+        relaxivity=relaxivity,
+        fw=fw,
+    )
+    if pred.shape[0] != ct_use.shape[0]:
+        return residuals
+    # A single non-finite sample invalidates the whole curve, as in the scalar path.
+    usable = np.all(np.isfinite(pred), axis=0)
+    residuals[:, usable] = ct_use[:, usable] - pred[:, usable]
+    return residuals
+
+
+def _write_postfit_arrays(
+    *,
+    config: DcePipelineConfig,
+    rootname: str,
+    model_name: str,
+    param_names: List[str],
+    timer: np.ndarray,
+    cp_use: np.ndarray,
+    ct_voxel: np.ndarray,
+    voxel_results: np.ndarray,
+    tumind: np.ndarray,
+    spatial_shape: Optional[Tuple[int, int, int]],
+    roi_names: List[str],
+    roi_curve: Optional[np.ndarray],
+    roi_results: np.ndarray,
+    r1o_voxel: Optional[np.ndarray],
+    r1o_roi: Optional[np.ndarray],
+    relaxivity: float,
+    fw: float,
+) -> Optional[str]:
+    write_arrays = _to_bool(_stage_override(config, "write_postfit_arrays"), False)
+    if not write_arrays:
+        return None
+
+    results_base = config.output_dir / f"{rootname}_{model_name}_fit"
+    out_path = Path(str(results_base) + "_postfit_arrays.npz")
+
+    payload: Dict[str, Any] = {
+        "model_name": np.asarray(model_name),
+        "param_names": np.asarray(param_names, dtype="<U64"),
+        "timer_min": np.asarray(timer, dtype=np.float64),
+        "cp_mM": np.asarray(cp_use, dtype=np.float64),
+        "ct_voxel_mM": np.asarray(ct_voxel, dtype=np.float64),
+        "voxel_results": np.asarray(voxel_results, dtype=np.float64),
+        "tumind_0based": np.asarray(tumind, dtype=np.int64),
+        "tumind_1based": np.asarray(tumind, dtype=np.int64) + 1,
+    }
+    if spatial_shape is not None:
+        payload["dimensions_xyz"] = np.asarray(spatial_shape, dtype=np.int64)
+
+    voxel_residuals = _compute_fit_residuals(
+        model_name=model_name,
+        ct=np.asarray(ct_voxel, dtype=np.float64),
+        fit_results=np.asarray(voxel_results, dtype=np.float64),
+        cp=np.asarray(cp_use, dtype=np.float64),
+        timer=np.asarray(timer, dtype=np.float64),
+        r1o_vector=r1o_voxel,
+        relaxivity=relaxivity,
+        fw=fw,
+    )
+    if voxel_residuals is not None:
+        payload["voxel_residuals"] = voxel_residuals
+
+    if roi_results.shape[0] > 0 and roi_curve is not None:
+        payload["roi_ct_mM"] = np.asarray(roi_curve, dtype=np.float64)
+        payload["roi_results"] = np.asarray(roi_results, dtype=np.float64)
+        payload["roi_names"] = np.asarray(roi_names, dtype="<U128")
+        roi_residuals = _compute_fit_residuals(
+            model_name=model_name,
+            ct=np.asarray(roi_curve, dtype=np.float64),
+            fit_results=np.asarray(roi_results, dtype=np.float64),
+            cp=np.asarray(cp_use, dtype=np.float64),
+            timer=np.asarray(timer, dtype=np.float64),
+            r1o_vector=r1o_roi,
+            relaxivity=relaxivity,
+            fw=fw,
+        )
+        if roi_residuals is not None:
+            payload["roi_residuals"] = roi_residuals
+
+    np.savez_compressed(out_path, **payload)
+    return str(out_path)
+
+
+# Both read the single cached probe in `accel_backend` rather than repeating its
+# imports; it reports `py*_imported` on every branch it can return.
+def _cpufit_import_available() -> bool:
+    return bool(probe_acceleration_backend().get("pycpufit_imported", False))
+
+
+def _gpufit_import_available() -> bool:
+    return bool(probe_acceleration_backend().get("pygpufit_imported", False))
+
+
+def _acceleration_backend_attempt_order(acceleration_backend: str) -> List[str]:
+    if acceleration_backend == "none":
+        return []
+    backends = [acceleration_backend]
+    if acceleration_backend.startswith("gpufit") and _cpufit_import_available():
+        backends.append("cpufit_cpu")
+    if acceleration_backend == "cpufit_cpu" and _gpufit_import_available():
+        backends.append("gpufit_cpu_fallback")
+    return backends
+
+
+def _accelerated_output_has_usable_primary_params(model_name: str, output: np.ndarray) -> bool:
+    """Return whether accelerated output has any finite rows for core model parameters."""
+    arr = np.asarray(output, dtype=np.float64)
+    if arr.ndim != 2:
+        return False
+    if arr.shape[0] == 0:
+        return True
+
+    # Reachable only from `_fit_stage_d_model` under `fit_func is not None`, so
+    # `model_name` is always a `_stage_d_fit_funcs()` key. Index directly: a model added
+    # without a parameter count should fail loudly, not silently widen the criterion to
+    # every column (SSE and CI included).
+    cols = tuple(range(_CFIT_MIN_PARAMS[model_name]))
+    max_col = max(cols) if cols else -1
+    if max_col >= arr.shape[1]:
+        return False
+
+    core = arr[:, cols]
+    finite_rows = np.all(np.isfinite(core), axis=1)
+    return bool(np.any(finite_rows))
+
+
+# Registry of the shared fit_*_stage_d(ct, cp, timer, prefs, backend) entry points,
+# rebuilt on every call (not a module-level dict) so patching e.g. dce_pipeline.fit_tofts_stage_d
+# in tests takes effect -- a dict literal built once at import time would capture the
+# original function objects and never see the patch.
+def _stage_d_fit_funcs() -> Dict[str, Callable[..., np.ndarray]]:
+    return {
+        "patlak": fit_patlak_stage_d,
+        "tofts": fit_tofts_stage_d,
+        "ex_tofts": fit_ex_tofts_stage_d,
+        "tissue_uptake": fit_tissue_uptake_stage_d,
+        "2cxm": fit_2cxm_stage_d,
+    }
+
+
+def _fit_stage_d_model_accelerated(
+    model_name: str,
+    ct: np.ndarray,
+    cp_use: np.ndarray,
+    timer: np.ndarray,
+    prefs: Dict[str, Any],
+    acceleration_backend: str,
+) -> Optional[np.ndarray]:
+    if acceleration_backend == "none":
+        return None
+    fit_func = _stage_d_fit_funcs().get(model_name)
+    if fit_func is None:
+        return None
+
+    n_fits = int(ct.shape[1])
+    if n_fits == 0:
+        return np.zeros((0, len(MODEL_LAYOUTS[model_name]["param_names"])), dtype=np.float64)
+
+    return fit_func(ct, cp_use, timer, prefs, backend=acceleration_backend)
+
+
+def _fit_auc_matrix(
+    timer: np.ndarray,
+    cp_use: np.ndarray,
+    ct: np.ndarray,
+    stlv_use: np.ndarray,
+    sttum: np.ndarray,
+    start_injection_min: float,
+    sss: Optional[np.ndarray],
+    ssstum: Optional[np.ndarray],
+) -> np.ndarray:
+    start_idx = _nearest_index(timer, start_injection_min)
+    t = timer[start_idx:]
+    cp = cp_use[start_idx:]
+    ct_use = ct[start_idx:, :]
+    sttum_use = sttum[start_idx:, :]
+    stlv = stlv_use[start_idx:]
+
+    if ssstum is not None and ssstum.size == sttum_use.shape[1]:
+        sttum_use = sttum_use - ssstum[np.newaxis, :]
+    if sss is not None and sss.size > 0:
+        stlv = stlv - float(np.mean(sss))
+
+    auc_cp = float(np.trapz(cp, t))
+    auc_sp = float(np.trapz(stlv, t))
+
+    # Integrate every voxel at once. The transpose must be made contiguous first:
+    # reducing along the fast axis keeps numpy's pairwise summation order, so this
+    # is bit-for-bit identical to the per-voxel loop, whereas `axis=0` is not.
+    auc_c = np.trapz(np.ascontiguousarray(ct_use.T), t, axis=1)
+    auc_s = np.trapz(np.ascontiguousarray(sttum_use.T), t, axis=1)
+
+    out = np.zeros((ct_use.shape[1], 4), dtype=np.float64)
+    out[:, 0] = auc_c
+    out[:, 1] = auc_s
+    out[:, 2] = auc_c / auc_cp if abs(auc_cp) > 1e-12 else np.nan
+    out[:, 3] = auc_s / auc_sp if abs(auc_sp) > 1e-12 else np.nan
+    return out
+
+
+def _load_roi_columns(
+    config: DcePipelineConfig,
+    tumind: np.ndarray,
+    spatial_shape: Optional[Tuple[int, int, int]],
+) -> Tuple[List[Path], List[str], List[np.ndarray]]:
+    if not config.roi_files or spatial_shape is None:
+        return [], [], []
+
+    roi_paths: List[Path] = []
+    roi_names: List[str] = []
+    roi_columns: List[np.ndarray] = []
+    tumind = np.asarray(tumind, dtype=np.int64).reshape(-1)
+
+    for roi_path in config.roi_files:
+        if roi_path.suffix.lower() == ".roi":
+            continue
+        roi_img = _load_nifti_data(roi_path)
+        if roi_img.ndim == 4:
+            roi_img = roi_img[..., 0]
+        if tuple(roi_img.shape) != tuple(spatial_shape):
+            continue
+
+        roi_idx = np.flatnonzero(roi_img.reshape(-1, order="F") > 0)
+        if roi_idx.size == 0:
+            continue
+        _, _, tum_pos = np.intersect1d(roi_idx, tumind, assume_unique=False, return_indices=True)
+        if tum_pos.size == 0:
+            continue
+
+        roi_paths.append(roi_path)
+        roi_names.append(_sanitize_name(roi_path.stem))
+        roi_columns.append(np.asarray(tum_pos, dtype=np.int64))
+
+    return roi_paths, roi_names, roi_columns
+
+
+def _log_backend_fallback(
+    model_name: str, backend: str, next_candidate: Optional[str], reason: str
+) -> None:
+    """Report why a Stage-D backend was abandoned and what happens next."""
+    tail = (
+        f"trying fallback backend '{next_candidate}'."
+        if next_candidate is not None
+        else "no fallback remains."
+    )
+    # A backend that quietly fell back changes runtime by orders of magnitude, so this
+    # is not a detail-only message.
+    run_reporting.notice(
+        f"Stage-D {model_name}: backend '{backend}' {reason}; {tail}",
+        run_reporting.Verbosity.NORMAL,
+    )
+
+
+def _fit_stage_d_model(
+    model_name: str,
+    ct: np.ndarray,
+    cp_use: np.ndarray,
+    timer: np.ndarray,
+    prefs: Dict[str, Any],
+    r1o: Optional[np.ndarray],
+    relaxivity: float,
+    fw: float,
+    stlv_use: Optional[np.ndarray],
+    sttum: Optional[np.ndarray],
+    start_injection_min: float,
+    sss: Optional[np.ndarray],
+    ssstum: Optional[np.ndarray],
+    acceleration_backend: str,
+) -> np.ndarray:
+    layout = MODEL_LAYOUTS[model_name]
+    row_len = len(layout["param_names"])
+
+    if model_name == "auc":
+        if stlv_use is None or sttum is None:
+            raise ValueError("AUC fitting requires Stlv_use and Sttum arrays")
+        return _fit_auc_matrix(timer, cp_use, ct, stlv_use, sttum, start_injection_min, sss, ssstum)
+
+    fit_func = _stage_d_fit_funcs().get(model_name)
+    if fit_func is not None:
+        # "python" is just the final, always-available candidate in the same fallback
+        # chain (acceleration_backend="none" -> chain is just ["python"]). Prefs are
+        # resolved once so every candidate -- accelerated or not -- sees the same
+        # model-specific overrides (e.g. voxel_lower_limit_fp_2cxm).
+        prefs_local = _apply_model_specific_prefs(prefs, model_name)
+        candidates = _acceleration_backend_attempt_order(acceleration_backend) + ["python"]
+        for idx, backend_candidate in enumerate(candidates):
+            next_candidate = candidates[idx + 1] if idx + 1 < len(candidates) else None
+            try:
+                result = _fit_stage_d_model_accelerated(
+                    model_name=model_name,
+                    ct=ct,
+                    cp_use=cp_use,
+                    timer=timer,
+                    prefs=prefs_local,
+                    acceleration_backend=backend_candidate,
+                )
+                if result is not None:
+                    if _accelerated_output_has_usable_primary_params(model_name, result):
+                        return result
+                    _log_backend_fallback(
+                        model_name,
+                        backend_candidate,
+                        next_candidate,
+                        "produced non-finite core parameter output",
+                    )
+                    continue
+                # Only reported when a fallback exists, matching the original: a
+                # bare "no result" on the last candidate stays silent.
+                if next_candidate is not None:
+                    _log_backend_fallback(
+                        model_name, backend_candidate, next_candidate, "returned no result"
+                    )
+            except Exception as exc:
+                _log_backend_fallback(
+                    model_name, backend_candidate, next_candidate, f"unavailable ({exc})"
+                )
+        return np.full((ct.shape[1], row_len), np.nan, dtype=np.float64)
+
+    # fxr (and any other model outside the shared batched architecture, e.g. because its
+    # per-voxel R1 baseline can't be batched): per-voxel loop through _fit_fxr_curve.
+    out = np.full((ct.shape[1], row_len), np.nan, dtype=np.float64)
+    for i in range(ct.shape[1]):
+        try:
+            r1o_val = float(r1o[i]) if r1o is not None and i < r1o.size else None
+            row = _fit_fxr_curve(model_name, ct[:, i], cp_use, timer, prefs, r1o_val, relaxivity, fw)
+            n_copy = min(row_len, row.shape[0])
+            out[i, :n_copy] = row[:n_copy]
+        except Exception:
+            continue
+    return out
+
+
+def _run_stage_d_real(
+    config: DcePipelineConfig,
+    stage_a: Dict[str, Any],
+    stage_b: Dict[str, Any],
+    event_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+) -> Dict[str, Any]:
+    backend_info = _resolve_stage_d_backend(config)
+    selected_backend = backend_info["selected_backend"]
+    acceleration_backend = backend_info["acceleration_backend"]
+    backend_reason = backend_info["reason"]
+    run_reporting.notice(
+        f"Stage-D backend: requested={backend_info['requested_backend']} "
+        f"selected={selected_backend} acceleration={acceleration_backend} ({backend_reason})"
+    )
+
+    arrays = stage_b.get("arrays")
+    if not isinstance(arrays, dict):
+        raise ValueError("Stage-D real mode requires Stage-B arrays")
+
+    cp_use = _as_1d_float(arrays["Cp_use"], "Cp_use")
+    timer = _as_1d_float(arrays["timer"], "timer")
+    ct_main = _as_time_by_voxel(arrays["Ct"], "Ct")
+    tumind = np.asarray(arrays.get("tumind", stage_a.get("arrays", {}).get("tumind", [])), dtype=np.int64).reshape(-1)
+    if tumind.size != ct_main.shape[1]:
+        if tumind.size == 0:
+            tumind = np.arange(ct_main.shape[1], dtype=np.int64)
+        else:
+            raise ValueError("tumind size does not match Ct voxel dimension")
+
+    if cp_use.size != timer.size or ct_main.shape[0] != timer.size:
+        raise ValueError("Stage-D expects Cp_use, Ct, timer to share time length")
+
+    time_smoothing = str(_stage_override(config, "time_smoothing")).strip().lower()
+    time_smoothing_window = int(_safe_float(_stage_override(config, "time_smoothing_window"), 0))
+    ct_main = _smooth_time_matrix(ct_main, time_smoothing, time_smoothing_window)
+
+    sttum = _as_time_by_voxel(arrays["Sttum"], "Sttum") if "Sttum" in arrays else None
+    stlv_use = _as_1d_float(arrays["Stlv_use"], "Stlv_use") if "Stlv_use" in arrays else None
+    if sttum is not None:
+        sttum = _smooth_time_matrix(sttum, time_smoothing, time_smoothing_window)
+
+    # Resolve the fallback only when Stage A genuinely did not report one: `dict.get`
+    # evaluates its default eagerly, so spelling this as `stage_a.get(key, _stage_override(...))`
+    # raised for a sidecar-supplied relaxivity that Stage A had already used successfully.
+    relaxivity_from_stage_a = stage_a.get("relaxivity")
+    if relaxivity_from_stage_a is None:
+        relaxivity_from_stage_a = _stage_override(config, "relaxivity")
+    relaxivity = float(relaxivity_from_stage_a)
+    prefs = _stage_d_fit_prefs(config)
+    fw = float(prefs["fxr_fw"])
+
+    spatial_shape: Optional[Tuple[int, int, int]] = None
+    ref_meta = _try_load_reference_nifti(config)
+    if ref_meta is not None:
+        spatial_shape = tuple(ref_meta["shape"])
+    elif "image_shape" in stage_a:
+        shape = stage_a["image_shape"]
+        if isinstance(shape, list) and len(shape) == 3:
+            spatial_shape = (int(shape[0]), int(shape[1]), int(shape[2]))
+
+    roi_paths, roi_names, roi_columns = _load_roi_columns(config, tumind, spatial_shape)
+    selected_models, skipped_models = _stage_d_selected_models(config)
+    # ROI-only mode (`fit_voxels=0`): skip the per-voxel Stage-D fit and only fit each ROI's
+    # averaged concentration curve (average-then-fit, matching MATLAB). Much faster, and for
+    # nonlinear models the pre-fit averaging reduces noise. Parameter maps are not written.
+    fit_voxels = _to_bool(_stage_override(config, "fit_voxels"), True)
+
+    rootname = str(stage_a.get("rootname", _stage_override(config, "rootname")))
+    start_injection_min = float(stage_b.get("start_injection_min", timer[0]))
+    sss = np.asarray(arrays["Sss"], dtype=np.float64).reshape(-1) if "Sss" in arrays else None
+    ssstum = np.asarray(arrays["Ssstum"], dtype=np.float64).reshape(-1) if "Ssstum" in arrays else None
+
+    # ROI aggregates of the Stage-B signal arrays do not depend on the model, so they are
+    # built once here rather than re-gathered per model inside the loop below.
+    roi_sttum_all: Optional[np.ndarray] = None
+    roi_ssstum_all: Optional[np.ndarray] = None
+    if roi_columns:
+        if sttum is not None:
+            roi_sttum_all = np.stack([np.mean(sttum[:, cols], axis=1) for cols in roi_columns], axis=1)
+        if ssstum is not None:
+            roi_ssstum_all = np.asarray(
+                [float(np.mean(ssstum[cols])) for cols in roi_columns], dtype=np.float64
+            )
+
+    model_outputs: Dict[str, Any] = {}
+    stage_arrays: Dict[str, np.ndarray] = {}
+    total_models = len(selected_models)
+    for model_index, model_name in enumerate(selected_models, start=1):
+        _emit_progress(
+            event_callback,
+            "model_start",
+            stage="D",
+            model=model_name,
+            model_index=model_index,
+            model_total=total_models,
+        )
+        layout = MODEL_LAYOUTS[model_name]
+        param_names = list(layout["param_names"])
+
+        ct_source = ct_main
+        r1o = None
+        if model_name == "fxr":
+            if "R1tTOI" not in arrays or "T1TUM" not in arrays:
+                raise ValueError("FXR model requires R1tTOI and T1TUM arrays from Stage-B")
+            ct_source = _as_time_by_voxel(arrays["R1tTOI"], "R1tTOI")
+            if ct_source.shape[0] != timer.size:
+                raise ValueError("R1tTOI time dimension mismatch for FXR")
+            t1tum = np.asarray(arrays["T1TUM"], dtype=np.float64).reshape(-1)
+            if t1tum.size != ct_source.shape[1]:
+                raise ValueError("T1TUM size mismatch for FXR")
+            r1o = 1.0 / t1tum
+
+        n_params = len(param_names)
+
+        def _fit(
+            ct: np.ndarray,
+            r1o_arg: Optional[np.ndarray],
+            sttum_arg: Optional[np.ndarray],
+            ssstum_arg: Optional[np.ndarray],
+        ) -> np.ndarray:
+            # The voxel and ROI fits differ only in these four arrays; binding the rest
+            # once keeps them from drifting apart when `_fit_stage_d_model` changes.
+            return _fit_stage_d_model(
+                model_name=model_name,
+                ct=ct,
+                cp_use=cp_use,
+                timer=timer,
+                prefs=prefs,
+                r1o=r1o_arg,
+                relaxivity=relaxivity,
+                fw=fw,
+                stlv_use=stlv_use,
+                sttum=sttum_arg,
+                start_injection_min=start_injection_min,
+                sss=sss,
+                ssstum=ssstum_arg,
+                acceleration_backend=acceleration_backend,
+            )
+
+        if fit_voxels:
+            voxel_results = _fit(ct_source, r1o, sttum, ssstum)
+        else:
+            # Placeholder so shapes stay consistent; no maps are written in ROI-only mode.
+            voxel_results = np.full((ct_source.shape[1], n_params), np.nan, dtype=np.float64)
+
+        roi_results = np.empty((0, n_params), dtype=np.float64)
+        roi_curve: Optional[np.ndarray] = None
+        roi_r1o: Optional[np.ndarray] = None
+        if roi_columns:
+            roi_curve = np.stack([np.mean(ct_source[:, cols], axis=1) for cols in roi_columns], axis=1)
+            if model_name == "fxr" and r1o is not None:
+                roi_r1o = np.asarray([float(np.mean(r1o[cols])) for cols in roi_columns], dtype=np.float64)
+            roi_results = _fit(
+                roi_curve,
+                roi_r1o,
+                roi_sttum_all,
+                roi_ssstum_all if ssstum is not None and ssstum.size == ct_source.shape[1] else None,
+            )
+
+        map_paths = (
+            _write_param_maps(
+                config=config,
+                rootname=rootname,
+                model_name=model_name,
+                param_names=param_names,
+                fit_values=voxel_results,
+                tumind=tumind,
+                spatial_shape=spatial_shape,
+                reference=ref_meta,
+            )
+            if fit_voxels
+            else {}
+        )
+
+        qof_map_paths = (
+            _write_qof_maps(
+                config=config,
+                rootname=rootname,
+                model_name=model_name,
+                ct_voxel=ct_source,
+                voxel_results=voxel_results,
+                tumind=tumind,
+                spatial_shape=spatial_shape,
+                timer=timer,
+                start_injection_min=start_injection_min,
+                end_injection_min=stage_b.get("end_injection_min"),
+                reference=ref_meta,
+            )
+            if fit_voxels
+            else {}
+        )
+
+        xls_path: Optional[str] = None
+        if config.write_xls and roi_results.shape[0] > 0:
+            results_base = config.output_dir / f"{rootname}_{model_name}_fit"
+            xls_target = Path(str(results_base) + "_rois.xls")
+            rows: List[List[Any]] = [list(layout["headings"])]
+            for i, roi_name in enumerate(roi_names):
+                row: List[Any] = [str(roi_paths[i]), roi_name]
+                row.extend(float(v) for v in roi_results[i, :])
+                rows.append(row)
+            _write_tsv_xls(xls_target, rows)
+            xls_path = str(xls_target)
+
+        postfit_arrays_path = _write_postfit_arrays(
+            config=config,
+            rootname=rootname,
+            model_name=model_name,
+            param_names=param_names,
+            timer=timer,
+            cp_use=cp_use,
+            ct_voxel=ct_source,
+            voxel_results=voxel_results,
+            tumind=tumind,
+            spatial_shape=spatial_shape,
+            roi_names=roi_names,
+            roi_curve=roi_curve,
+            roi_results=roi_results,
+            r1o_voxel=r1o,
+            r1o_roi=roi_r1o,
+            relaxivity=relaxivity,
+            fw=fw,
+        )
+
+        stage_arrays[f"{model_name}_voxel_results"] = voxel_results
+        if roi_results.shape[0] > 0:
+            stage_arrays[f"{model_name}_roi_results"] = roi_results
+
+        model_outputs[model_name] = {
+            "param_names": param_names,
+            "voxel_result_shape": list(voxel_results.shape),
+            "roi_result_shape": list(roi_results.shape),
+            "map_paths": map_paths,
+            "qof_map_paths": qof_map_paths,
+            "xls_path": xls_path,
+            "postfit_arrays_path": postfit_arrays_path,
+        }
+        _emit_progress(
+            event_callback,
+            "model_done",
+            stage="D",
+            model=model_name,
+            model_index=model_index,
+            model_total=total_models,
+            voxel_count=int(voxel_results.shape[0]),
+            roi_count=int(roi_results.shape[0]),
+        )
+
+    backend_used = "cpu" if selected_backend == "cpu" else acceleration_backend
+    return {
+        "stage": "D",
+        "status": "ok",
+        "impl": "real",
+        "selected_backend": selected_backend,
+        "acceleration_backend": acceleration_backend,
+        "backend_reason": backend_reason,
+        "backend_used": backend_used,
+        "write_xls": bool(config.write_xls),
+        "time_smoothing": time_smoothing,
+        "time_smoothing_window": int(time_smoothing_window),
+        "models_requested": selected_models + skipped_models,
+        "models_run": selected_models,
+        "models_skipped": skipped_models,
+        "model_outputs": model_outputs,
+        "arrays": stage_arrays,
+    }
+
+
+class HybridStageRunner:
+    """Runner with real Stage-A and Stage-B support plus scaffold fallbacks."""
+
+    def run_a(
+        self, config: DcePipelineConfig, event_callback: Optional[Callable[[Dict[str, Any]], None]] = None
+    ) -> Dict[str, Any]:
+        del event_callback
+        mode = str(_stage_override(config, "stage_a_mode")).strip().lower()
+        if mode == "scaffold":
+            return {
+                "stage": "A",
+                "status": "scaffold",
+                "impl": "scaffold",
+                "dynamic_file_count": len(config.dynamic_files),
+                "aif_file_count": len(config.aif_files),
+                "roi_file_count": len(config.roi_files),
+                "t1map_file_count": len(config.t1map_files),
+                "noise_file_count": len(config.noise_files),
+                "drift_file_count": len(config.drift_files),
+                "subject_tp_path": (
+                    str(config.subject_tp_path) if config.subject_tp_path is not None else None
+                ),
+            }
+        return _run_stage_a_real(config)
+
+    def run_b(
+        self,
+        config: DcePipelineConfig,
+        stage_a: Dict[str, Any],
+        event_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> Dict[str, Any]:
+        del event_callback
+
+        def _scaffold(**extra: Any) -> Dict[str, Any]:
+            return {
+                "stage": "B",
+                "status": "scaffold",
+                "impl": "scaffold",
+                "aif_mode": config.aif_mode.strip().lower(),
+                "imported_aif_path": str(config.imported_aif_path) if config.imported_aif_path else None,
+                "manual_click_aif_enabled": False,
+                **extra,
+            }
+
+        mode = str(_stage_override(config, "stage_b_mode")).strip().lower()
+        if mode == "scaffold":
+            return _scaffold()
+
+        if mode == "auto":
+            if not isinstance(stage_a.get("arrays"), dict):
+                return _scaffold(reason="stage_a_arrays_missing")
+            return _run_stage_b_real(config, stage_a)
+
+        if mode == "real":
+            return _run_stage_b_real(config, stage_a)
+
+        raise ValueError(f"Unsupported stage_b_mode '{mode}'")
+
+    def run_d(
+        self,
+        config: DcePipelineConfig,
+        stage_a: Dict[str, Any],
+        stage_b: Dict[str, Any],
+        event_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> Dict[str, Any]:
+        def _scaffold(**extra: Any) -> Dict[str, Any]:
+            backend_info = _resolve_stage_d_backend(config)
+            return {
+                "stage": "D",
+                "status": "scaffold",
+                "impl": "scaffold",
+                "selected_backend": backend_info["selected_backend"],
+                "acceleration_backend": backend_info["acceleration_backend"],
+                "backend_reason": backend_info["reason"],
+                "write_xls": bool(config.write_xls),
+                "model_flags": dict(config.model_flags),
+                **extra,
+            }
+
+        mode = str(_stage_override(config, "stage_d_mode")).strip().lower()
+        if mode == "scaffold":
+            return _scaffold()
+
+        if mode == "auto":
+            if not isinstance(stage_b.get("arrays"), dict):
+                return _scaffold(reason="stage_b_arrays_missing")
+            return _run_stage_d_real(config, stage_a, stage_b, event_callback=event_callback)
+
+        if mode == "real":
+            return _run_stage_d_real(config, stage_a, stage_b, event_callback=event_callback)
+
+        raise ValueError(f"Unsupported stage_d_mode '{mode}'")
+
+
+def _array_shapes(data: Dict[str, Any]) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    for key, value in data.items():
+        if isinstance(value, np.ndarray):
+            out[key] = list(value.shape)
+    return out
+
+
+def _emit_progress(event_callback: Optional[Callable[[Dict[str, Any]], None]], event_type: str, **payload: Any) -> None:
+    if event_callback is None:
+        return
+    event: Dict[str, Any] = {
+        "type": event_type,
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+    }
+    event.update(payload)
+    event_callback(event)
+
+
+def _stage_summary(stage_data: Dict[str, Any]) -> Dict[str, Any]:
+    summary = {}
+    for key, value in stage_data.items():
+        if key == "arrays" and isinstance(value, dict):
+            summary["array_shapes"] = _array_shapes(value)
+            continue
+        if isinstance(value, np.ndarray):
+            summary[key] = {"shape": list(value.shape)}
+            continue
+        summary[key] = value
+    return summary
+
+
+def _write_stage_checkpoint(checkpoint_dir: Path, stage_name: str, data: Dict[str, Any]) -> Path:
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    metadata = dict(data)
+    arrays = metadata.pop("arrays", None)
+    if isinstance(arrays, dict):
+        npz_path = checkpoint_dir / f"{stage_name.lower()}_out_arrays.npz"
+        serializable_arrays = {k: v for k, v in arrays.items() if isinstance(v, np.ndarray)}
+        if serializable_arrays:
+            np.savez_compressed(npz_path, **serializable_arrays)
+            metadata["array_npz"] = str(npz_path)
+            metadata["array_shapes"] = _array_shapes(serializable_arrays)
+
+    target = checkpoint_dir / f"{stage_name.lower()}_out.json"
+    target.write_text(json.dumps(metadata, indent=2, default=_json_default))
+    return target
+
+
+def _emit_stage_artifacts(
+    event_callback: Optional[Callable[[Dict[str, Any]], None]], stage_name: str, stage_data: Dict[str, Any]
+) -> None:
+    figure_paths = stage_data.get("figure_paths")
+    if isinstance(figure_paths, dict):
+        for name, path in figure_paths.items():
+            _emit_progress(
+                event_callback,
+                "artifact_written",
+                stage=stage_name,
+                artifact_type="figure",
+                name=str(name),
+                path=str(path),
+            )
+
+    if stage_name != "D":
+        return
+    model_outputs = stage_data.get("model_outputs")
+    if not isinstance(model_outputs, dict):
+        return
+    for model_name, output in model_outputs.items():
+        if not isinstance(output, dict):
+            continue
+        map_paths = output.get("map_paths")
+        if isinstance(map_paths, dict):
+            for param, path in map_paths.items():
+                _emit_progress(
+                    event_callback,
+                    "artifact_written",
+                    stage="D",
+                    model=str(model_name),
+                    artifact_type="map",
+                    name=str(param),
+                    path=str(path),
+                )
+        xls_path = output.get("xls_path")
+        if isinstance(xls_path, str) and xls_path:
+            _emit_progress(
+                event_callback,
+                "artifact_written",
+                stage="D",
+                model=str(model_name),
+                artifact_type="roi_xls",
+                name="roi_xls",
+                path=xls_path,
+            )
+        postfit_arrays_path = output.get("postfit_arrays_path")
+        if isinstance(postfit_arrays_path, str) and postfit_arrays_path:
+            _emit_progress(
+                event_callback,
+                "artifact_written",
+                stage="D",
+                model=str(model_name),
+                artifact_type="postfit_arrays",
+                name="postfit_arrays",
+                path=postfit_arrays_path,
+            )
+
+
+def _call_stage(func: Callable[..., Any], *args: Any, event_callback: Any) -> Any:
+    """Invoke a stage runner, passing `event_callback` only if it accepts one.
+
+    Probing the signature beats calling and catching TypeError: that idiom
+    cannot tell a missing kwarg from a TypeError raised inside the stage, so a
+    genuine failure deep in Stage A would silently re-run the entire stage --
+    every NIfTI load, every voxel clean, every QC figure -- before failing again
+    with a traceback pointing at the retry.
+    """
+    try:
+        params = inspect.signature(func).parameters
+    except (TypeError, ValueError):  # builtins and C callables have no signature
+        return func(*args)
+    accepts = "event_callback" in params or any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+    if accepts:
+        return func(*args, event_callback=event_callback)
+    return func(*args)
+
+
+def run_dce_pipeline(
+    config: DcePipelineConfig,
+    runner: Optional[DceStageRunner] = None,
+    event_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+) -> Dict[str, Any]:
+    """Run DCE stages A->B->D in memory with optional checkpoints."""
+    import time
+
+    start_time = time.perf_counter()
+    config.validate()
+    config.output_dir.mkdir(parents=True, exist_ok=True)
+    if config.checkpoint_dir:
+        config.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    active_runner = runner or HybridStageRunner()
+    defaults_path = dce_config.load_defaults().path
+    _emit_progress(
+        event_callback,
+        "run_start",
+        output_dir=str(config.output_dir),
+        checkpoint_dir=str(config.checkpoint_dir) if config.checkpoint_dir else None,
+        backend=str(config.backend),
+        dce_defaults_path=str(defaults_path),
+        **version.build_identity(),
+    )
+
+    def _finish_stage(stage: str, data: Dict[str, Any], **extra: Any) -> None:
+        """Checkpoint a completed stage and emit its stage_done + artifact events."""
+        if config.checkpoint_dir:
+            checkpoint = _write_stage_checkpoint(config.checkpoint_dir, stage, data)
+            _emit_progress(event_callback, "checkpoint_written", stage=stage, path=str(checkpoint))
+        arrays = data.get("arrays")
+        _emit_progress(
+            event_callback,
+            "stage_done",
+            stage=stage,
+            status=str(data.get("status", "")),
+            impl=str(data.get("impl", "")),
+            array_shapes=_array_shapes(arrays) if isinstance(arrays, dict) else {},
+            **extra,
+        )
+        _emit_stage_artifacts(event_callback, stage, data)
+
+    current_stage = "A"
+    try:
+        _emit_progress(event_callback, "stage_start", stage="A")
+        stage_a = _call_stage(active_runner.run_a, config, event_callback=event_callback)
+        _finish_stage("A", stage_a)
+
+        current_stage = "B"
+        _emit_progress(event_callback, "stage_start", stage="B")
+        stage_b = _call_stage(active_runner.run_b, config, stage_a, event_callback=event_callback)
+        _finish_stage("B", stage_b)
+
+        current_stage = "D"
+        _emit_progress(event_callback, "stage_start", stage="D")
+        stage_d = _call_stage(
+            active_runner.run_d, config, stage_a, stage_b, event_callback=event_callback
+        )
+        _finish_stage(
+            "D",
+            stage_d,
+            models_run=list(stage_d.get("models_run", [])),
+            models_skipped=list(stage_d.get("models_skipped", [])),
+        )
+    except Exception as exc:
+        _emit_progress(
+            event_callback,
+            "run_error",
+            stage=current_stage,
+            error_type=type(exc).__name__,
+            error=str(exc),
+        )
+        raise
+
+
+    # Calculate execution time
+    duration_sec = time.perf_counter() - start_time
+
+    # Extract backend from stage D
+    backend_used = str(stage_d.get("backend_used", stage_d.get("impl", "cpu")))
+
+    # Build provenance
+    provenance = {
+        # Which ROCKETSHIP produced this. Recorded even when nothing printed it, since the
+        # result files outlive the terminal that made them.
+        **version.build_identity(),
+        "execution_timestamp": datetime.now(timezone.utc).isoformat(),
+        "duration_sec": duration_sec,
+        "inputs": {
+            "dynamic": [str(p) for p in config.dynamic_files],
+            "aif_mask": [str(p) for p in config.aif_files],
+            "roi_mask": [str(p) for p in config.roi_files],
+            "t1_map": [str(p) for p in config.t1map_files],
+            "noise_mask": [str(p) for p in config.noise_files] if config.noise_files else None,
+        },
+        "backend_requested": config.backend,
+        "backend_used": backend_used,
+    }
+
+    summary = {
+        "meta": {
+            "pipeline": "dce_cli_in_memory",
+            "status": "ok",
+            "single_process": True,
+            "dce_defaults_path": str(defaults_path),
+            "duration_sec": duration_sec,
+        },
+        "provenance": provenance,
+        "config": config.to_dict(),
+        "stages": {
+            "A": _stage_summary(stage_a),
+            "B": _stage_summary(stage_b),
+            "D": _stage_summary(stage_d),
+        },
+    }
+
+    summary_path = config.output_dir / "dce_pipeline_run.json"
+    summary_path.write_text(json.dumps(summary, indent=2, default=_json_default))
+    summary["meta"]["summary_path"] = str(summary_path)
+    _emit_progress(event_callback, "run_done", summary_path=str(summary_path), status="ok")
+    return summary
