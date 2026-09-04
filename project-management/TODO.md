@@ -147,6 +147,13 @@ Larger feature requests should be logged in `project-management/projects/feature
       Each needs porting or an explicit decision not to. Carried over from the script
       preferences audit, retired 2026-08-16 — it was the only record that these are open.
 
+- [ ] Decide two open questions on automatic leading-frame trimming
+      (`start_t_auto_method: transient`, shipped off by default): whether a first frame that is
+      *below* the baseline but banded should be trimmed, and whether a non-enhancing series
+      should fail a run rather than the detector silently declining to trim. Evidence,
+      thresholds and the 938-series evaluation are in
+      `project-management/projects/transient-chop/transient_detection.md`.
+
 ## External Accelerator Handoff (Open Items Only)
 
 ### Synthetic_DCE Generator

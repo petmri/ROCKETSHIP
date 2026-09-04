@@ -19,6 +19,7 @@ import numpy as np
 import dce_config
 from dce_config import DceConfigError
 import dce_file_discovery
+import dce_transient
 import run_reporting
 import version
 
@@ -962,10 +963,85 @@ def _resolve_dynamic_metadata(
     }
 
 
+def _resolve_auto_start_t(
+    config: DcePipelineConfig,
+    dynamic: np.ndarray,
+    aif_mask: Optional[np.ndarray],
+    roi_mask: Optional[np.ndarray],
+) -> Tuple[Optional[int], Optional[Dict[str, Any]]]:
+    """Detect how many leading non-steady-state frames to trim.
+
+    Returns `(start_1b, details)`, or `(None, details)` when the detector cannot
+    answer -- too few pre-arrival frames, or an arrival it does not believe. The
+    caller then falls back to `start_t = 1`; refusing beats chopping a baseline
+    away on a mislocated arrival. See `dce_transient`.
+    """
+    method = str(_stage_override(config, "start_t_auto_method")).strip().lower()
+    if method in ("", "none", "off", "false"):
+        return None, None
+    if method != "transient":
+        raise ValueError(
+            f"stage_overrides.start_t_auto_method must be 'none' or 'transient', got {method!r}"
+        )
+    if aif_mask is None or not np.any(aif_mask):
+        raise ValueError("start_t_auto_method='transient' needs an AIF mask to locate arrival")
+
+    # Arrival comes from the same detector Stage A uses for the baseline window,
+    # but on the untrimmed series -- the trim is what we are deciding here.
+    arrival_method = _normalize_steady_state_auto_method(
+        _stage_override(config, "steady_state_auto_method")
+    )
+    if arrival_method == "none":
+        arrival_method = DEFAULT_STEADY_STATE_AUTO_METHOD
+    aif_curves = dynamic[aif_mask].T.astype(np.float64)
+    arrival = _baseline_end_detector(arrival_method, config)(aif_curves)
+    onset_0b = int(arrival["end_ss_1b"])
+
+    details: Dict[str, Any] = {"method": method, "arrival_method": arrival_method, "onset_0b": onset_0b}
+    try:
+        result = dce_transient.detect_from_dynamic(
+            dynamic,
+            onset_0b,
+            mask=roi_mask if roi_mask is not None and np.any(roi_mask) else None,
+            osc_z=float(_stage_override(config, "start_t_auto_osc_z")),
+            z=float(_stage_override(config, "start_t_auto_z")),
+            z_ext=float(_stage_override(config, "start_t_auto_z_ext")),
+            max_chop=int(_stage_override(config, "start_t_auto_max_chop")),
+            max_baseline=int(_stage_override(config, "start_t_auto_max_baseline")),
+        )
+    except ValueError as exc:
+        details["skipped"] = str(exc)
+        return None, details
+
+    details.update(
+        {
+            "n_chop": result.n_chop,
+            "start_t_1b": result.start_t_1b,
+            "banding_available": result.oscillation is not None,
+            "flag": result.flag,
+        }
+    )
+    if result.oscillation is not None and np.isfinite(result.oscillation[0]):
+        details["oscillation_frame0"] = round(float(result.oscillation[0]), 3)
+    if np.isfinite(result.deviations[0]):
+        details["deviation_frame0_sigma"] = round(float(result.deviations[0]), 3)
+    if not result.trustworthy:
+        details["skipped"] = result.flag
+        return None, details
+    return result.start_t_1b, details
+
+
 def _resolve_timepoint_window(
     config: DcePipelineConfig,
     n_timepoints: int,
+    auto_start_1b: Optional[int] = None,
 ) -> Tuple[int, int, Dict[str, Any]]:
+    """Resolve the Stage-A `start_t`/`end_t` trim.
+
+    `auto_start_1b` is the transient detector's answer (`_resolve_auto_start_t`),
+    used only when `start_t` is not set: naming the frame explicitly is how a run
+    is pinned reproducibly, so it outranks the detector.
+    """
     if n_timepoints < 1:
         raise ValueError("Stage-A requires at least one dynamic timepoint")
 
@@ -984,7 +1060,13 @@ def _resolve_timepoint_window(
             raise ValueError(f"stage_overrides.{key} must be numeric, got {raw!r}") from exc
         return fallback if value <= 0 else value
 
-    start_1b = _frame_override(start_raw, start_is_set, "start_t", 1)
+    start_fallback = 1
+    used_auto_start = False
+    if not start_is_set and auto_start_1b is not None:
+        start_fallback = int(auto_start_1b)
+        used_auto_start = True
+
+    start_1b = _frame_override(start_raw, start_is_set, "start_t", start_fallback)
     end_1b = _frame_override(end_raw, end_is_set, "end_t", n_timepoints)
 
     start_1b = max(1, min(start_1b, n_timepoints))
@@ -997,6 +1079,8 @@ def _resolve_timepoint_window(
     source = "default_full_range"
     if start_is_set or end_is_set:
         source = "start_t/end_t"
+    elif used_auto_start:
+        source = "start_t_auto_method"
     info = {
         "source": source,
         "start_1b": int(start_1b),
@@ -1576,6 +1660,21 @@ def _resolve_aif_sidecar_steady_state_end(config: DcePipelineConfig) -> Tuple[Op
     return int(payload["SteadyStateEndTimeIndex"]), str(sidecar_path)
 
 
+def _baseline_end_detector(
+    method: str, config: DcePipelineConfig
+) -> Callable[[np.ndarray], Dict[str, Any]]:
+    """The baseline-end (contrast arrival) detector named by `method`."""
+    detector_map: Dict[str, Callable[[np.ndarray], Dict[str, Any]]] = {
+        "legacy_sobel": _legacy_sobel_baseline_end,
+        "piecewise_constant": _piecewise_constant_baseline_end,
+        "glr": _glr_baseline_end,
+        "tv": _tv_baseline_end,
+        # Needs the aif_* fit preferences, unlike the purely signal-shape detectors.
+        "biexp_fit": lambda curves: _biexp_fit_baseline_end(curves, config),
+    }
+    return detector_map[method]
+
+
 def _resolve_baseline_window(
     config: DcePipelineConfig,
     n_timepoints: int,
@@ -1629,15 +1728,7 @@ def _resolve_baseline_window(
             raise ValueError(
                 "stage_overrides.steady_state_auto_method requires Stage-A AIF signal data to estimate baseline end"
             )
-        detector_map: Dict[str, Callable[[np.ndarray], Dict[str, Any]]] = {
-            "legacy_sobel": _legacy_sobel_baseline_end,
-            "piecewise_constant": _piecewise_constant_baseline_end,
-            "glr": _glr_baseline_end,
-            "tv": _tv_baseline_end,
-            # Needs the aif_* fit preferences, unlike the purely signal-shape detectors.
-            "biexp_fit": lambda curves: _biexp_fit_baseline_end(curves, config),
-        }
-        detector = detector_map[auto_method]
+        detector = _baseline_end_detector(auto_method, config)
         auto_details = detector(stlv)
         end_1b = int(auto_details["end_ss_1b"])
         used_method = auto_method
@@ -1921,17 +2012,27 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     if dynamic.ndim != 4:
         raise ValueError(f"Expected 4D dynamic input, got shape {dynamic.shape}")
     n_timepoints_input = int(dynamic.shape[3])
-    time_start_0b, time_end_0b_exclusive, time_window_info = _resolve_timepoint_window(config, n_timepoints_input)
-    dynamic = dynamic[..., time_start_0b:time_end_0b_exclusive]
-    if dynamic.shape[3] < 1:
-        raise ValueError("Stage-A timepoint window produced an empty dynamic series")
 
     if not config.roi_files:
         raise ValueError("Stage-A real mode requires at least one ROI mask file")
+    # Masks are spatial, so loading them before the trim costs nothing and lets the
+    # transient detector see the untrimmed series it has to decide the trim from.
     spatial = dynamic.shape[:3]
     aif_mask_img = _as_spatial_volume(_load_nifti_data(config.aif_files[0]), spatial, "AIF mask")
     roi_mask_img = _as_spatial_volume(_load_nifti_data(config.roi_files[0]), spatial, "ROI mask")
     t1map_img = _as_spatial_volume(_load_nifti_data(config.t1map_files[0]), spatial, "T1 map")
+
+    auto_start_1b, auto_start_details = _resolve_auto_start_t(
+        config, dynamic, aif_mask_img > 0, roi_mask_img > 0
+    )
+    time_start_0b, time_end_0b_exclusive, time_window_info = _resolve_timepoint_window(
+        config, n_timepoints_input, auto_start_1b=auto_start_1b
+    )
+    if auto_start_details is not None:
+        time_window_info["start_t_auto"] = auto_start_details
+    dynamic = dynamic[..., time_start_0b:time_end_0b_exclusive]
+    if dynamic.shape[3] < 1:
+        raise ValueError("Stage-A timepoint window produced an empty dynamic series")
 
     # MATLAB A_make_R1maps_func converts T1 maps from ms->s when values are large.
     # Keep the same unit behavior to avoid 1000x concentration scaling errors.

@@ -198,6 +198,52 @@ sidecar accompanying the DCE image, or from an explicit `dce_metadata_path`. Whe
 JSON is available, all three must be set manually. Setting only some of them while a metadata
 JSON is present is rejected: supply all three, or none.
 
+### Trimming leading frames
+
+| Option | Description |
+| --- | --- |
+| `start_t` | One-based first dynamic frame to analyse. Absent, with no automatic detection: 1 |
+| `end_t` | One-based last dynamic frame to analyse. Absent: the last frame |
+| `start_t_auto_method` | `none`, the default, or `transient` to detect the leading frames |
+
+The first frames of a dynamic series are often acquired before the magnetisation reaches
+steady state. They carry transient high signal and slice-to-slice banding, and they corrupt
+anything downstream that assumes a flat pre-contrast baseline. Two ways to remove them:
+
+1. **A fixed count.** Set `start_t` to the first good frame — `start_t: 3` discards two.
+2. **Automatic detection.** Leave `start_t` unset and set `start_t_auto_method: transient`.
+
+`start_t` wins where both are set, so naming the frame remains the way to pin a run
+reproducibly.
+
+Note that "steady state" here means the *magnetisation* steady state, and is unrelated to the
+`steady_state_start`/`steady_state_end` keys below, which bound the pre-contrast baseline
+window. This trim happens before contrast arrival, which is what those keys locate.
+
+**The `transient` detector** weighs two kinds of evidence, because on 3D acquisitions the mean
+signal alone misses most affected frames. Slice-to-slice banding decides *whether* the first
+frame is transient: a frame acquired off steady state weights k-space partitions unevenly, and
+the resulting oscillation along the slice axis largely cancels in the volume mean. The mean
+elevation then decides *how far* the transient extends, since a decaying transient leaves the
+following frame elevated but no longer banded.
+
+| Option | Description |
+| --- | --- |
+| `start_t_auto_osc_z` | Banding ratio above which a frame is transient. Default 5.0 |
+| `start_t_auto_z` | Mean deviation, in noise σ, to flag the first frame. Default 4.0 |
+| `start_t_auto_z_ext` | Mean deviation, in σ, to extend an established transient. Default 2.0 |
+| `start_t_auto_max_chop` | Never trim more than this many frames. Default 3 |
+| `start_t_auto_max_baseline` | An arrival past this frame is not believed. Default 8 |
+
+Contrast arrival comes from the detector named by `steady_state_auto_method`, run on the
+untrimmed series. Both kinds of evidence measure the first frame against a plateau taken from
+the remaining pre-arrival frames, so both depend on that arrival being right. Where it lands
+beyond `start_t_auto_max_baseline`, or is not found at all, the plateau would be post-contrast
+signal against which the true baseline itself reads as transient — so the detector declines
+instead, the run proceeds with `start_t` at 1, and the reason is recorded in the run summary
+under `stages.A.timepoint_window.start_t_auto`. Volumes with fewer than seven usable slices
+cannot show banding and fall back to the mean-signal evidence alone.
+
 ### Baseline and injection timing
 
 The end of the pre-contrast baseline is resolved with the following precedence:

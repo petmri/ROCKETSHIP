@@ -1,10 +1,11 @@
 # New Feature Requests
--[ ] Turn the noise estimation currently used in pipeline parity testing into a standalone function for general use. This is a small but useful utility that can be used to estimate noise in DCE-MRI voxels, and could be useful for other applications as well (AIF voxel filtering, TV baseline detection, etc.).
+- [x] Turn the noise estimation currently used in pipeline parity testing into a standalone function for general use. This is a small but useful utility that can be used to estimate noise in DCE-MRI voxels, and could be useful for other applications as well (AIF voxel filtering, TV baseline detection, etc.). Done: `python/dce_sigma.py`, shared by `dce_qof` and the transient detector below.
 - [ ] Implement confidence intervals for GPUfit/CPUfit (currently only available in MATLAB/Python).
 - [ ] Add parallelization to CPUfit (OpenMP?)
-- [ ] Auto detect when to chop, look at baseline and determine if it is "flat enough" to use the full baseline, or if chopping is required. If chopping is required, determine how many frames to chop. Could also look at osciliations in the z direction to determine if chopping is required.
+- [x] Auto detect when to chop, look at baseline and determine if it is "flat enough" to use the full baseline, or if chopping is required. If chopping is required, determine how many frames to chop. Could also look at osciliations in the z direction to determine if chopping is required. Done: `start_t_auto_method: transient` (`python/dce_transient.py`); the z-direction oscillation is the primary trigger, evaluated in `project-management/projects/transient-chop/transient_detection.md`.
 - [ ] Add an auto BIDs discovery module to the parametric function/gui
 - [ ] Add a batch processing (BIDS) option for parametric
+- [ ] Implemented and confirm that arbitrary/variable time vectors work
 - [ ] **Take 2CXM residuals at the acquired times rather than on the dense grid.** The model must
       still be evaluated on the 0.1 s grid -- that is what resolves the 1-2 s plasma compartment --
       but the residual can be taken after sampling the prediction back down. Everything in the
