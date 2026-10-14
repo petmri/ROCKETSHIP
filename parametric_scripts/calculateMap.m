@@ -195,6 +195,7 @@ end
 
 if gpufit_available
     disp("Gpufit detected. GPU will be utilized for T1 mapping.")
+    disp(['Gpufit version: ' report_gpufit_version()])
 else
     disp("Gpufit detection failed. Defaulting to CPU.")
 end

@@ -1,0 +1,56 @@
+{
+  "_schema": "rocketship-parametric-defaults/1",
+  "_doc": [
+    "THE single source of truth for parametric T1 defaults and preferences.",
+    "Edit this file to change behaviour; do not edit source. Nothing in python/ carries a",
+    "fallback value, so any key absent from here and from your run config is an error.",
+    "",
+    "Resolution order, highest first:",
+    "  1. your run config",
+    "  2. this file's 'defaults' block",
+    "  3. error",
+    "",
+    "This file holds preferences only. The inputs a run operates on -- output_dir,",
+    "vfa_files, mask_file, b1_map_file -- belong in a run config, not here, because they",
+    "describe one study rather than how the software behaves. See",
+    "python/parametric_run_example.json for a runnable config.",
+    "",
+    "Sections:",
+    "  'defaults' -- key -> value. These are the values a run uses unless overridden.",
+    "  'required' -- known keys with NO default. Supply one or the run stops. The text",
+    "                explains where the value should come from.",
+    "  'optional' -- known keys with no default where being absent is meaningful (a",
+    "                fallback mechanism or auto-detection takes over). Not an error.",
+    "  '_units'   -- the unit each physical key is expressed in. Advisory, not parsed.",
+    "",
+    "A key in none of these sections is rejected as unknown, so typos are caught rather",
+    "than silently ignored."
+  ],
+  "_units": {
+    "tr_ms": "milliseconds",
+    "flip_angles_deg": "degrees",
+    "xy_smooth_sigma": "voxels (Gaussian sigma, in-plane only)"
+  },
+  "required": {
+    "output_dir": "Where the run writes its maps, summary and figures. Set this in your run config."
+  },
+  "optional": {
+    "tr_ms": "Repetition time. Read from the VFA image's JSON sidecar when absent, which is where dce2bids writes it. Set it here only if your sidecars do not carry it.",
+    "flip_angles_deg": "One angle per flip frame of the VFA image. Read from the per-flip JSON sidecars when absent. Must describe the frames of the image actually being fitted.",
+    "mask_file": "Restrict fitting to a mask. Every voxel is fitted when absent.",
+    "b1_map_file": "B1 correction map. Flip angles are used as nominal when absent."
+  },
+  "defaults": {
+    "fit_type": "t1_fa_fit",
+    "backend": "auto",
+    "output_basename": "T1_map",
+    "output_label": "",
+    "rsquared_threshold": 0.6,
+    "write_r_squared": true,
+    "write_rho_map": false,
+    "invalid_fill_value": -1.0,
+    "odd_echoes": false,
+    "xy_smooth_sigma": 0.0,
+    "write_qc_figures": true
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "docs",
+      "runtimeExecutable": ".venv/bin/mkdocs",
+      "runtimeArgs": ["serve", "--dev-addr", "127.0.0.1:8127"],
+      "port": 8127
+    }
+  ]
+}

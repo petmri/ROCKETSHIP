@@ -1,0 +1,51 @@
+{
+  "_doc": [
+    "Example DCE run config for data in BIDS layout. Copy it, point the two folders at your",
+    "own session, and edit. See dce_run_example_nonbids.json for data that is not in BIDS.",
+    "",
+    "A run config says which data to process and only the settings this run overrides. Every",
+    "other knob resolves from python/dce_defaults.json, the single source for defaults, limits",
+    "and preferences. Restating a default here would fork it, so keys whose value matches the",
+    "defaults file are deliberately absent.",
+    "",
+    "What makes this the BIDS form: naming the session folders is enough. Notice there are no",
+    "file lists and no acquisition parameters below.",
+    "",
+    "  - The images and masks are found under 'subject_tp_path' by the dceprep naming",
+    "    convention: dce/*desc-bfcz_DCE.nii*, dce/*label-AIF_T1map.nii*,",
+    "    anat/*space-DCEref_label-brain_mask.nii*, anat/*space-DCEref_T1map.nii* and an",
+    "    optional anat/*label-noise_mask.nii*. Each is logged as it is found. To use a",
+    "    different file, name it outright -- an explicit list always wins over the convention.",
+    "",
+    "  - TR, flip angle, temporal resolution and relaxivity are read from the acquisition",
+    "    sidecar, found at <subject_source_path>/dce/*DCE.json.",
+    "",
+    "Both folders are optional in general; they are what buys the two conveniences above, so a",
+    "config that omits them has to name its files and state its parameters, as the non-BIDS",
+    "example does. 'drift_files' is never discovered: it has no naming convention."
+  ],
+  "subject_source_path": "../tests/data/BIDS_test/rawdata/sub-02downsample/ses-01",
+  "subject_tp_path": "../tests/data/BIDS_test/derivatives/sub-02downsample/ses-01",
+  "output_dir": "../out/dce_run_example_bids",
+  "checkpoint_dir": "../out/dce_run_example_bids/checkpoints",
+  "backend": "cpu",
+  "write_xls": true,
+  "aif_mode": "fitted",
+  "model_flags": {
+    "tofts": 1,
+    "ex_tofts": 0,
+    "patlak": 0,
+    "tissue_uptake": 0,
+    "two_cxm": 0,
+    "fxr": 0,
+    "auc": 0,
+    "nested": 0,
+    "FXL_rr": 0
+  },
+  "stage_overrides": {
+    "stage_b_mode": "real",
+    "stage_d_mode": "real",
+    "rootname": "Dyn-1",
+    "start_t": 3
+  }
+}

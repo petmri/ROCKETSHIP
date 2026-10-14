@@ -94,48 +94,48 @@ plot_limits = axis;
 if strcmp(plot_data.model_name,'aif') || strcmp(plot_data.model_name,'tofts')
     ktrans_error = mean([abs(fit_parameters(1)-fit_parameters(4)) abs(fit_parameters(1)-fit_parameters(5))]);
     ve_error = mean([abs(fit_parameters(2)-fit_parameters(6)) abs(fit_parameters(2)-fit_parameters(7))]);
-    plot_str(1) = {[' K_{trans} = ' num2str(fit_parameters(1),2) '±' num2str(ktrans_error,2)]};
-    plot_str(2) = {[' V_e = ' num2str(fit_parameters(2),2) '±' num2str(ve_error,2)]};
+    plot_str(1) = {[' K_{trans} = ' num2str(fit_parameters(1),2) 'Â±' num2str(ktrans_error,2)]};
+    plot_str(2) = {[' V_e = ' num2str(fit_parameters(2),2) 'Â±' num2str(ve_error,2)]};
     plot_str(3) = {[' residual = ' num2str(fit_parameters(3))]};
 elseif strcmp(plot_data.model_name,'aif_vp') || strcmp(plot_data.model_name,'ex_tofts') || strcmp(plot_data.model_name,'nested')
     ktrans_error = mean([abs(fit_parameters(1)-fit_parameters(5)) abs(fit_parameters(1)-fit_parameters(6))]);
     ve_error = mean([abs(fit_parameters(2)-fit_parameters(7)) abs(fit_parameters(2)-fit_parameters(8))]);
     vp_error = mean([abs(fit_parameters(3)-fit_parameters(9)) abs(fit_parameters(3)-fit_parameters(10))]);
-    plot_str(1) = {[' K_{trans} = ' num2str(fit_parameters(1),2) '±' num2str(ktrans_error,2)]};
-    plot_str(2) = {[' V_e = ' num2str(fit_parameters(2),2) '±' num2str(ve_error,2)]};
-    plot_str(3) = {[' V_p = ' num2str(fit_parameters(3),2) '±' num2str(vp_error,2)]};
+    plot_str(1) = {[' K_{trans} = ' num2str(fit_parameters(1),2) 'Â±' num2str(ktrans_error,2)]};
+    plot_str(2) = {[' V_e = ' num2str(fit_parameters(2),2) 'Â±' num2str(ve_error,2)]};
+    plot_str(3) = {[' V_p = ' num2str(fit_parameters(3),2) 'Â±' num2str(vp_error,2)]};
     plot_str(4) = {[' residual = ' num2str(fit_parameters(4))]};
 elseif strcmp(plot_data.model_name,'2cxm')
     ktrans_error = mean([abs(fit_parameters(1)-fit_parameters(6)) abs(fit_parameters(1)-fit_parameters(7))]);
     ve_error = mean([abs(fit_parameters(2)-fit_parameters(8)) abs(fit_parameters(2)-fit_parameters(9))]);
     vp_error = mean([abs(fit_parameters(3)-fit_parameters(10)) abs(fit_parameters(3)-fit_parameters(11))]);
     fp_error = mean([abs(fit_parameters(4)-fit_parameters(12)) abs(fit_parameters(4)-fit_parameters(13))]);
-    plot_str(1) = {[' K_{trans} = ' num2str(fit_parameters(1),2) '±' num2str(ktrans_error,2)]};
-    plot_str(2) = {[' V_e = ' num2str(fit_parameters(2),2) '±' num2str(ve_error,2)]};
-    plot_str(3) = {[' V_p = ' num2str(fit_parameters(3),2) '±' num2str(vp_error,2)]};
-    plot_str(4) = {[' F_p = ' num2str(fit_parameters(4),2) '±' num2str(fp_error,2)]};
+    plot_str(1) = {[' K_{trans} = ' num2str(fit_parameters(1),2) 'Â±' num2str(ktrans_error,2)]};
+    plot_str(2) = {[' V_e = ' num2str(fit_parameters(2),2) 'Â±' num2str(ve_error,2)]};
+    plot_str(3) = {[' V_p = ' num2str(fit_parameters(3),2) 'Â±' num2str(vp_error,2)]};
+    plot_str(4) = {[' F_p = ' num2str(fit_parameters(4),2) 'Â±' num2str(fp_error,2)]};
     plot_str(5) = {[' residual = ' num2str(fit_parameters(5))]};
 elseif strcmp(plot_data.model_name,'tissue_uptake')
     ktrans_error = mean([abs(fit_parameters(1)-fit_parameters(5)) abs(fit_parameters(1)-fit_parameters(6))]);
     fp_error = mean([abs(fit_parameters(2)-fit_parameters(7)) abs(fit_parameters(2)-fit_parameters(8))]);
     vp_error = mean([abs(fit_parameters(3)-fit_parameters(9)) abs(fit_parameters(3)-fit_parameters(10))]);
-    plot_str(1) = {[' K_{trans} = ' num2str(fit_parameters(1),2) '±' num2str(ktrans_error,2)]};
-    plot_str(2) = {[' F_p = ' num2str(fit_parameters(2),2) '±' num2str(fp_error,2)]};
-    plot_str(3) = {[' V_p = ' num2str(fit_parameters(3),2) '±' num2str(vp_error,2)]};
+    plot_str(1) = {[' K_{trans} = ' num2str(fit_parameters(1),2) 'Â±' num2str(ktrans_error,2)]};
+    plot_str(2) = {[' F_p = ' num2str(fit_parameters(2),2) 'Â±' num2str(fp_error,2)]};
+    plot_str(3) = {[' V_p = ' num2str(fit_parameters(3),2) 'Â±' num2str(vp_error,2)]};
     plot_str(4) = {[' residual = ' num2str(fit_parameters(4))]};
 elseif strcmp(plot_data.model_name,'fxr')
     ktrans_error = mean([abs(fit_parameters(1)-fit_parameters(5)) abs(fit_parameters(1)-fit_parameters(6))]);
     ve_error = mean([abs(fit_parameters(2)-fit_parameters(7)) abs(fit_parameters(2)-fit_parameters(8))]);
     vp_error = mean([abs(fit_parameters(3)-fit_parameters(9)) abs(fit_parameters(3)-fit_parameters(10))]);
-    plot_str(1) = {[' K_{trans} = ' num2str(fit_parameters(1),2) '±' num2str(ktrans_error,2)]};
-    plot_str(2) = {[' V_e = ' num2str(fit_parameters(2),2) '±' num2str(ve_error,2)]};
-    plot_str(3) = {[' \tau = ' num2str(fit_parameters(3),2) '±' num2str(vp_error,2)]};
+    plot_str(1) = {[' K_{trans} = ' num2str(fit_parameters(1),2) 'Â±' num2str(ktrans_error,2)]};
+    plot_str(2) = {[' V_e = ' num2str(fit_parameters(2),2) 'Â±' num2str(ve_error,2)]};
+    plot_str(3) = {[' \tau = ' num2str(fit_parameters(3),2) 'Â±' num2str(vp_error,2)]};
     plot_str(4) = {[' residual = ' num2str(fit_parameters(4))]};
 elseif strcmp(plot_data.model_name,'patlak')
     ktrans_error = mean([abs(fit_parameters(1)-fit_parameters(4)) abs(fit_parameters(1)-fit_parameters(5))]);
     vp_error = mean([abs(fit_parameters(2)-fit_parameters(6)) abs(fit_parameters(2)-fit_parameters(7))]);
-    plot_str(1) = {[' K_{trans} = ' num2str(fit_parameters(1),2) '±' num2str(ktrans_error,2)]};
-    plot_str(2) = {[' V_p = ' num2str(fit_parameters(2),2) '±' num2str(vp_error,2)]};
+    plot_str(1) = {[' K_{trans} = ' num2str(fit_parameters(1),2) 'Â±' num2str(ktrans_error,2)]};
+    plot_str(2) = {[' V_p = ' num2str(fit_parameters(2),2) 'Â±' num2str(vp_error,2)]};
     plot_str(3) = {[' residual = ' num2str(fit_parameters(3))]};
 
 else

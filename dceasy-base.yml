@@ -1,0 +1,136 @@
+# ==============================================================================
+# DCEasy shared MkDocs configuration
+# Source of truth: petmri/petmri.github.io › theme/dceasy-base.yml
+#
+# Each site consumes it with a relative path at the top of its own mkdocs.yml:
+#
+#     INHERIT: ./dceasy-base.yml
+#
+# MERGE SEMANTICS — and the two build tools disagree, so read carefully:
+#   * dict values MERGE with the child's, under both
+#   * list values are REPLACED wholesale by mkdocs 1.6.1 (mergedeep.merge),
+#     but CONCATENATED by Zensical 0.0.57 — verified both ways
+#
+# All three DCEasy sites build with Zensical, so concatenation is the live
+# behavior: a site that redeclares extra_css gets the base's entries PLUS its
+# own, and repeating an entry loads that file twice.
+#
+# Dict syntax for markdown_extensions and plugins sidesteps the disagreement
+# entirely, which is why they use it here: a site can add one extension without
+# redeclaring all of them, under either tool. theme.features has no dict form,
+# so this file holds the complete list; sites should still not redeclare it,
+# since anything they list is appended under Zensical and silently replaces the
+# whole list if the site is ever built with mkdocs.
+#
+# INHERIT resolves a LOCAL path only; it cannot fetch a URL. Sync this file into
+# each repo (see theme/README.md).
+# ==============================================================================
+
+theme:
+  name: material
+
+  # Zensical ships two looks. "classic" is Material's, which is what the DCEasy
+  # palette below is built for: it paints the header bar with
+  # --md-primary-fg-color, the navy set in dceasy.css. "modern" is Zensical's
+  # own design and does NOT use that variable for the header, so a site left on
+  # the default renders a white header and loses the family color entirely.
+  #
+  # Zensical-only key; MkDocs does not know it. It lives here rather than in
+  # each mkdocs.yml so the three sites cannot drift apart -- which is exactly
+  # what happened when only the hub set it.
+  variant: classic
+
+  font:
+    text: Source Serif 4
+    code: JetBrains Mono
+
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+  # Complete list — see merge semantics above.
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tooltips
+
+  # Family mark and favicon — the same on every DCEasy site. Each repo carries
+  # a copy at docs/assets/ (see theme/README.md). The header variant is stroked
+  # white rather than currentColor because theme.logo renders an <img>, which
+  # does not inherit page color.
+  # The header mark is shared: it sits beside the site name, which already says
+  # which site you are on, so its job is to signal the family.
+  #
+  # theme.favicon is deliberately NOT here. A favicon is often the only thing
+  # identifying a pinned or narrow tab, so it must differ per project. Each site
+  # sets its own from theme/assets/favicons/.
+  logo: assets/dceasy-mark-white.svg
+
+  icon:
+    repo: fontawesome/brands/github
+
+extra_css:
+  - stylesheets/dceasy.css
+
+markdown_extensions:
+  admonition: {}
+  attr_list: {}
+  md_in_html: {}
+  footnotes: {}
+  tables: {}
+  toc:
+    permalink: true
+  pymdownx.arithmatex:
+    generic: true
+  pymdownx.details: {}
+  pymdownx.highlight:
+    anchor_linenums: true
+  pymdownx.inlinehilite: {}
+  pymdownx.snippets: {}
+  pymdownx.superfences:
+    custom_fences:
+      - name: mermaid
+        class: mermaid
+        format: !!python/name:pymdownx.superfences.fence_code_format
+  pymdownx.tabbed:
+    alternate_style: true
+  pymdownx.emoji:
+    emoji_index: !!python/name:material.extensions.emoji.twemoji
+    emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+plugins:
+  search: {}
+
+extra:
+  analytics:
+    provider: google
+    property: G-QGP3ETP28Q
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/petmri
+      name: petmri on GitHub
+    - icon: material/web
+      link: https://dceasy.org/
+      name: DCEasy family

@@ -1,0 +1,221 @@
+{
+  "version": 1,
+  "gate_ready": false,
+  "metric": "voxelwise_region_mae",
+  "label_map": {
+    "1": "muscle_fat",
+    "2": "brain",
+    "3": "vessel"
+  },
+  "backend_aliases": {
+    "auto": "cpufit_cpu"
+  },
+  "tolerances": {
+    "t1_ms": {
+      "muscle_fat": 2000.0,
+      "brain": 1650.0,
+      "vessel": 3800.0
+    },
+    "dce": {
+      "cpu": {
+        "tofts": {
+          "Ktrans": {
+            "muscle_fat": 1.9,
+            "brain": 2.3,
+            "vessel": 2.5
+          },
+          "ve": {
+            "muscle_fat": 0.8,
+            "brain": 0.75,
+            "vessel": 1.2
+          }
+        },
+        "ex_tofts": {
+          "Ktrans": {
+            "muscle_fat": 1.9,
+            "brain": 1.6,
+            "vessel": 2.2
+          },
+          "ve": {
+            "muscle_fat": 0.75,
+            "brain": 0.6,
+            "vessel": 1.05
+          },
+          "vp": {
+            "muscle_fat": 0.27,
+            "brain": 0.035,
+            "vessel": 0.55
+          }
+        },
+        "patlak": {
+          "Ktrans": {
+            "muscle_fat": 1.85,
+            "brain": 1.55,
+            "vessel": 2.2
+          },
+          "vp": {
+            "muscle_fat": 0.27,
+            "brain": 0.035,
+            "vessel": 0.55
+          }
+        }
+      },
+      "cpufit_cpu": {
+        "tofts": {
+          "Ktrans": {
+            "muscle_fat": 1.9,
+            "brain": 2.3,
+            "vessel": 2.5
+          },
+          "ve": {
+            "muscle_fat": 0.49,
+            "brain": 0.5,
+            "vessel": 0.05
+          }
+        },
+        "ex_tofts": {
+          "Ktrans": {
+            "muscle_fat": 1.9,
+            "brain": 1.8,
+            "vessel": 2.0
+          },
+          "ve": {
+            "muscle_fat": 0.5,
+            "brain": 0.7,
+            "vessel": 0.8
+          },
+          "vp": {
+            "muscle_fat": 0.19,
+            "brain": 0.03,
+            "vessel": 0.55
+          }
+        },
+        "patlak": {
+          "Ktrans": {
+            "muscle_fat": 1.85,
+            "brain": 1.6,
+            "vessel": 1.9
+          },
+          "vp": {
+            "muscle_fat": 0.23,
+            "brain": 0.03,
+            "vessel": 0.55
+          }
+        }
+      }
+    }
+  },
+  "observed_max_mae": {
+    "t1_ms": {
+      "muscle_fat": 1596.866318,
+      "brain": 1305.655806,
+      "vessel": 3113.271462
+    },
+    "dce": {
+      "cpu": {
+        "tofts": {
+          "Ktrans": {
+            "muscle_fat": 1.485096,
+            "brain": 1.795708,
+            "vessel": 1.988241
+          },
+          "ve": {
+            "muscle_fat": 0.593022,
+            "brain": 0.554138,
+            "vessel": 0.951258
+          }
+        },
+        "ex_tofts": {
+          "Ktrans": {
+            "muscle_fat": 1.474844,
+            "brain": 1.256111,
+            "vessel": 1.717148
+          },
+          "ve": {
+            "muscle_fat": 0.581323,
+            "brain": 0.466923,
+            "vessel": 0.807236
+          },
+          "vp": {
+            "muscle_fat": 0.200224,
+            "brain": 0.017764,
+            "vessel": 0.399247
+          }
+        },
+        "patlak": {
+          "Ktrans": {
+            "muscle_fat": 1.471689,
+            "brain": 1.230223,
+            "vessel": 1.694662
+          },
+          "vp": {
+            "muscle_fat": 0.200218,
+            "brain": 0.017766,
+            "vessel": 0.399238
+          }
+        }
+      },
+      "cpufit_cpu": {
+        "tofts": {
+          "Ktrans": {
+            "muscle_fat": 1.48519,
+            "brain": 1.794434,
+            "vessel": 1.988709
+          },
+          "ve": {
+            "muscle_fat": 0.382462,
+            "brain": 0.386199,
+            "vessel": 0.028613
+          }
+        },
+        "ex_tofts": {
+          "Ktrans": {
+            "muscle_fat": 1.476481,
+            "brain": 1.40203,
+            "vessel": 1.562281
+          },
+          "ve": {
+            "muscle_fat": 0.386186,
+            "brain": 0.527219,
+            "vessel": 0.60273
+          },
+          "vp": {
+            "muscle_fat": 0.137211,
+            "brain": 0.015598,
+            "vessel": 0.426005
+          }
+        },
+        "patlak": {
+          "Ktrans": {
+            "muscle_fat": 1.468396,
+            "brain": 1.23611,
+            "vessel": 1.487109
+          },
+          "vp": {
+            "muscle_fat": 0.168934,
+            "brain": 0.015693,
+            "vessel": 0.411858
+          }
+        }
+      }
+    }
+  },
+  "provenance": {
+    "source": "phantom_gt_explore",
+    "source_sessions": [
+      "sub-05phantom",
+      "sub-06phantom",
+      "sub-07phantom"
+    ],
+    "margin_factor_dce": 1.25,
+    "margin_factor_t1": 1.2,
+    "dce_additive_margin": 0.01,
+    "t1_additive_margin_ms": 50.0,
+    "notes": [
+      "This profile is provisional and not a merge gate yet (performance triage in progress).",
+      "Tolerances are model- and region-specific because model assumptions intentionally bias some regions.",
+      "Initial profile derived from local ROCKETSHIP CPU and cpufit_cpu (backend=auto) runs on phantom sessions.",
+      "MATLAB calibration can be added later without changing test code structure."
+    ]
+  }
+}

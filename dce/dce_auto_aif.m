@@ -72,12 +72,12 @@ end
 end_inject = end_ss + injection_duration;
 
 figure
-plot(global_smooth)
+plot(global_smooth, 'b', 'DisplayName', 'Smoothed global signal')
 hold on;
-injection = zeros(size(global_smooth));
-injection(end_ss) = 1;
-injection(end_inject) = 1;
-plot(injection,'r');
+plot_aif_transition_lines(end_ss, end_inject);
+legend('show', 'Location', 'best');
+xlabel('Image number'); ylabel('Normalised signal');
+title('Auto-AIF: baseline end and injection end');
 hold off;
 % plot(bw,'r');
 % plot(bx,'r');
@@ -149,7 +149,12 @@ parfor voxel_index = 1:spatial_points
             aif_x = aif_x./max(aif_x);
             xdata{voxel_index}.Cp    = aif_x;
             xdata{voxel_index}.timer = timer';
-            xdata{voxel_index}.step = [end_ss end_inject];
+            % end_ss/end_inject are 1-based frame numbers but timer is
+            % 0:time_points-1, so frame f sits at f-1. See B_AIF_fitting_func.
+            xdata{voxel_index}.step = [end_ss-1 end_inject-1];
+            % AIFbiexpfithelp dereferences fittingAU; without it this errors out. The curve is
+            % already baseline-subtracted and scaled to 1 above, so false is correct here.
+            xdata{voxel_index}.fittingAU = false;
             % Run fit
             [aif_fitted, ~, ~, rsquare] = AIFbiexpfithelp(xdata{voxel_index}, 0);
             % Remove bad fits
@@ -214,7 +219,9 @@ if ~isempty(aif_index)
     aif_found = aif_found./max(aif_found);
     xdata{1}.Cp    = aif_found;
     xdata{1}.timer = timer';
-    xdata{1}.step = [end_ss end_inject];
+    % Frame numbers -> 0-based timer, as above.
+    xdata{1}.step = [end_ss-1 end_inject-1];
+    xdata{1}.fittingAU = false;
     % Show fit
     [aif_fitted, ~, ~, rsquare] = AIFbiexpfithelp(xdata, 0);
     figure;

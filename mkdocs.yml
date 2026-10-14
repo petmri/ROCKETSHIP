@@ -1,0 +1,59 @@
+# Shared DCEasy theme: palette, fonts, features, social, analytics, extensions.
+# Source of truth is petmri/petmri.github.io › theme/. Do NOT redeclare
+# theme.features here — lists replace rather than merge, and the site would
+# silently lose every feature not listed.
+INHERIT: ./dceasy-base.yml
+
+site_name: ROCKETSHIP
+site_description: Processing and analysis of dynamic contrast-enhanced and parametric MRI data.
+site_url: https://dceasy.org/ROCKETSHIP/
+repo_url: https://github.com/petmri/ROCKETSHIP
+repo_name: petmri/ROCKETSHIP
+docs_dir: docs
+
+# Per-project favicon — the family mark is shared via the header logo, but the
+# tab icon has to tell this site apart from the other DCEasy sites.
+theme:
+  favicon: assets/favicon.svg
+
+
+# Project-management notes and archived project records are working documents for the
+# development team, not user documentation. They live at the repository root, in
+# project-management/, deliberately OUTSIDE docs/ — anything under docs/ is published.
+#
+# This used to be docs/project-management/ kept out by exclude_docs. That works under
+# MkDocs but Zensical has no exclude_docs, no not_in_nav and no draft support, and would
+# silently publish all 18 pages and index them for site search. Placement, not
+# configuration, is what keeps them unpublished. Do not move them back under docs/.
+
+# Site-specific: ROCKETSHIP's reference pages carry display maths.
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+nav:
+  - Home: index.md
+  - Walkthroughs:
+      - Python Walkthrough: wiki/python-walkthrough.md
+      - MATLAB DCE Walkthrough: wiki/dce-walkthrough.md
+      - MATLAB DSC Walkthrough: wiki/dsc-walkthrough.md
+      - MATLAB Parametric Walkthrough: wiki/parametric-walkthrough.md
+  - Setup:
+      - GPU and CPU Acceleration: wiki/enable-gpu-acceleration.md
+  - Technical Reference:
+      - DCE Options: dce_options.md
+      - Parametric T1 Options: parametric_options.md
+      - Signal to Concentration: reference/signal-to-concentration.md
+      - Pharmacokinetic Models:
+          - Overview: reference/models/index.md
+          - Tofts: reference/models/tofts.md
+          - Extended Tofts: reference/models/extended-tofts.md
+          - Patlak: reference/models/patlak.md
+          - Tissue Uptake: reference/models/tissue-uptake.md
+          - Two-Compartment Exchange: reference/models/two-compartment-exchange.md
+          - FXR (Shutter Speed): reference/models/fxr.md
+          - Area Under the Curve: reference/models/auc.md
+          - Arterial Input Function: reference/models/aif.md
+  - Testing:
+      - Overview: testing.md
+      - OSIPI Verification: osipi-verification.md

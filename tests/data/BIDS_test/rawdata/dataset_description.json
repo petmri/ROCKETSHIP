@@ -1,0 +1,24 @@
+{
+    "Name": "ROCKETSHIP DCE/T1 parity and phantom-qualification test dataset",
+    "BIDSVersion": "1.9.0",
+    "DatasetType": "raw",
+    "Description": "Small synthetic BIDS dataset used by the ROCKETSHIP test suite for MATLAB<->Python parity and synthetic-phantom ground-truth qualification. sub-01original/sub-02downsample are a real-style reference example (BIDS_example sub-01) plus a downsampled variant; sub-05..sub-09 are fully synthetic DCE phantoms that ship voxelwise ground-truth maps; sub-10bbbdownsample and sub-11tiny are committed fit-parity/settings fixtures whose MATLAB reference maps live under derivatives/matlabref. Not intended for scientific reuse.",
+    "GeneratedBy": [
+        {
+            "Name": "generate_synthetic_datasets.m",
+            "Description": "Builds the real-style reference (sub-01original) and its downsample variant (sub-02downsample) from tests/data/BIDS_example sub-01."
+        },
+        {
+            "Name": "synthetic_dce.generate_synthetic_data_gpu",
+            "Description": "Generates the synthetic ground-truth DCE phantoms (sub-05..sub-09) with known Ktrans/ve/vp/fp/T1 maps and a Parker AIF."
+        },
+        {
+            "Name": "tests/data/scripts/generate_bbb_p19_downsample.py",
+            "Description": "Builds the sub-10bbbdownsample DCE fit-parity fixture (3x3 in-plane downsample of BBB data p19)."
+        },
+        {
+            "Name": "tests/data/scripts/generate_tiny_dce_settings_fixture.py",
+            "Description": "Builds the sub-11tiny synthetic DCE half used for fast settings/feature sweeps."
+        }
+    ]
+}

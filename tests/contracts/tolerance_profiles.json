@@ -1,0 +1,27 @@
+{
+  "forward_exact": {
+    "atol": 1e-10,
+    "rtol": 1e-8,
+    "description": "Deterministic closed-form forward models with no optimizer path dependence."
+  },
+  "fit_recovery_strict": {
+    "atol": 1e-6,
+    "rtol": 1e-4,
+    "description": "Noise-free nonlinear-fit parity for well-conditioned models. On noise-free synthetic data with matched bounds/seeds, MATLAB and the Python port land on the same minimum to ~1e-11..1e-7, so this tight bound catches real porting divergence while the current MATLAB/Python optimizers pass comfortably. Use for tofts/ex_tofts/patlak/vp/tissue_uptake/fxr and parametric fits."
+  },
+  "fit_recovery": {
+    "atol": 5e-3,
+    "rtol": 5e-2,
+    "description": "Loose recovery bound reserved for intrinsically ill-conditioned inverse problems (e.g. 2CXM) whose parameters trade off even on noise-free data, so per-parameter parity is not a tight numerical contract. Do NOT use for well-conditioned models; prefer fit_recovery_strict there."
+  },
+  "noisy_parity": {
+    "atol": 1e-5,
+    "rtol": 1e-3,
+    "description": "Python-vs-MATLAB parity on IDENTICAL stored noisy curves, applied only to parameters MATLAB itself recovered near ground truth (identifiable at that noise level). Measured same-input agreement is <=2.1e-7 for tofts/ex_tofts and exact for linear patlak, so this bound flags real divergence (>~0.1%) while passing faithful ports. Never apply to non-identifiable parameters; the test gates those out."
+  },
+  "map_regression": {
+    "atol": 1e-4,
+    "rtol": 1e-2,
+    "description": "Voxel/map-level regression checks where interpolation or solver differences are expected."
+  }
+}

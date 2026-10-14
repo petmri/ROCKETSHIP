@@ -1,4 +1,3 @@
-% function saved_results = A_make_R1maps_func(DYNAMIC, LV, TUMOR, NOISE, DRIFT, hdr, res,quant, rootname, dynampath, dynam_name, aif_rr_type, ... 
 function [saved_results, RUNA_vars, errormsg] = A_make_R1maps_func(filevolume, noise_pathpick, ...
     noise_pixsize, LUT, filelist, t1aiffiles, t1roifiles, t1mapfiles, noisefiles, ...
     driftfiles, rootname, fileorder, quant, mask_roi, mask_aif, ...
@@ -282,7 +281,6 @@ if dimt==1
     else
         error('Input dynamic images not 4D data, or time dimension = 1');
     end
-    
 end
 
 % The TR is in ms
@@ -644,17 +642,36 @@ elseif (steady_state_time == -2)
         dimx = size(DYNAMIC,1);
         dimy = size(DYNAMIC,2);
         dimz = dimz;
-        end_ss = dce_auto_aif(DYNAMLV,lvind,dimx,dimy,dimz,injection_duration);
+        % end_ss = dce_auto_aif(DYNAMLV,lvind,dimx,dimy,dimz,injection_duration);
+        % [end_ss, end_injection] = find_end_ss(DYNAMLV);
+        % [end_ss, end_injection] = find_end_ss_biexp(DYNAMLV);
+        % find_end_ss_tv is the default. find_end_ss_biexp fits both transition times
+        % together and so also reports a fractional upslope end, which is attractive -- but
+        % measured against 280 human-rated sessions it lands on the right baseline end 74.6%
+        % of the time against find_end_ss_tv's 95.0%, and every one of its errors is one
+        % frame late. It absorbs the first lightly-enhanced frame into the baseline because
+        % doing so costs almost nothing in SSE, and no goodness-of-fit criterion can correct
+        % that: the late answer genuinely fits *better*. See S11 in
+        % project-management/projects/archived/batch-parity/aif_fitting_parity.md.
+        % Matches Python's default steady_state_auto_method='tv'.
+        [end_ss, end_injection] = find_end_ss_tv(DYNAMLV);
     end
     start_injection = end_ss;
-    [~, end_injection] = max(DYNAMLV);
-    end_injection = mean(end_injection);
+    % [~, end_injection] = max(DYNAMLV);
+    % end_injection = mean(end_injection);
     steady_state_time(2) = end_ss;
     steady_state_time(1) = 1; 
 else
     %No zero index in matlab
     steady_state_time(2) = steady_state_time;
     steady_state_time(1) = 1;
+    % Same as the manual branch above: steady_state_time(2) is the last
+    % baseline frame, so it is also the injection start. Without this the
+    % explicit-steady-state path leaves start_injection/end_injection
+    % undefined and errors out at the Adata assignment below.
+    start_injection = steady_state_time(2);
+    [~, end_injection] = max(DYNAMLV);
+    end_injection = mean(end_injection);
 end
 disp(['Steady state time selected from image ' num2str(steady_state_time(1)) ...
     ' to image ' num2str(steady_state_time(2)) ' ']);

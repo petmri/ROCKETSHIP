@@ -1,0 +1,38 @@
+{
+    "RepetitionTime": 0.008579,
+    "TemporalResolution": 33.20773344,
+    "FlipAngle": 17.021,
+    "Relaxivity_per_mM_per_s": 5.209561,
+    "Hematocrit": 0.0,
+    "AIFConcentrationKind": "plasma",
+    "PlasmaCorrectionApplied": false,
+    "AcquisitionDateTime": "2000-01-01T00:00:00.000000",
+    "GeneratedBy": [
+        "synthetic_dce.generate_synthetic_data_gpu"
+    ],
+    "SyntheticPhantom": {
+        "AIFConcentrationKind": "plasma",
+        "PlasmaCorrectionApplied": false,
+        "Hematocrit": 0.0,
+        "RecommendedROCKETSHIPHematocrit": 0.0,
+        "BaselineImages": 4,
+        "Relaxivity_per_mM_per_s": 5.209561,
+        "AIFPrecontrastT1_ms": 1472.34714,
+        "AIFRho": 894.966039,
+        "TimeOffsetFrames": 0.598658,
+        "AIFModel": "parker",
+        "Seed": 42,
+        "VoxelSNRRange": {
+            "min": 5000.0,
+            "max": 10000.0
+        },
+        "VFAFlipAnglesDeg": [
+            2.0,
+            5.0,
+            10.0,
+            15.0
+        ],
+        "VFANoiseAdded": false,
+        "Intent": "Low-noise phantom for T1-improved DCE fitting evaluation"
+    }
+}
