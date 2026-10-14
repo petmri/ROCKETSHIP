@@ -208,6 +208,7 @@ for model_index=1:numel(dce_model_list)
 
     if USE_GPU
         disp("Gpufit detected. GPU will be utilized for voxel fitting.")
+        disp(['Gpufit version: ' report_gpufit_version()])
     else
         disp("Gpufit not detected. Defaulting to CPU.")
     end

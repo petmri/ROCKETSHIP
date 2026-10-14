@@ -2908,7 +2908,7 @@ def _fit_aif_biexp(
         "fit_t_base_end": bool(fit_t_base_end),
         "peak_weight": float(peak_weight),
         "robust_mode": aif_robust_mode,
-        "robust_scale": robust_scale,
+        "robust_scale": robust_scale if math.isfinite(robust_scale) else None,
         "robust_iterations": robust_iterations,
         "t0_exp_drifted": t0_exp_drifted,
         "delta_init": float(delta_init),
@@ -3198,10 +3198,10 @@ def _run_stage_b_real(config: DcePipelineConfig, stage_a: Dict[str, Any]) -> Dic
             "fit_peak_weight_cp": float(fit_cp["peak_weight"]),
             "fit_peak_weight_stlv": float(fit_stlv["peak_weight"]),
             "fit_robust_mode_cp": str(fit_cp["robust_mode"]),
-            "fit_robust_scale_cp": float(fit_cp["robust_scale"]),
+            "fit_robust_scale_cp": fit_cp["robust_scale"],
             "fit_robust_iterations_cp": int(fit_cp["robust_iterations"]),
             "fit_robust_mode_stlv": str(fit_stlv["robust_mode"]),
-            "fit_robust_scale_stlv": float(fit_stlv["robust_scale"]),
+            "fit_robust_scale_stlv": fit_stlv["robust_scale"],
             "fit_robust_iterations_stlv": int(fit_stlv["robust_iterations"]),
             "fit_delta_cp": float(fit_cp["delta"]),
             "fit_delta_stlv": float(fit_stlv["delta"]),
@@ -4044,10 +4044,12 @@ def _run_stage_d_real(
     backend_info = _resolve_stage_d_backend(config)
     selected_backend = backend_info["selected_backend"]
     acceleration_backend = backend_info["acceleration_backend"]
+    acceleration_backend_version = backend_info.get("acceleration_backend_version")
     backend_reason = backend_info["reason"]
+    version_note = f" v{acceleration_backend_version}" if acceleration_backend_version else ""
     run_reporting.notice(
         f"Stage-D backend: requested={backend_info['requested_backend']} "
-        f"selected={selected_backend} acceleration={acceleration_backend} ({backend_reason})"
+        f"selected={selected_backend} acceleration={acceleration_backend}{version_note} ({backend_reason})"
     )
 
     arrays = stage_b.get("arrays")
@@ -4290,6 +4292,7 @@ def _run_stage_d_real(
         "impl": "real",
         "selected_backend": selected_backend,
         "acceleration_backend": acceleration_backend,
+        "acceleration_backend_version": acceleration_backend_version,
         "backend_reason": backend_reason,
         "backend_used": backend_used,
         "write_xls": bool(config.write_xls),
@@ -4376,6 +4379,7 @@ class HybridStageRunner:
                 "impl": "scaffold",
                 "selected_backend": backend_info["selected_backend"],
                 "acceleration_backend": backend_info["acceleration_backend"],
+                "acceleration_backend_version": backend_info.get("acceleration_backend_version"),
                 "backend_reason": backend_info["reason"],
                 "write_xls": bool(config.write_xls),
                 "model_flags": dict(config.model_flags),
@@ -4625,6 +4629,7 @@ def run_dce_pipeline(
         },
         "backend_requested": config.backend,
         "backend_used": backend_used,
+        "backend_used_version": stage_d.get("acceleration_backend_version"),
     }
 
     summary = {

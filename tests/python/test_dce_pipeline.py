@@ -1484,6 +1484,29 @@ class TestDcePipeline:
             assert float(result["fit_t0_exp_stlv"]) > float(result["fit_t_base_end_stlv"])
             assert result["arrays"]["Cp_use"].shape == result["arrays"]["CpROI"].shape
 
+    def test_stage_b_omits_unavailable_robust_scales_from_json_numbers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            config.aif_mode = "fitted"
+            config.stage_overrides = {
+                "relaxivity": 3.6,
+                "stage_b_mode": "real",
+                "restrict_fit_start_min": 0.0,
+                "restrict_fit_end_min": 0.0,
+            }
+
+            result = _run_stage_b_real(config, _make_stage_a_payload())
+            robust_scales = {
+                "fit_robust_scale_cp": result["fit_robust_scale_cp"],
+                "fit_robust_scale_stlv": result["fit_robust_scale_stlv"],
+            }
+
+            assert robust_scales == {
+                "fit_robust_scale_cp": None,
+                "fit_robust_scale_stlv": None,
+            }
+            assert json.loads(json.dumps(robust_scales, allow_nan=False)) == robust_scales
+
     def test_stage_b_real_prefers_stage_a_auto_injection_minutes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))

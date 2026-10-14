@@ -353,6 +353,9 @@ This section intentionally lists the major legacy MATLAB entry points and core i
 - `parse_preference_file.m` — preference parser used across DCE MATLAB workflows.
 - `dce_auto_aif.m`, `AIFbiexpcon.m`, `AIFbiexpfithelp.m` — AIF-specific logic.
 - `loadIMGVOL.m`, `sortIMGVOL.m`, `sort_parse_INPUTS.m` — image input/parsing helpers.
+- `report_gpufit_version.m` — logs the installed Gpufit version alongside GPU detection
+  (shared by `dce/` and `parametric_scripts/`); Python's audit-trail counterpart is
+  `python/accel_backend.py`'s `pygpufit_version`/`pycpufit_version`.
 
 #### Parametric mapping module (`parametric_scripts/`)
 

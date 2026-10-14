@@ -841,6 +841,7 @@ def run_parametric_t1_pipeline(
                 "requested_backend": backend_info["requested_backend"],
                 "selected_backend": "cpu",
                 "acceleration_backend": "none",
+                "acceleration_backend_version": None,
                 "reason": "B1 scaling active; using CPU nonlinear solver",
             }
 
@@ -872,6 +873,7 @@ def run_parametric_t1_pipeline(
             requested=backend_info["requested_backend"],
             selected=backend_info["selected_backend"],
             acceleration_backend=backend_info["acceleration_backend"],
+            acceleration_backend_version=backend_info.get("acceleration_backend_version"),
             reason=backend_info["reason"],
             b1_scaling_active=bool(has_b1_scaling),
         )
@@ -952,6 +954,7 @@ def run_parametric_t1_pipeline(
                 "requested": backend_info["requested_backend"] if backend_info else "cpu",
                 "selected": backend_info["selected_backend"] if backend_info else "cpu",
                 "acceleration_backend": backend_info["acceleration_backend"] if backend_info else "none",
+                "acceleration_backend_version": backend_info.get("acceleration_backend_version") if backend_info else None,
                 "reason": backend_info["reason"] if backend_info else "non-accelerated fit type",
             },
         },

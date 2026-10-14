@@ -16,9 +16,27 @@ without importing pygpufit at all.
 from __future__ import annotations
 
 from functools import lru_cache
+from importlib.metadata import PackageNotFoundError, version as _dist_version
 from typing import Any, Callable, Dict, Optional
 
 ALLOWED_BACKENDS = {"auto", "cpu", "gpufit"}
+
+
+def _module_version(module: Any, dist_name: str) -> Optional[str]:
+    """Version of an imported pygpufit/pycpufit module, for audit trails in run output.
+
+    Tries the installed distribution's metadata first (what `pip show` reports),
+    then falls back to the module's own `<pkg>.version.__version__` (present in
+    both packages) for non-pip installs (e.g. built from source on PATH).
+    """
+    try:
+        return _dist_version(dist_name)
+    except PackageNotFoundError:
+        pass
+    try:
+        return str(module.version.__version__)
+    except Exception:
+        return None
 
 
 @lru_cache(maxsize=1)
@@ -51,6 +69,9 @@ def probe_acceleration_backend() -> Dict[str, Any]:
     except Exception as exc:
         pycpufit_error = str(exc)
 
+    pygpufit_version = _module_version(pygpufit_module, "pyGpufit") if pygpufit_module is not None else None
+    pycpufit_version = _module_version(pycpufit_module, "pyCpufit") if pycpufit_module is not None else None
+
     if cuda_available:
         return {
             "backend": "gpufit_cuda",
@@ -60,6 +81,8 @@ def probe_acceleration_backend() -> Dict[str, Any]:
             "pycpufit_imported": pycpufit_module is not None,
             "pygpufit_error": pygpufit_error,
             "pycpufit_error": pycpufit_error,
+            "pygpufit_version": pygpufit_version,
+            "pycpufit_version": pycpufit_version,
         }
 
     if pycpufit_module is not None:
@@ -71,6 +94,8 @@ def probe_acceleration_backend() -> Dict[str, Any]:
             "pycpufit_imported": True,
             "pygpufit_error": pygpufit_error,
             "pycpufit_error": pycpufit_error,
+            "pygpufit_version": pygpufit_version,
+            "pycpufit_version": pycpufit_version,
         }
 
     if pygpufit_module is not None:
@@ -82,6 +107,8 @@ def probe_acceleration_backend() -> Dict[str, Any]:
             "pycpufit_imported": False,
             "pygpufit_error": pygpufit_error,
             "pycpufit_error": pycpufit_error,
+            "pygpufit_version": pygpufit_version,
+            "pycpufit_version": pycpufit_version,
         }
 
     return {
@@ -92,6 +119,8 @@ def probe_acceleration_backend() -> Dict[str, Any]:
         "pycpufit_imported": False,
         "pygpufit_error": pygpufit_error,
         "pycpufit_error": pycpufit_error,
+        "pygpufit_version": None,
+        "pycpufit_version": None,
     }
 
 
@@ -112,6 +141,7 @@ def resolve_backend_selection(
             "requested_backend": backend,
             "selected_backend": "cpu",
             "acceleration_backend": "none",
+            "acceleration_backend_version": None,
             "reason": "backend=cpu forces pure CPU fitting path",
         }
 
@@ -119,6 +149,14 @@ def resolve_backend_selection(
     probe_backend = str(probe.get("backend", "none"))
     probe_reason = str(probe.get("reason", ""))
     pygpufit_imported = bool(probe.get("pygpufit_imported", False))
+
+    def _version_for(acceleration_backend: str) -> Optional[str]:
+        # cpufit_cpu is pyCpufit's own backend; every gpufit_* variant (including the
+        # CPU fallback path) is pyGpufit's, since gpufit_cpu_fallback still runs
+        # through the pygpufit binding rather than pycpufit's.
+        if acceleration_backend == "cpufit_cpu":
+            return probe.get("pycpufit_version")
+        return probe.get("pygpufit_version")
 
     if backend == "gpufit":
         if not pygpufit_imported:
@@ -128,6 +166,7 @@ def resolve_backend_selection(
             "requested_backend": backend,
             "selected_backend": "gpufit",
             "acceleration_backend": acceleration_backend,
+            "acceleration_backend_version": _version_for(acceleration_backend),
             "reason": f"backend=gpufit selected acceleration backend '{acceleration_backend}' ({probe_reason})",
         }
 
@@ -137,12 +176,14 @@ def resolve_backend_selection(
             "requested_backend": backend,
             "selected_backend": "gpufit",
             "acceleration_backend": probe_backend,
+            "acceleration_backend_version": _version_for(probe_backend),
             "reason": f"backend=auto selected acceleration backend '{probe_backend}' ({probe_reason})",
         }
     return {
         "requested_backend": backend,
         "selected_backend": "cpu",
         "acceleration_backend": "none",
+        "acceleration_backend_version": None,
         "reason": "backend=auto fell back to pure CPU fitting path",
     }
 
