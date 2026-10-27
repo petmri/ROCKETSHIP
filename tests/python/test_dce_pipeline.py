@@ -317,6 +317,30 @@ class TestDcePipeline:
             assert out["time_resolution_sec"] == pytest.approx(15.3239)
             assert "RepetitionTime@RepetitionTimeExcitation" in str(out["metadata_sources"]["time_resolution_sec"])
 
+    def test_dynamic_metadata_volume_timing_outranks_scalar_spacing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = _make_config(Path(tmp))
+            sidecar = Path(str(config.dynamic_files[0])[:-7] + ".json")
+            sidecar.write_text(
+                json.dumps(
+                    {
+                        "RepetitionTime": 0.005,
+                        "TemporalResolution": 99.0,
+                        "FlipAngle": 17.0,
+                        "NumberOfAverages": 2,
+                        "VolumeTiming": [0.0, 30.0, 90.0, 120.0, 180.0],
+                    }
+                )
+            )
+
+            out = _resolve_dynamic_metadata(config, n_timepoints=3, n_timepoints_raw=5, window_0b=(1, 4))
+            assert out["timer_min"] == pytest.approx([0.0, 1.0, 1.5])
+            assert out["time_resolution_sec"] == pytest.approx(45.0)
+            assert "VolumeTiming" in str(out["metadata_sources"]["time_resolution_sec"])
+
+            with pytest.raises(ValueError, match=r"VolumeTiming has 5 entries"):
+                _resolve_dynamic_metadata(config, n_timepoints=8)
+
     def test_dynamic_metadata_time_resolution_from_acquisition_duration(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = _make_config(Path(tmp))

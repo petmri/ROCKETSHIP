@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import tempfile
 
+import numpy as np
 import pytest
 
 
@@ -131,3 +132,45 @@ def test_cli_pipeline_writes_event_log_and_summary_contract() -> None:
             assert Path(map_path).exists()
         assert tofts_out["xls_path"]
         assert Path(tofts_out["xls_path"]).exists()
+
+
+@pytest.mark.integration
+def test_cli_pipeline_runs_on_uneven_volume_timing() -> None:
+    """A sidecar `VolumeTiming` becomes the Stage-A/B timer, cropped by `start_t` and rebased to 0.
+
+    The MATLAB side of the same contract is tests/matlab/unit/TestDceVolumeTiming.m.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_dir = Path(tmp)
+        config_path = _make_temp_config(tmp_dir)
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+        meta_path = Path(payload["stage_overrides"]["dce_metadata_path"])
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        # 18 frames: 20 s apart for the first five, 10 s apart after, so the auto-found
+        # injection frames straddle the change in spacing.
+        volume_timing = [20.0 * i if i < 5 else 80.0 + 10.0 * (i - 4) for i in range(18)]
+        meta["VolumeTiming"] = volume_timing
+        meta["NumberOfAverages"] = 3
+        (tmp_dir / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+        payload["stage_overrides"]["dce_metadata_path"] = str(tmp_dir / "meta.json")
+        payload["stage_overrides"]["start_t"] = 2
+        config_path.write_text(json.dumps(payload), encoding="utf-8")
+
+        assert dce_cli.main(["--config", str(config_path), "--events", "off"]) == 0
+
+        expected_timer = (np.asarray(volume_timing[1:]) - volume_timing[1]) / 60.0
+        checkpoints = tmp_dir / "checkpoints"
+        stage_a = json.loads((checkpoints / "a_out.json").read_text(encoding="utf-8"))
+        with np.load(checkpoints / "a_out_arrays.npz") as arrays:
+            np.testing.assert_allclose(arrays["timer"], expected_timer)
+        with np.load(checkpoints / "b_out_arrays.npz") as arrays:
+            np.testing.assert_allclose(arrays["timer"], expected_timer)
+
+        # Median step of the cropped window (three 20 s steps, thirteen 10 s), not scaled by
+        # NumberOfAverages.
+        assert stage_a["time_resolution_min"] == pytest.approx(10.0 / 60.0)
+        frames = np.arange(expected_timer.size, dtype=np.float64)
+        for key in ("start_injection", "end_injection"):
+            assert stage_a[f"{key}_min_auto"] == pytest.approx(
+                np.interp(stage_a[key] - 1.0, frames, expected_timer)
+            )

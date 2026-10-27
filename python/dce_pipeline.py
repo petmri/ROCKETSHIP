@@ -739,6 +739,7 @@ def _resolve_dynamic_metadata(
     n_timepoints: int,
     *,
     n_timepoints_raw: Optional[int] = None,
+    window_0b: Optional[Tuple[int, int]] = None,
 ) -> Dict[str, Any]:
     metadata_path, _ = _explicit_stage_override(config, ("dce_metadata_path",))
     candidates: List[Path] = []
@@ -836,6 +837,26 @@ def _resolve_dynamic_metadata(
             tr_ms = float(payload["RepetitionTime"]) * 1000.0
             metadata_sources["tr_ms"] = f"{source_prefix}.RepetitionTime"
 
+    # BIDS VolumeTiming (seconds, one entry per raw frame) outranks every scalar spacing field.
+    volume_timing_sec: Optional[np.ndarray] = None
+    if time_resolution_sec is None and payload.get("VolumeTiming") is not None:
+        raw_timing = np.asarray(payload["VolumeTiming"], dtype=np.float64).ravel()
+        n_expected = int(n_timepoints_raw) if n_timepoints_raw is not None else int(n_timepoints)
+        if raw_timing.size != n_expected:
+            raise ValueError(
+                f"VolumeTiming has {raw_timing.size} entries but the dynamic image has {n_expected} frames"
+            )
+        if not np.all(np.isfinite(raw_timing)) or np.any(np.diff(raw_timing) <= 0.0):
+            raise ValueError("VolumeTiming must be finite and strictly increasing")
+        start_0b, end_0b = window_0b if window_0b is not None else (0, raw_timing.size)
+        volume_timing_sec = raw_timing[start_0b:end_0b] - raw_timing[start_0b]
+        if volume_timing_sec.size > 1:
+            time_resolution_sec = float(np.median(np.diff(volume_timing_sec)))
+        else:
+            time_resolution_sec = float(np.median(np.diff(raw_timing)))
+        metadata_sources["time_resolution_sec"] = f"{source_prefix}.VolumeTiming(median step)"
+        metadata_sources["volume_timing_sec"] = f"{source_prefix}.VolumeTiming"
+
     if time_resolution_sec is None:
         if "time_resolution_sec" in payload:
             time_resolution_sec = float(payload["time_resolution_sec"])
@@ -874,6 +895,7 @@ def _resolve_dynamic_metadata(
     if (
         time_resolution_sec is not None
         and "NumberOfAverages" in payload
+        and volume_timing_sec is None
         and metadata_sources.get("time_resolution_sec", "").startswith(source_prefix)
     ):
         time_resolution_sec = float(time_resolution_sec) * float(payload["NumberOfAverages"])
@@ -953,6 +975,7 @@ def _resolve_dynamic_metadata(
         "tr_ms": float(tr_ms),
         "time_resolution_sec": float(time_resolution_sec),
         "time_resolution_min": float(time_resolution_sec) / 60.0,
+        "timer_min": (volume_timing_sec / 60.0 if volume_timing_sec is not None else None),
         "fa_deg": float(fa_deg),
         "relaxivity": (float(relaxivity) if relaxivity is not None else None),
         "hematocrit": (float(hematocrit) if hematocrit is not None else None),
@@ -2010,7 +2033,12 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     t1_tum = t1_flat[tumind].astype(np.float64)
 
     n_time = dynamic.shape[3]
-    timing = _resolve_dynamic_metadata(config, n_time, n_timepoints_raw=n_timepoints_input)
+    timing = _resolve_dynamic_metadata(
+        config,
+        n_time,
+        n_timepoints_raw=n_timepoints_input,
+        window_0b=(time_start_0b, time_end_0b_exclusive),
+    )
     tr_ms = float(timing["tr_ms"])
     tr_sec = tr_ms / 1000.0
     fa_deg = float(timing["fa_deg"])
@@ -2073,7 +2101,10 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     delta_r1_lv = r1_lv - np.mean(r1_lv[baseline_slice, :], axis=0)[np.newaxis, :]
     delta_r1_toi = r1_toi - np.mean(r1_toi[baseline_slice, :], axis=0)[np.newaxis, :]
 
-    timer = np.arange(n_time, dtype=np.float64) * time_resolution_min
+    if timing.get("timer_min") is not None:
+        timer = np.asarray(timing["timer_min"], dtype=np.float64)
+    else:
+        timer = np.arange(n_time, dtype=np.float64) * time_resolution_min
     # MATLAB auto-find-injection parity:
     # start_injection := end_ss (baseline detector output)
     # end_injection   := mean(argmax(DYNAMLV, axis=time))
@@ -2097,8 +2128,9 @@ def _run_stage_a_real(config: DcePipelineConfig) -> Dict[str, Any]:
     # late: it would put the end of the baseline on the *first contrast* frame, and Stage-B
     # bounds the fitted AIF's `t_base_end` below by that time -- forcing the AIF to zero on a
     # frame that already carries contrast. Mirrors dce/B_AIF_fitting_func.m.
-    start_injection_min_auto = float(max(0.0, (start_injection - 1.0) * time_resolution_min))
-    end_injection_min_auto = float(max(0.0, (end_injection - 1.0) * time_resolution_min))
+    frame_index = np.arange(n_time, dtype=np.float64)
+    start_injection_min_auto = float(max(0.0, np.interp(start_injection - 1.0, frame_index, timer)))
+    end_injection_min_auto = float(max(0.0, np.interp(end_injection - 1.0, frame_index, timer)))
 
     figures = _save_stage_a_qc_figures(
         config.output_dir,
@@ -3531,9 +3563,8 @@ def _write_qof_maps(
         ct_arr = np.asarray(ct_voxel, dtype=np.float64)
         n_obs = int(ct_arr.shape[0])
         dt = float(timer[1] - timer[0]) if np.asarray(timer).size > 1 else 0.0
-        t0 = float(timer[0]) if np.asarray(timer).size else 0.0
         window = dce_qof.bolus_window_from_timing(
-            start_injection_min, end_injection_min, dt, n_obs, t0
+            start_injection_min, end_injection_min, dt, n_obs, np.asarray(timer)
         )
 
         chi2_max = _safe_float(_stage_override(config, "qof_chi2_max"), 6.0)

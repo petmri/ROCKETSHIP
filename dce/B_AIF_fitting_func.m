@@ -17,7 +17,9 @@ function [results, B_vars] = B_AIF_fitting_func(results_a_path, start_time, ...
 %  fit_aif            - fit AIF to model (bool, 0 for reference region)
 %  import_aif_path    - import AIF from .mat file (string)
 %  time_resolution    - time resolution of dynamic scan (in minutes)
-%  timevectpath       - import manual time vector from .mat file (string)
+%  timevectpath       - import manual time vector from .mat file (string), or the
+%                       frame times themselves (numeric vector, e.g. from BIDS
+%                       VolumeTiming via dce_volume_timer)
 %
 %
 % The script loads the data arrays generated from A_make_R1maps_func().
@@ -68,7 +70,11 @@ quant    = Adata.quant;
 rootname = Adata.rootname;
 Cp       = double(Adata.Cp);
 Ct       = double(Adata.Ct);
-if (start_injection == -1 || end_injection == -1)
+% Frame times passed in directly (VolumeTiming) place the auto injection on themselves, below;
+% a .mat time vector keeps the uniform mapping, as the Python pipeline does.
+frame_times_given = isnumeric(timevectpath) && ~isempty(timevectpath);
+auto_injection = (start_injection == -1 || end_injection == -1);
+if auto_injection && ~frame_times_given
     % Adata.start_injection (= end_ss, the LAST baseline frame) and
     % Adata.end_injection (= mean peak frame) are 1-based frame numbers, but
     % timer = 0:time_resolution:... is 0-based, so frame f sits at
@@ -122,7 +128,10 @@ disp(fit_aif);
 disp('User selected import AIF path: ');
 fprintf('%s\n\n',import_aif_path);
 
-if ~isempty(timevectpath)
+if frame_times_given
+    fprintf('User supplied frame times (VolumeTiming): %d frames, median step (sec)\n', numel(timevectpath));
+    disp(time_resolution*60);
+elseif ~isempty(timevectpath)
     disp('User selected import time vector path: ');
     fprintf('%s\n\n',timevectpath);
 else
@@ -145,7 +154,9 @@ tic
 %% 2. time management (Change the starter, timeend if needed)
 %% b) Time management
 
-if ~isempty(timevectpath)
+if frame_times_given
+    timer = double(timevectpath);
+elseif ~isempty(timevectpath)
     external = load(timevectpath);
     if isfield(external,'timer')
         timer = external.timer;
@@ -158,6 +169,11 @@ if ~isempty(timevectpath)
         disp('No time vector found in selected file')
         return
     end
+end
+
+if ~isempty(timevectpath)
+    % Row vector, like the generated timer: xdata{1}.timer below is a transpose of it.
+    timer = timer(:)';
     
     % Check that time vector is same size as data. If shorter, extrapolate
     % using the last time interval as guide.
@@ -167,7 +183,7 @@ if ~isempty(timevectpath)
     elseif length(timer) < size(Cp,1)
         lasttimeres = timer(end)-timer(end-1);
         
-        while length(timer < size(Cp,1))
+        while length(timer) < size(Cp,1)
             timer(end+1) = timer(end)+lasttimeres;
         end
     else
@@ -183,6 +199,16 @@ else
     %Generate time curve
     timer   = 0:time_resolution:time_resolution*(size(Cp,1)-1);
 
+end
+
+if auto_injection && frame_times_given
+    % Same frame -> minutes mapping as the uniform branch above, read off the supplied
+    % frame times so uneven spacing lands each frame where it was acquired.
+    frame_index = 0:numel(timer)-1;
+    start_injection = max(0, interp1(frame_index, timer, Adata.start_injection - 1));
+    end_injection = max(0, interp1(frame_index, timer, Adata.end_injection - 1));
+    fprintf('Auto-found injection (min) on the supplied frame times: %g to %g\n', ...
+        start_injection, end_injection);
 end
 
 %Restrict to specified times

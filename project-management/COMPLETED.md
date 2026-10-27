@@ -7,6 +7,21 @@ Do not track open items in this file; active work belongs in `project-management
 
 Completed items moved from `TODO.md` on 2026-03-05 to keep the active backlog short.
 
+## Completed Recent Updates (2026-10-26)
+
+- [x] **DCE Stage A reads BIDS `VolumeTiming`.** The sidecar's per-frame start times become
+      the Stage-A timer (cropped to the `start_t`/`end_t` window and shifted to start at 0),
+      ahead of every scalar spacing field, so non-uniform acquisitions are no longer fitted on
+      an assumed even grid. Auto injection times interpolate on that timer, and the opt-in QoF
+      bolus window maps minutes to frames through it. MATLAB's `run_dce_cli` does the same:
+      `dce/dce_volume_timer.m` crops the sidecar times with the `start_t`/`end_t` window that
+      `loadIMGVOL` now shares (`dce/dce_frame_window.m`), and passes them to
+      `B_AIF_fitting_func` as a numeric time vector, where auto injection times interpolate
+      on them. That path also fixed a hang: extending a short imported time vector looped
+      forever (`while length(timer < n)`). See `docs/dce_options.md`.
+- [x] **Stage checkpoints are written with zlib level 1** instead of `savez_compressed`'s
+      level 6: 10 s vs 16 s per 1.1 GB stage on a network share for ~7% larger files.
+
 ## Completed Recent Updates (2026-08-24) — parametric T1 parity
 
 ### Parametric GUI brought in line with the DCE GUI (from TODO Blocking Items)

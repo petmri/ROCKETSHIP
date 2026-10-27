@@ -68,6 +68,17 @@ must be named outright in the file lists. For the metadata, in order of preferen
 `relaxivity` is subject to the same routes and has no default anywhere, so a run that
 supplies it by none of them stops rather than guessing.
 
+**Frame timing.** A sidecar `VolumeTiming` list (BIDS: the start of each frame in seconds,
+one entry per frame of the dynamic image) is used as the frame times themselves, so
+unevenly spaced acquisitions are fitted on their real time axis. It outranks every scalar
+spacing field (`time_resolution_sec`, `TemporalResolution`, `AcquisitionDuration`, ...) and
+is not scaled by `NumberOfAverages`; the reported `time_resolution_sec` becomes the median
+step. A stated `stage_overrides.time_resolution_sec` still wins and gives even spacing, and an
+explicit time-vector file (`time_vector_path`/`timevectpath`) wins over both. A list whose
+length differs from the frame count, or that is not strictly increasing, stops the run.
+MATLAB's `run_dce_cli` reads `VolumeTiming` the same way (`dce/dce_volume_timer.m`), except
+that MATLAB has no `time_resolution_sec` override when a sidecar is present.
+
 ### File paths
 
 A path in a run configuration may be written relative. It is resolved against **the directory

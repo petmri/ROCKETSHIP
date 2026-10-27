@@ -63,6 +63,7 @@ function run_dce_cli(subject_source_path, subject_tp_path)
     force_use_default_relaxivity = str2double(script_prefs.force_use_default_relaxivity);
     filePattern = dir(strcat(subject_source_path,'/dce/*DCE.json'));
     dce_json = strcat(subject_source_path, '/dce/', filePattern.name);
+    volume_timing = [];
 
     if exist(dce_json, 'file')
         disp("DCE JSON found.")
@@ -90,7 +91,17 @@ function run_dce_cli(subject_source_path, subject_tp_path)
             tr = json.RepetitionTime;
         end
 
-        if isfield(json, 'NumberOfAverages')
+        % BIDS VolumeTiming gives every frame's start time, so it outranks the scalar spacing
+        % above and is already per-frame (no NumberOfAverages scaling). Checked here against
+        % the image so a bad sidecar fails before part A; cropped to start_t/end_t at part B.
+        if isfield(json, 'VolumeTiming') && ~isempty(json.VolumeTiming)
+            volume_timing = json.VolumeTiming;
+            n_frames_raw = load_untouch_header_only(dynamic_files{1});
+            n_frames_raw = n_frames_raw.dime.dim(5);
+            dce_volume_timer(volume_timing, n_frames_raw, [], []);
+        end
+
+        if isfield(json, 'NumberOfAverages') && isempty(volume_timing)
             time_resolution = time_resolution * json.NumberOfAverages;
         end
         if isfield(json, 'InstitutionName')
@@ -215,11 +226,22 @@ function run_dce_cli(subject_source_path, subject_tp_path)
     % main function call
     fail = 0;
     while (fail < 3)
+        % A retry may move start_t, so the frame times are re-cropped on every attempt.
+        % An explicit timevectpath still wins, as it does in the Python pipeline.
+        b_timevect = timevectpath;
+        b_time_resolution = time_resolution;
+        if ~isempty(volume_timing)
+            [volume_timer, b_time_resolution] = dce_volume_timer(volume_timing, ...
+                n_frames_raw, start_t, end_t);
+            if isempty(timevectpath)
+                b_timevect = volume_timer;
+            end
+        end
         try
             [B_results, B_vars] = B_AIF_fitting_func(A_results, ...
                 start_time, end_time, start_injection, ...
                 end_injection, fit_aif, import_aif_path, ...
-                time_resolution, timevectpath, A_vars, false);
+                b_time_resolution, b_timevect, A_vars, false);
             break;
         catch L
             disp("RUNB failed. Repeating in case of bad read...")
