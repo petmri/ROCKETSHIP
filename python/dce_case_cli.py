@@ -297,6 +297,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--checkpoint-dir", type=Path, help="Optional checkpoint directory override.")
     parser.add_argument("--backend", choices=["auto", "cpu", "gpufit"], default="auto", help="DCE fitting backend.")
     parser.add_argument("--models", default="patlak", help="Comma-separated model list (default: patlak).")
+    parser.add_argument(
+        "--aif-mode",
+        choices=["fitted", "raw"],
+        default="fitted",
+        help="AIF curve used for fitting: the fitted biexponential (default) or the raw ROI curve.",
+    )
     parser.add_argument("--dynamic-file", type=Path, help="Optional explicit dynamic file override.")
     parser.add_argument("--aif-file", type=Path, help="Optional explicit AIF mask override.")
     parser.add_argument("--roi-file", type=Path, help="Optional explicit ROI mask override.")
@@ -397,7 +403,7 @@ def main(argv: list[str] | None = None) -> int:
         backend=args.backend,
         checkpoint_dir=checkpoint_dir,
         write_xls=True,
-        aif_mode="fitted",
+        aif_mode=args.aif_mode,
         dynamic_files=[inputs["dynamic"]],
         aif_files=[inputs["aif"]],
         roi_files=[inputs["roi"]],
