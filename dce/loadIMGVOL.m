@@ -267,15 +267,7 @@ if filevolume == 1
         img = nii.img;
         hdr = nii.hdr;
         res = nii.hdr.dime.pixdim(2:4);
-        if (start_t > 0) & (end_t > start_t)
-            DYNAMIC = img(:,:,:,start_t:end_t);
-        elseif (start_t > 1) & isempty(end_t)
-            DYNAMIC = img(:,:,:,start_t:size(img,4));
-        elseif (end_t > 0)
-            DYNAMIC = img(:,:,:,1:end_t);
-        else
-            DYNAMIC = img;
-        end
+        DYNAMIC = img(:,:,:,dce_frame_window(size(img,4), start_t, end_t));
     else
         errormsg = 'Unknown file type - DYNAMIC';
         return;

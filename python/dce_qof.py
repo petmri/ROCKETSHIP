@@ -48,7 +48,7 @@ def bolus_window_from_timing(
     end_injection_min: Optional[float],
     time_resolution_min: Optional[float],
     n_frames: int,
-    timer_min0: float = 0.0,
+    timer_min: Optional[np.ndarray] = None,
     *,
     margin_frames: int = 2,
 ) -> Optional[Tuple[int, int]]:
@@ -56,27 +56,36 @@ def bolus_window_from_timing(
 
     Shared by the offline checkpoint path and the in-pipeline
     `write_qof_maps` path so both produce the same σ estimate for the same
-    data. Returns `None` when the timing is absent or the frame step is not
-    positive.
+    data. With `timer_min`, minutes map to frames through the timer itself, which
+    stays exact for non-uniform (BIDS `VolumeTiming`) frames; without it, frames are
+    `time_resolution_min` apart from 0. Returns `None` when the timing is absent or the
+    frame step is not positive.
     """
     if time_resolution_min is None or start_injection_min is None:
         return None
     dt = float(time_resolution_min)
     if not dt > 0:
         return None
-    start_min = float(start_injection_min)
-    onset = (start_min - float(timer_min0)) / dt
-    if end_injection_min is None:
-        duration = 0.0
+    timer = None if timer_min is None else np.asarray(timer_min, dtype=np.float64).reshape(-1)
+    if timer is not None and timer.size > 1:
+        frames = np.arange(timer.size, dtype=np.float64)
+        minutes = [float(start_injection_min)]
+        if end_injection_min is not None:
+            minutes.append(float(end_injection_min))
+        frame_pos = np.interp(minutes, timer, frames)
     else:
-        duration = max(0.0, (float(end_injection_min) - start_min) / dt)
+        frame_pos = np.array([float(start_injection_min) / dt] + (
+            [] if end_injection_min is None else [float(end_injection_min) / dt]
+        ))
+    onset = float(frame_pos[0])
+    duration = max(0.0, float(frame_pos[1]) - onset) if frame_pos.size > 1 else 0.0
     return bolus_exclude_window(onset, duration, n_frames, margin_frames=margin_frames)
 
 
 def bolus_window_from_checkpoint(
     checkpoint_path: Path,
     n_frames: int,
-    timer_min0: float = 0.0,
+    timer_min: Optional[np.ndarray] = None,
     *,
     margin_frames: int = 2,
 ) -> Optional[Tuple[int, int]]:
@@ -95,7 +104,7 @@ def bolus_window_from_checkpoint(
         meta.get("end_injection_min"),
         meta.get("time_resolution_min"),
         n_frames,
-        timer_min0,
+        timer_min,
         margin_frames=margin_frames,
     )
 
@@ -210,8 +219,7 @@ def compute_qof(
     if checkpoint_path is None:
         checkpoint_path = npz_path.parent / "checkpoints" / "b_out.json"
     window = bolus_window_from_checkpoint(
-        checkpoint_path, n_obs, timer_min0=float(timer[0]) if timer.size else 0.0,
-        margin_frames=margin_frames,
+        checkpoint_path, n_obs, timer_min=timer, margin_frames=margin_frames,
     )
 
     result = compute_qof_arrays(

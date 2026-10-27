@@ -210,3 +210,15 @@ def test_unknown_model_raises(tmp_path: Path) -> None:
         dce_qof.compute_qof(npz)
     with pytest.raises(ValueError):
         dce_qof.compute_qof_arrays("not_a_model", np.zeros((5, 3)), np.zeros((3, 4)))
+
+
+def test_bolus_window_from_timing_maps_minutes_through_nonuniform_timer() -> None:
+    # Frames 0.5 min apart, then 0.1 min apart from frame 4 (a BIDS VolumeTiming-style timer).
+    timer = np.array([0.0, 0.5, 1.0, 1.5, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5, 3.0, 3.5])
+    window = dce_qof.bolus_window_from_timing(2.0, 2.4, 0.5, timer.size, timer, margin_frames=1)
+    assert window == dce_qof.bolus_exclude_window(4, 4, timer.size, margin_frames=1)
+
+    uniform = np.arange(12) * 0.5
+    assert dce_qof.bolus_window_from_timing(2.0, 3.0, 0.5, 12, uniform) == (
+        dce_qof.bolus_window_from_timing(2.0, 3.0, 0.5, 12)
+    )
