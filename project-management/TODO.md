@@ -35,7 +35,12 @@ Larger feature requests should be logged in `project-management/projects/feature
       main git repo. Options + recommendation (Release assets now, DataLad later) in
       `project-management/projects/large-data-distribution/large_data_distribution.md`.
 
-### 3. Modeling and Workflow Follow-Ups
+### 3. Test-Retest Validation
+- [ ] Validate 2.0 on scan-rescan data: Python vs MATLAB repeatability (non-inferiority),
+      processing-variance budget, metrics and pre-set analysis rules. Plan and open data
+      questions in `project-management/projects/test-retest-validation/test_retest_validation.md`.
+
+### 4. Modeling and Workflow Follow-Ups
 - [ ] Decide whether to gate `2cxm` Fp reporting on frame rate and/or fit quality. Fp is
       recoverable at typical DCE frame rates — 0.8% median error at 5 s frames on the OSIPI DRO,
       see `COMPLETED.md` (2026-08-12) — but it degrades sharply outside that: 567% at 10 s
