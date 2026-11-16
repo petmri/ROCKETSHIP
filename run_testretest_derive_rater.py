@@ -136,7 +136,8 @@ def derive_session(
             target.parent.mkdir(parents=True, exist_ok=True)
             if target.is_symlink() or target.exists():
                 target.unlink()
-            os.symlink(source.resolve(), target)
+            # relative, so the derived run still resolves where the share is mounted elsewhere
+            os.symlink(os.path.relpath(source.resolve(), target.parent.resolve()), target)
     (out_session / "dce").mkdir(parents=True, exist_ok=True)
     header = t1_image.header
     nib.save(nib.Nifti1Image(mask.astype(np.uint8), dynamic.affine), str(out_session / f"dce/{prefix}_label-AIF_mask.nii.gz"))

@@ -46,9 +46,9 @@ def session_job(fit_dir: Path, bids_root: Path) -> Dict[str, Any]:
         files = config[key]
         if len(files) != 1:
             raise ValueError(f"{key} lists {len(files)} files")
-        # not resolved: a derived rater run links its preprocessed files from the base run,
-        # and the job should name the file the fit was given
-        path = Path(files[0])
+        # Resolved: a derived rater run links its preprocessed files from the base run, and
+        # a link made on this machine may not resolve where the share is mounted elsewhere
+        path = Path(files[0]).resolve()
         try:
             job[name] = path.relative_to(bids_root).as_posix()
         except ValueError:
@@ -87,7 +87,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--out", type=Path, required=True, help="Job list JSON to write.")
     args = parser.parse_args(argv)
 
-    bids_root = args.bids_root.absolute()
+    bids_root = args.bids_root.resolve()
     ok = None
     manifest = args.fit_root / "fit_manifest.tsv"
     if manifest.exists():
@@ -101,13 +101,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             left_out.append(f"{key[0]} {key[1]}: Python fit not ok")
             continue
         try:
-            jobs.append(session_job(fit_dir.absolute(), bids_root))
+            jobs.append(session_job(fit_dir.resolve(), bids_root))
         except (ValueError, KeyError) as error:
             left_out.append(f"{key[0]} {key[1]}: {error}")
     payload = {
         "written": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "rater": args.rater,
-        "fit_root": args.fit_root.absolute().relative_to(bids_root).as_posix(),
+        "fit_root": args.fit_root.resolve().relative_to(bids_root).as_posix(),
         "paths_relative_to": "the DCE BIDS root (pass it to run_testretest_matlab as bids_root)",
         "jobs": jobs,
         "left_out": left_out,

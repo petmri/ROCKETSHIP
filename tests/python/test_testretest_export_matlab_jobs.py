@@ -58,6 +58,24 @@ def test_job_carries_the_resolved_settings_with_paths_relative_to_the_share(tmp_
     assert job["python_git_revision"] == "abc1234"
 
 
+def test_linked_inputs_are_named_by_the_file_they_point_to(tmp_path):
+    """A derived rater run links its series from the base run; the job names the real file."""
+    fit = write_fit(tmp_path, "sub-A1", "ses-01")
+    real = tmp_path / "derivatives/dceprep-testretest_AC/sub-A1/ses-01/dce/sub-A1_ses-01_desc-bfcz_DCE.nii.gz"
+    real.parent.mkdir(parents=True)
+    real.touch()
+    link = tmp_path / "derivatives/derived_SG/sub-A1/ses-01/dce/sub-A1_ses-01_desc-bfcz_DCE.nii.gz"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(real)
+    config = json.loads((fit / "run_config.json").read_text())
+    config["dynamic_files"] = [str(link)]
+    (fit / "run_config.json").write_text(json.dumps(config))
+
+    job = export.session_job(fit, tmp_path)
+
+    assert job["dynamic"] == "derivatives/dceprep-testretest_AC/sub-A1/ses-01/dce/sub-A1_ses-01_desc-bfcz_DCE.nii.gz"
+
+
 def test_a_cropped_window_and_an_auto_baseline_are_passed_on(tmp_path):
     fit = write_fit(tmp_path, "sub-A1", "ses-01", method="tv", end=12,
                     window={"source": "stage_overrides", "start_1b": 3, "end_1b": 55, "n_timepoints_input": 60})

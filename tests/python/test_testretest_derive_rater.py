@@ -94,6 +94,7 @@ def test_derived_session_links_the_preprocessing_and_adds_the_raters_aif(tmp_pat
     assert row["baseline_end"] == 28 and row["tumor_voxels"] == 2
     linked = out / f"dce/{PREFIX}_desc-bfcz_DCE.nii.gz"
     assert linked.is_symlink() and linked.resolve() == (base / f"dce/{PREFIX}_desc-bfcz_DCE.nii.gz").resolve()
+    assert not Path(linked.readlink()).is_absolute()  # survives a different mount point
     aif_t1 = nib.load(out / f"dce/{PREFIX}_label-AIF_T1map.nii.gz").get_fdata()
     assert int((aif_t1 > 0).sum()) == 2
     assert aif_t1[3, 3, 1] == 1200.0  # drawn slice 3 is slice 1 after the trim
