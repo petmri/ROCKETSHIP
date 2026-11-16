@@ -54,12 +54,54 @@ sessions, DCE in both. Every subject's `*_sessions.tsv` gives `days_from_first` 
     Ktrans, vp, AIF fit R² and AIF peak per session for both runs.
   - They differ in DCEPrep version and AIF setup as well as pipeline, so they are a
     **descriptive** MATLAB-vs-Python comparison, not the primary one.
-- **Rater runs** `dceprep-testretest_AC` / `_WN` (2026-10-27, ROCKETSHIP Python
-  `7127152` via DCEPrep `e455970`; eLabFTW experiment 19):
-  - Preprocessing finished for 75 of 86 AC cases. The 11 failures are DCEPrep errors
-    (`ZeroDivisionError`, empty-median `StatisticsError`, one inconsistent VFA
-    `RepetitionTime`), not ROCKETSHIP errors.
-  - No model fits exist yet apart from two trial `ex_tofts` maps under WN.
+- **Rater runs** `dceprep-testretest_AC` / `_WN`, as found on 2026-11-16 (their
+  `PROVENANCE.md` files are the record; eLabFTW experiment 20):
+  - Re-run on 2026-10-28/29 with DCEPrep `fdb2944` (branch `registration-mm-smoothing`,
+    not merged) and ROCKETSHIP `7127152` (branch `case-cli-aif-mode`, not merged). The first
+    run (2026-10-27, DCEPrep `e455970`, 75 of 86) is kept beside them as
+    `*_pre-regfix_2026-10-28`.
+  - Preprocessing: **85 of 86 sessions** per rater. See "DCEPrep failures" below.
+  - Patlak and extended Tofts fits exist for 85 (AC) and 84 (WN) sessions, raw AIF curve,
+    blood T1 fixed per field strength.
+  - Decisions already taken in those runs, before any rule in this plan was fixed: one
+    motion-corrupted VFA dropped at staging, one WN session's fit set aside for a
+    non-enhancing AIF, and AIF voxels without a valid VFA T1 given the cohort blood T1
+    (11 AC and 6 WN sessions). See proposal 4.
+- **In-house repeatability summary** `dceprep-testretest_analysis` (2026-10-29): Python-only
+  scan-rescan and inter-rater tables from the rater runs. It contains no MATLAB results, but
+  it means Python-only repeatability has been looked at. Not opened for this work.
+- **Validation fits** `rocketship-testretest/python_AC` / `python_WN` (2026-11-16): the
+  Python arm refitted from the rater runs by `run_testretest_fits.py`, see "Status".
+
+## DCEPrep failures: root causes (2026-11-16)
+The 11 failures of the 2026-10-27 run, from the logs and the data. Session-level detail
+(IDs, QC tables) is in `DCE_BIDS/derivatives/rocketship-testretest/NOTES_2026-11-16.md`;
+subject IDs stay out of this repository.
+
+| Sessions | Error | Root cause | State |
+|---|---|---|---|
+| 5 | `ZeroDivisionError` in `VFA_norm.py` | VFA-to-DCE registration slid along z, so the white-matter mask and the registered VFA did not overlap at all | fixed in DCEPrep `fdb2944` (smoothing in mm, every voxel sampled) |
+| 4 | `StatisticsError: no median for empty data` in `VFA_norm.py` | same, with partial overlap: no slice had the 1000 WM voxels the histogram fit needs | fixed in `fdb2944` |
+| 1 | `fslmaths: images of different sizes` in the DCE worker | the empty-slice cleanup removed a slice mid-slab and rewrote the masks while the DCE worker read them | fixed in `e455970` and `fdb2944` (trim only slab edges, with `fslroi`) |
+| 1 | `Inconsistent RepetitionTime across raw VFA sidecars` | a real protocol deviation, see below | **open: decision needed** |
+
+- The two `VFA_norm.py` errors were symptoms. The script now stops with a message that
+  names the file, the voxel counts and the likely cause (DCEPrep branch
+  `fix/vfa-norm-failure-diagnostics`, with the repository's first tests).
+- **The remaining session is not a tooling failure.** Its second session was acquired with
+  a fifth VFA (20°) at TR 7.4 ms against 7.3 ms for the others, where its first session has
+  four flips. ROCKETSHIP's check tolerates 0.1 ms and trips only through floating-point
+  rounding. Fitted with one TR the T1 comes out about 0.8% low. More important, the VFA slab
+  of that session sits about 13 mm above the DCE slab, a third of the DCE slab has no VFA
+  data, and the five flips are registered up to 7 mm apart. Proposal 2.
+- **A crash-free run is not a correct one.** A new check
+  (`scripts/vfa_registration_qc.py` on the DCEPrep branch) compares the transforms of the
+  flips of one session, which should nearly agree because the VFAs are acquired back to
+  back. Median disagreement is 0.7 mm and the 95th percentile 2.9 mm, but one session that
+  now preprocesses cleanly has its lowest flip 12.8 mm from the other three; at a 3 mm
+  limit 15 of 86 sessions are flagged, mostly through the lowest flip angle. Proposal 1.
+- DCEPrep cannot be re-run on the analysis workstation as it stands (no HD-BET, empty
+  DCEPrep venv), so no session was re-preprocessed for this work.
 
 ## Design: three comparisons
 
@@ -124,19 +166,26 @@ error; it is a secondary, descriptive analysis only.
   change made during the work is judged only on the held-out subjects.
 
 ## Tooling to build
-- [ ] `python/repeatability.py`: pair sessions by subject. Input is a tidy table of ROI
-      medians (subject, session, pipeline, model, region, parameter, value). Output is the
-      metrics above with bootstrap CIs. Unit-tested on synthetic pairs with a known wSD.
-- [ ] Runner: batch both pipelines over the cohort, collect ROI medians from the Part E /
-      ROI `.xls` outputs, call `repeatability.py`, and write a report (tables +
-      Bland–Altman and per-subject paired plots).
-  - `run_dce_bids_batch.py` covers Python batch processing.
-  - The MATLAB side runs `run_dce_cli` per session.
-  - Start the plots from `python/plot_ktrans_correlation.py`.
-- [ ] Processing-variance runner for comparison 2 (one session, one factor at a time).
-- [ ] Synthetic sanity check: the repeated-noise synthetic set in `TODO.md` (Secondary 1)
-      should give the wSD it was generated with. This validates the statistics code before
-      it touches real data.
+- [x] `python/repeatability.py`: wSD, RC, log-scale wCV, ICC(2,1), Bland–Altman, subject
+      bootstrap, wSD-ratio non-inferiority, processing SD, stratified split, session
+      pairing. Unit-tested on synthetic pairs with a known wSD
+      (`tests/python/test_repeatability.py`).
+- [x] Runner, Python side: `run_testretest_fits.py` fits a rater run from one config
+      (`testretest_run_config.json`) into a separate root; `run_testretest_analysis.py`
+      collects ROI medians, audits metadata, and runs the analysis in `synthetic`,
+      `shuffled` or `unblinded` mode (`python/testretest_study.py`). The report has the
+      tables plus Bland–Altman and paired plots per group.
+  - ROI medians are taken from the parameter maps inside the DCEPrep WM/GM masks, not from
+    the ROI `.xls` (which fits the ROI-mean curve, not the voxels).
+  - [ ] MATLAB side: blocked, MATLAB is not installed. See `matlab_arm.md`.
+- [x] Processing-variance runner: `run_testretest_processing_variance.py` with
+      `processing_factors.json`. Tested on the tiny fixture; not yet run on the cohort.
+- [x] Blinding: `prereg.json` holds every decision as null; the unblinded mode and the
+      variance budget's comparison with the rescan wSD are refused until it is complete
+      and signed off.
+- [ ] Synthetic sanity check at the image level: the repeated-noise synthetic set in
+      `TODO.md` (Secondary 1) still does not exist. The statistics are validated on
+      generated tables (`run_testretest_analysis.py selfcheck`), not through the pipeline.
 
 ## Dependencies and risks
 - **Data distribution**: real test-retest data cannot go in git. CI coverage, if any, waits
@@ -149,6 +198,65 @@ error; it is a secondary, descriptive analysis only.
   - MATLAB's `script_preferences.txt` relaxivity fallback
 - **Small cohorts**: CIs on wSD ratios will be wide. Report them honestly rather than
   claiming equivalence from point estimates.
+
+## Proposals (2026-11-16, none applied)
+Nothing below changes a pre-set decision; each is for the open questions that follow.
+
+1. **Register the VFA set with one transform** (DCEPrep). Each flip is registered to the
+   DCE on its own, and the lowest flip angle, with the least contrast, is the one that
+   strays. One transform for the set removes the failure mode; the consistency check then
+   guards it. It changes every T1 map, so it needs a full preprocessing re-run, and it
+   should land together with DCEPrep#14 (bias-corrected VFAs into the z-normalization),
+   before the MATLAB arm is run. Until then: decide a limit for the check (3 mm flags 15 of
+   86 sessions; one session is at 12.8 mm) and whether exceeding it excludes the pair.
+2. **The session that still fails.** Options: (a) exclude the pair as an acquisition
+   deviation (VFA slab off the DCE slab, extra flip, different TR); (b) re-stage it with
+   the four flips of its first session, register with the shared transform of proposal 1,
+   and keep it only if VFA coverage of the brain mask is adequate. Proposed rule for (a),
+   blind to outcome: exclude a pair when a session's VFA slab covers less than a set
+   fraction of the DCE brain mask. Separately, ROCKETSHIP's TR check should name the flips
+   and state its tolerance, and per-flip TR in the T1 fit would make the case fittable.
+3. **Match the VFA flip set within a pair.** Two pairs have different flip sets in their
+   two sessions (the session above, and the one that lost a motion-corrupted flip at
+   staging). Dropping the same flip from the partner session keeps the T1 estimate
+   comparable between test and retest. The metadata audit flags both.
+4. **Bring earlier decisions under the pre-registered rules.** The dropped VFA, the
+   set-aside WN session and the AIF T1 patch were decided during the rater runs. Record
+   them in `exclusions_manual.tsv` with their reasons, or reverse them. The validation
+   fits apply none of them beyond what is in the staged inputs, so the WN session with the
+   non-enhancing AIF is not set aside there; check its row in `fit_manifest.tsv`.
+5. **Decision interval for non-inferiority.** In simulation at 19 and 24 pairs the
+   percentile bootstrap's 95% interval covers the true ratio 90–92% of the time, so its
+   upper limit is too low too often; Pitman's interval for correlated variances covers
+   94–96%. Proposed: decide on the Pitman interval and report the bootstrap beside it.
+   Also state whether "upper 95% CI" means the upper limit of a two-sided 95% interval
+   (assumed in the code) or a one-sided 95% bound.
+6. **Margin and power.** Chance of concluding non-inferiority when the pipelines are
+   truly equal (Pitman 95% upper limit below the margin; simulation, 1500 replicates).
+   "Shared" is the fraction of rescan variance common to both pipelines.
+
+   | Pairs | Shared | Margin 1.1 | Margin 1.25 |
+   |---|---|---|---|
+   | 19 (RIDER) | 0.80 / 0.95 / 0.99 | 0.08 / 0.22 / 0.73 | 0.31 / 0.78 / 1.00 |
+   | 24 (QIN-GBM) | 0.80 / 0.95 / 0.99 | 0.09 / 0.26 / 0.85 | 0.38 / 0.89 / 1.00 |
+   | 43 (pooled) | 0.80 / 0.95 / 0.99 | 0.18 / 0.48 / 0.98 | 0.64 / 0.99 / 1.00 |
+
+   A 1.1 margin can only be met if the two pipelines' test-retest differences nearly
+   coincide. Analysing the cohorts separately roughly halves the power of the pooled
+   analysis, which bears on the pooling question.
+7. **AIF-fit exclusion rule.** With the raw AIF curve there is no AIF fit, so
+   `fit_rsquared_cp_adj` does not exist for these runs. Use the fitted AIF for the primary
+   analysis, replace the rule (for example a minimum AIF enhancement), or set it to
+   `not_applied`.
+8. **"Normal-appearing" needs lesion masks.** The DCEPrep WM/GM masks of these glioma
+   patients include tumour and oedema. The collector takes any mask; the endpoint needs to
+   say which (manual tumour ROIs exist for 12 subjects in `AIFArtist`).
+9. **MATLAB arm.** Decide which code is "1.x" (the `1.2` tag or the MATLAB side of the
+   validation commit) and accept a small driver in place of `run_dce_cli`
+   (`matlab_arm.md`).
+10. **cpufit as a backend level.** `backend` accepts `auto`, `cpu`, `gpufit`; cpufit is only
+    reached through `auto` without CUDA. An explicit value would let the variance runner
+    cover it.
 
 ## Open questions
 Answered by the data survey above: cohort size and rescan intervals, scanners and protocol,
@@ -165,17 +273,35 @@ only; not matched to the current inputs). Still open:
 - [ ] **Prostate (15 pairs)**: include in a later phase with an assumed fixed T10, or
       exclude? If included, check whether `TriggerDelayTime` spans `n` or `n-1` frame
       intervals (about 2% on the time axis). That shifts accuracy but not repeatability.
-- [ ] **DCEPrep failures** (11/86 AC cases): fix and re-run before the analysis, or treat
-      as exclusions? Fixing is cleaner, since these are tooling failures, not data quality.
-- [ ] **Non-inferiority margin** and exclusion thresholds: agree before unblinding.
+- [ ] **DCEPrep failures**: 10 of the 11 are fixed (see "DCEPrep failures"). Still to
+      decide: the one remaining session (proposal 2), a limit for the registration
+      consistency check and what exceeding it means (proposal 1), and whether to
+      re-preprocess with a shared VFA transform before the MATLAB arm.
+- [ ] **Non-inferiority margin** and exclusion thresholds: agree before unblinding. Enter
+      them in `prereg.json`; the code refuses the real analysis until it is complete
+      (proposals 5–7).
+- [ ] **MATLAB**: where it will run, and which code is "1.x" (proposal 9).
+- [ ] **Which rater** carries the primary claim, AC or WN.
 - [ ] **Development/held-out split**: proposed split by subject within each collection,
       stratified, about 1/3 development. Fix the seed and record the split in this folder.
 
 ## Status
 - [x] Approach drafted (2026-10-27).
 - [x] Data surveyed and the plan filled in (2026-10-27).
-- [ ] Remaining open questions answered.
-- [ ] Statistics module + synthetic validation.
-- [ ] Rater runs fitted (Python), and MATLAB run on the same staged inputs.
-- [ ] Processing-variance budget.
+- [x] DCEPrep failures root-caused (2026-11-16): 10 of 11 fixed, 1 awaiting a decision;
+      diagnostics, tests and a registration QC check on DCEPrep branch
+      `fix/vfa-norm-failure-diagnostics`.
+- [x] Statistics module + synthetic validation (2026-11-16).
+- [x] Rater runs fitted, Python arm (2026-11-16): `rocketship-testretest/python_AC` and
+      `python_WN`, Patlak and extended Tofts with QoF maps. AC: 85 fitted, 1 skipped (no
+      preprocessed DCE). WN was still running when this was written; counts are in each
+      folder's `fit_manifest.tsv` and `provenance.json`. The fits record revision
+      `73d0f3b`, a local commit whose message was later reworded; the same tree is
+      `ecd3ce3` on this branch (`git rev-parse ecd3ce3^{tree}`).
+- [ ] MATLAB run on the same staged inputs: **blocked**, MATLAB is not installed on the
+      analysis workstation (`matlab_arm.md`).
+- [x] Analysis code, blinded (2026-11-16): tested on synthetic tables and on the
+      label-shuffled real table. No real repeatability result has been computed or viewed.
+- [ ] Remaining open questions answered and `prereg.json` signed off.
+- [ ] Processing-variance budget (runner ready, not run on the cohort).
 - [ ] Held-out confirmation and report.

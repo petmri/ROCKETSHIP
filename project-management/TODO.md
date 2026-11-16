@@ -37,8 +37,11 @@ Larger feature requests should be logged in `project-management/projects/feature
 
 ### 3. Test-Retest Validation
 - [ ] Validate 2.0 on scan-rescan data: Python vs MATLAB repeatability (non-inferiority),
-      processing-variance budget, metrics and pre-set analysis rules. Plan and open data
-      questions in `project-management/projects/test-retest-validation/test_retest_validation.md`.
+      processing-variance budget, metrics and pre-set analysis rules. Statistics, the
+      Python-arm fits and the blinded analysis exist (2026-11-16). Open: the MATLAB arm
+      (MATLAB not installed where the data is analysed), the pre-registration decisions,
+      and the preprocessing proposals. Plan, proposals and status in
+      `project-management/projects/test-retest-validation/test_retest_validation.md`.
 
 ### 4. Modeling and Workflow Follow-Ups
 - [ ] Decide whether to gate `2cxm` Fp reporting on frame rate and/or fit quality. Fp is
