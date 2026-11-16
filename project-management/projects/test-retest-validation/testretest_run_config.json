@@ -1,0 +1,48 @@
+{
+  "_doc": [
+    "Run config for the Python arm of the test-retest validation (run_testretest_fits.py).",
+    "File lists are globs relative to one session of a DCEPrep rater run",
+    "(derivatives/dceprep-testretest_<RATER>/sub-*/ses-*). The runner resolves them, adds the",
+    "session paths and the cohort's overrides, and writes the literal config it ran next to",
+    "that session's outputs.",
+    "",
+    "The settings mirror the rater runs of 2026-10-28 (eLabFTW experiment 20): raw AIF ROI",
+    "curve, blood T1 fixed per field strength (Lu et al. 2004, MRM 52:679), baseline end from",
+    "the rater's AIF sidecar where present and auto-detected otherwise, relaxivity from the",
+    "staged DCE sidecar. Everything not listed resolves from python/dce_defaults.json.",
+    "They are working settings: the plan requires them fixed across sessions and pipelines,",
+    "and the MATLAB arm must be given the same values (matlab/README.md in this folder).",
+    "",
+    "'cohort_overrides' is read by the runner, not by the pipeline: the longest subject-ID",
+    "prefix that matches wins, and its keys are merged into stage_overrides."
+  ],
+  "backend": "gpufit",
+  "write_xls": true,
+  "aif_mode": "raw",
+  "dynamic_files": ["dce/*_desc-bfcz_DCE.nii*"],
+  "aif_files": ["dce/*_label-AIF_T1map.nii*"],
+  "roi_files": ["anat/*_space-DCEref_label-brain_mask.nii*"],
+  "t1map_files": ["anat/*_space-DCEref_T1map.nii*"],
+  "noise_files": [],
+  "drift_files": [],
+  "model_flags": {
+    "tofts": 0,
+    "ex_tofts": 1,
+    "patlak": 1,
+    "tissue_uptake": 0,
+    "two_cxm": 0,
+    "fxr": 0,
+    "auc": 0,
+    "nested": 0,
+    "FXL_rr": 0
+  },
+  "stage_overrides": {
+    "stage_b_mode": "real",
+    "stage_d_mode": "real",
+    "write_qof_maps": true
+  },
+  "cohort_overrides": {
+    "sub-RIDERNeuroMRI": {"blood_t1_ms": 1441},
+    "sub-QINGBMTR": {"blood_t1_ms": 1664}
+  }
+}
