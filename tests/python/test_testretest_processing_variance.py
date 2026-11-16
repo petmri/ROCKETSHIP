@@ -80,6 +80,23 @@ def test_rater_and_baseline_can_be_crossed(tmp_path):
 
 
 @pytest.mark.unit
+def test_another_raters_aif_is_skipped_where_this_run_kept_no_signal(tmp_path):
+    """DCEPrep masks the series by brain-or-AIF of its own rater."""
+    base = aif_map(tmp_path, "AC", [(3, 3, 1)])
+    aif_map(tmp_path, "WN", [(1, 1, 2), (1, 2, 2)])
+    series = np.zeros((7, 7, 3, 4))
+    series[2:5, 2:5, :, :] = 50.0  # WN's voxels are outside
+    dynamic = save(tmp_path / "dyn.nii.gz", series)
+    runs = {"WN": tmp_path / "WN"}
+
+    path, reason = pv.stage_aif({"name": "wn", "aif_from": "WN"}, base, tmp_path / "v", runs, "sub-A1", "ses-01", None, dynamic)
+    assert path is None and reason == "2 of 2 AIF voxels have no signal in this run's preprocessed series"
+
+    path, reason = pv.stage_aif({"name": "own"}, base, tmp_path / "w", runs, "sub-A1", "ses-01", None, dynamic)
+    assert path is not None and reason == ""
+
+
+@pytest.mark.unit
 def test_processing_sd_pools_sessions_and_ignores_failed_levels():
     def row(session, level, value, status="ok", factor="start_t"):
         return {"subject": "s", "session": session, "factor": factor, "level": level, "status": status,

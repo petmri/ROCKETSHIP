@@ -153,6 +153,15 @@ def _one(folder: Path, pattern: str) -> Optional[Path]:
     return matches[0] if len(matches) == 1 else None
 
 
+def _one_in(folders: Sequence[Path], pattern: str) -> Optional[Path]:
+    """The single match in the first folder that has one."""
+    for folder in folders:
+        path = _one(folder, pattern)
+        if path is not None:
+            return path
+    return None
+
+
 def _load(path: Path) -> np.ndarray:
     import nibabel as nib
 
@@ -184,9 +193,10 @@ def collect_session(
     *,
     pipeline: str,
     rater: str,
-    regions: Mapping[str, str] = DEFAULT_REGIONS,
+    regions: Mapping[str, Any] = DEFAULT_REGIONS,
     fit_roi: str = DEFAULT_FIT_ROI,
     model_parameters: Mapping[str, Sequence[str]] = MODEL_PARAMETERS,
+    region_roots: Sequence[Path] = (),
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any], List[str]]:
     """ROI medians of one fitted session.
 
@@ -194,6 +204,12 @@ def collect_session(
     both pipelines write) and region masks from the DCEPrep session, both in DCE space. A
     region is the mask intersected with the fit ROI; its value is the median of the finite
     voxels. Returns (table rows, session QC row, problems).
+
+    A region is a glob, or ``{"mask": glob, "minus": glob}`` for a mask with another
+    removed (white matter outside the tumour ROI). Masks are looked for in the DCEPrep
+    session first, then under each of ``region_roots`` (``<root>/sub-*/ses-*``), so a
+    region drawn by one rater can be applied to every rater's fits. A region whose mask is
+    missing for a session is left out for that session and reported.
     """
     subject, session = dceprep_session.parent.name, dceprep_session.name
     base = {"subject": subject, "session": session, "cohort": cohort_of(subject), "pipeline": pipeline, "rater": rater}
@@ -204,17 +220,23 @@ def collect_session(
     roi = _load(roi_path) > 0 if roi_path else None
     if roi is None:
         problems.append(f"{subject} {session}: fit ROI {fit_roi} not found or ambiguous")
+    folders = [dceprep_session, *(Path(root) / subject / session for root in region_roots)]
     masks: Dict[str, np.ndarray] = {}
-    for region, pattern in regions.items():
-        path = _one(dceprep_session, pattern)
-        if path is None:
-            problems.append(f"{subject} {session}: {region} mask {pattern} not found or ambiguous")
+    for region, spec in regions.items():
+        patterns = [spec] if isinstance(spec, str) else [spec["mask"], spec["minus"]]
+        paths = [_one_in(folders, pattern) for pattern in patterns]
+        if any(path is None for path in paths):
+            missing = patterns[[path is None for path in paths].index(True)]
+            problems.append(f"{subject} {session}: {region} mask {missing} not found or ambiguous")
             continue
-        mask = _load(path) > 0
-        if roi is not None and mask.shape == roi.shape:
-            masks[region] = mask & roi
-        else:
+        loaded = [_load(path) > 0 for path in paths]
+        if roi is None or any(mask.shape != roi.shape for mask in loaded):
             problems.append(f"{subject} {session}: {region} mask grid differs from the fit ROI")
+            continue
+        mask = loaded[0] & roi
+        if len(loaded) == 2:
+            mask &= ~loaded[1]
+        masks[region] = mask
 
     for model, parameters in model_parameters.items():
         reliable_path = _one(fit_dir, f"*_{model}_fit_qof_reliable.nii*")

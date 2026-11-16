@@ -23,6 +23,7 @@ Plan: project-management/projects/test-retest-validation/test_retest_validation.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -42,13 +43,17 @@ def cmd_collect(args: argparse.Namespace) -> int:
     rows: List[Dict[str, Any]] = []
     qc_rows: List[Dict[str, Any]] = []
     problems: List[str] = []
+    kwargs: Dict[str, Any] = {"region_roots": [Path(root) for root in args.regions_root]}
+    if args.regions_json:
+        spec = json.loads(Path(args.regions_json).read_text(encoding="utf-8"))
+        kwargs.update(regions=spec["regions"], fit_roi=spec.get("fit_roi", study.DEFAULT_FIT_ROI))
     for arm in args.arm:
         try:
             pipeline, rater, fit_root, dceprep_run = arm.split(":", 3)
         except ValueError:
             raise SystemExit(f"--arm must be pipeline:rater:fit_root:dceprep_run, got '{arm}'")
         arm_rows, arm_qc, arm_problems = study.collect_arm(
-            Path(fit_root), Path(dceprep_run), pipeline=pipeline, rater=rater
+            Path(fit_root), Path(dceprep_run), pipeline=pipeline, rater=rater, **kwargs
         )
         print(f"{pipeline} / {rater}: {len(arm_qc)} sessions, {len(arm_rows)} ROI medians, {len(arm_problems)} problems")
         rows += arm_rows
@@ -195,6 +200,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     collect = commands.add_parser("collect", help="ROI medians of every arm into one tidy table")
     collect.add_argument("--arm", action="append", required=True, metavar="PIPELINE:RATER:FIT_ROOT:DCEPREP_RUN")
+    collect.add_argument("--regions-json", help='Region masks as {"regions": {name: glob or {"mask": glob, "minus": glob}}}; default WM and GM.')
+    collect.add_argument("--regions-root", action="append", default=[], help="Another run to look for region masks in, e.g. the one holding tumour ROIs (repeatable).")
     collect.add_argument("--out", required=True, help="Folder for roi_medians.csv and session_qc.csv")
     collect.set_defaults(run=cmd_collect)
 

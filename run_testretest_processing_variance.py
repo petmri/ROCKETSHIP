@@ -65,7 +65,7 @@ def _morph(mask: np.ndarray, operation: str) -> np.ndarray:
 
 def stage_aif(
     level: Mapping[str, Any], base_aif: Path, variant_dir: Path, rater_runs: Mapping[str, Path],
-    subject: str, session: str, blood_t1_ms: Optional[float],
+    subject: str, session: str, blood_t1_ms: Optional[float], dynamic: Optional[Path] = None,
 ) -> Tuple[Optional[Path], str]:
     """Write the AIF file a level asks for into its folder. Returns (path, "") or (None, reason).
 
@@ -88,6 +88,16 @@ def stage_aif(
     if tuple(image.shape) != tuple(nib.load(str(base_aif)).shape):
         return None, "AIF grid differs from the base session's"
     data = np.asarray(image.get_fdata())
+    if dynamic is not None and (level.get("aif_from") or level.get("aif_mask") == "dilate"):
+        # DCEPrep masks the series by brain-or-AIF of the rater it ran for, so a voxel
+        # another rater drew, or one added by dilation, may hold no signal in this run
+        voxels = np.isfinite(data) & (data > 0)
+        if level.get("aif_mask"):
+            voxels = _morph(voxels, str(level["aif_mask"]))
+        series = np.asarray(nib.load(str(dynamic)).dataobj)[voxels]
+        dark = int((~(np.abs(series) > 0).any(axis=1)).sum())
+        if dark:
+            return None, f"{dark} of {int(voxels.sum())} AIF voxels have no signal in this run's preprocessed series"
     if level.get("aif_mask"):
         selected = np.isfinite(data) & (data > 0)
         changed = _morph(selected, str(level["aif_mask"]))
@@ -215,7 +225,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             for level in levels:
                 variant_dir = args.out / subject / session / factor / str(level["name"])
                 variant_dir.mkdir(parents=True, exist_ok=True)
-                aif, reason = stage_aif(level, base_aif, variant_dir, rater_runs, subject, session, blood_t1)
+                aif, reason = stage_aif(level, base_aif, variant_dir, rater_runs, subject, session, blood_t1, Path(base["dynamic_files"][0]))
                 status, detail = ("skipped", reason) if aif is None else run_level(base, level, variant_dir, aif)
                 print(f"{subject} {session} {factor}={level['name']}: {status} {detail}", flush=True)
                 rows: List[Dict[str, Any]] = []

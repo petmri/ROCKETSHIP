@@ -1,0 +1,18 @@
+{
+  "_doc": [
+    "Regions for 'run_testretest_analysis.py collect --regions-json', for sessions that have",
+    "a tumour ROI (rater SG, written into the derived SG run by",
+    "run_testretest_derive_rater.py; pass that run as --regions-root so the ROI applies to",
+    "every rater's fits). The '_nontumor' regions are the DCEPrep tissue masks with the",
+    "tumour ROI removed. Which region carries the claim is a pre-registration decision; this",
+    "file only makes them available. A session without a tumour ROI gets WM and GM only."
+  ],
+  "regions": {
+    "WM": "anat/*_space-DCEref_label-WM_mask.nii*",
+    "GM": "anat/*_space-DCEref_label-GM_mask.nii*",
+    "tumor": "anat/*_space-DCEref_label-tumor_mask.nii*",
+    "WM_nontumor": {"mask": "anat/*_space-DCEref_label-WM_mask.nii*", "minus": "anat/*_space-DCEref_label-tumor_mask.nii*"},
+    "GM_nontumor": {"mask": "anat/*_space-DCEref_label-GM_mask.nii*", "minus": "anat/*_space-DCEref_label-tumor_mask.nii*"}
+  },
+  "fit_roi": "anat/*_space-DCEref_label-brain_mask.nii*"
+}
