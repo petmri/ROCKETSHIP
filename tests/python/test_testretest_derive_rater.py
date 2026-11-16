@@ -134,6 +134,21 @@ def test_command_line_writes_the_manifest_and_keeps_the_base_run_read_only(tmp_p
         derive.main([*common, "--out", str(tmp_path / "dceprep-AC" / "derived")])
 
 
+@pytest.mark.integration
+def test_tumour_rois_are_written_even_where_the_aif_needs_dceprep(tmp_path):
+    make_inputs(tmp_path, aif_voxels=[(0, 0, 3)], tumor_voxels=[(4, 4, 4)])  # AIF outside the base mask
+    common = ["--rater", "SG", "--aifartist", str(tmp_path / "AIFArtist"), "--base-run", str(tmp_path / "dceprep-AC")]
+
+    assert derive.main([*common, "--out", str(tmp_path / "derived"), "--regions-out", str(tmp_path / "regions")]) == 0
+
+    assert not (tmp_path / "derived" / SUBJECT).exists()
+    tumor = nib.load(tmp_path / "regions" / SUBJECT / SESSION / f"anat/{PREFIX}_space-DCEref_label-tumor_mask.nii.gz").get_fdata()
+    assert np.argwhere(tumor > 0).tolist() == [[4, 4, 2]]
+    assert "\tok\t" in (tmp_path / "regions/regions_manifest.tsv").read_text()
+    with pytest.raises(SystemExit):
+        derive.main(common)
+
+
 @pytest.mark.unit
 def test_collector_applies_a_tumour_roi_from_another_run_to_any_raters_fits(tmp_path):
     """Regions 'tumor' and 'WM minus tumor' come from the derived run via region_roots."""

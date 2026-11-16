@@ -153,15 +153,9 @@ def derive_session(
                 json.dumps({"SteadyStateEndTimeIndex": baseline_end, "Source": sidecar.name}, indent=2) + "\n", encoding="utf-8"
             )
 
-    tumor_voxels: Any = ""
-    tumor_path = _one(rater_dir, f"*desc-rater{rater}_label-Tumor_mask.nii*")
-    if tumor_path is not None:
-        tumor, reason = to_grid(nib.load(str(tumor_path)), dynamic)
-        if tumor is None:
-            row["detail"] = f"tumour mask not written: {reason}"
-        else:
-            tumor_voxels = int(tumor.sum())
-            nib.save(nib.Nifti1Image(tumor.astype(np.uint8), dynamic.affine), str(out_session / f"anat/{prefix}_space-DCEref_label-tumor_mask.nii.gz"))
+    tumor_voxels, reason = write_tumor(rater, rater_dir, dynamic, out_session, prefix)
+    if reason:
+        row["detail"] = f"tumour mask not written: {reason}"
     row.update(
         status="ok", aif_voxels=int(mask.sum()), aif_voxels_t1_filled=int((mask & ~valid).sum()),
         baseline_end=baseline_end, tumor_voxels=tumor_voxels,
@@ -169,17 +163,70 @@ def derive_session(
     return row
 
 
+def write_tumor(rater: str, rater_dir: Path, reference: Any, out_session: Path, prefix: str) -> Tuple[Any, str]:
+    """Write the rater's tumour ROI on the reference grid. Returns (voxel count or "", reason)."""
+    import nibabel as nib
+
+    tumor_path = _one(rater_dir, f"*desc-rater{rater}_label-Tumor_mask.nii*")
+    if tumor_path is None:
+        return "", ""
+    tumor, reason = to_grid(nib.load(str(tumor_path)), reference)
+    if tumor is None:
+        return "", reason
+    target = out_session / f"anat/{prefix}_space-DCEref_label-tumor_mask.nii.gz"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    nib.save(nib.Nifti1Image(tumor.astype(np.uint8), reference.affine), str(target))
+    return int(tumor.sum()), ""
+
+
+def write_regions(rater: str, aifartist: Path, base_run: Path, regions_out: Path) -> List[Dict[str, Any]]:
+    """Tumour ROIs of every session the rater drew one for, whatever became of its AIF.
+
+    The ROI does not depend on the AIF, so sessions whose AIF needs a real DCEPrep run still
+    get their tumour region. Pass the folder to 'collect --regions-root'.
+    """
+    import nibabel as nib
+
+    rows: List[Dict[str, Any]] = []
+    for rater_dir in sorted(aifartist.glob("sub-*/ses-*/dce")):
+        if not list(rater_dir.glob(f"*desc-rater{rater}_label-Tumor_mask.nii*")):
+            continue
+        subject, session = rater_dir.parts[-3], rater_dir.parts[-2]
+        reference_path = _one(base_run / subject / session, "dce/*_desc-bfcz_DCE.nii*")
+        if reference_path is None:
+            rows.append({"subject": subject, "session": session, "status": "skipped", "detail": "no preprocessed series in the base run"})
+            continue
+        voxels, reason = write_tumor(rater, rater_dir, nib.load(str(reference_path)), regions_out / subject / session, f"{subject}_{session}")
+        rows.append({"subject": subject, "session": session, "status": "skipped" if reason else "ok", "detail": reason, "tumor_voxels": voxels})
+    regions_out.mkdir(parents=True, exist_ok=True)
+    with open(regions_out / "regions_manifest.tsv", "w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, ("subject", "session", "status", "detail", "tumor_voxels"), delimiter="\t", restval="")
+        writer.writeheader()
+        writer.writerows(rows)
+    return rows
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--rater", required=True, help="AIFArtist rater code, e.g. SG.")
     parser.add_argument("--aifartist", type=Path, required=True, help="derivatives/AIFArtist")
     parser.add_argument("--base-run", type=Path, required=True, help="DCEPrep run to take the preprocessing from.")
-    parser.add_argument("--out", type=Path, required=True, help="Derived run folder; must be outside --base-run.")
+    parser.add_argument("--out", type=Path, help="Derived run folder; must be outside --base-run.")
+    parser.add_argument("--regions-out", type=Path, help="Also write the rater's tumour ROIs for every session that has one, into this folder.")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG, help="Run config (cohort blood T1).")
     args = parser.parse_args(argv)
-    base_run, out = args.base_run.resolve(), args.out.resolve()
-    if out == base_run or base_run in out.parents:
-        parser.error("--out must be outside --base-run")
+    base_run = args.base_run.resolve()
+    if args.out is None and args.regions_out is None:
+        parser.error("give --out, --regions-out, or both")
+    for target in (args.out, args.regions_out):
+        if target is not None and (target.resolve() == base_run or base_run in target.resolve().parents):
+            parser.error("outputs must be outside --base-run")
+    if args.regions_out is not None:
+        regions = write_regions(args.rater, args.aifartist, base_run, args.regions_out.resolve())
+        print(f"tumour ROIs: {sum(r['status'] == 'ok' for r in regions)} written, {sum(r['status'] != 'ok' for r in regions)} skipped -> {args.regions_out}")
+    if args.out is None:
+        return 0
+    out = args.out.resolve()
     config = json.loads(args.config.read_text(encoding="utf-8"))
 
     rows: List[Dict[str, Any]] = []
