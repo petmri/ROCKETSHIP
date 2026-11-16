@@ -343,9 +343,10 @@ def shuffle_labels(rows: Sequence[Mapping[str, Any]], seed: int) -> List[Dict[st
             names.append(str(row["session"]))
     donor_of: Dict[str, str] = {}
     for cohort in sorted(cohorts):
-        subjects = sorted(cohorts[cohort])
+        # a subject with a single session has no pair to scramble and is left as it is
+        subjects = sorted(s for s in cohorts[cohort] if len(sessions[s]) > 1)
         if len(subjects) < 2:
-            raise ValueError(f"cohort {cohort} has one subject; its pairing cannot be scrambled")
+            raise ValueError(f"cohort {cohort} has fewer than two paired subjects; its pairing cannot be scrambled")
         order = [subjects[i] for i in rng.permutation(len(subjects))]
         for i, subject in enumerate(order):
             donor_of[order[(i + 1) % len(order)]] = subject  # a cycle: nobody keeps their own
@@ -358,7 +359,7 @@ def shuffle_labels(rows: Sequence[Mapping[str, Any]], seed: int) -> List[Dict[st
         new = dict(row)
         subject = str(row["subject"])
         ordered = sorted(sessions[subject])
-        if len(ordered) > 1 and row["session"] == ordered[-1]:
+        if subject in recipient_of and row["session"] == ordered[-1]:
             recipient = recipient_of[subject]
             new["subject"] = recipient
             new["session"] = sorted(sessions[recipient])[-1]

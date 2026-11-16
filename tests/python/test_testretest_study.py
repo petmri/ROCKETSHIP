@@ -241,8 +241,24 @@ def test_shuffle_hides_both_the_repeatability_and_the_pipeline_difference():
 @pytest.mark.unit
 def test_shuffle_refuses_a_cohort_it_cannot_scramble():
     table = study.synthetic_table({"A": 1}, {"python": 0.3}, seed=1)
-    with pytest.raises(ValueError, match="one subject"):
+    with pytest.raises(ValueError, match="fewer than two paired subjects"):
         study.shuffle_labels(table, seed=1)
+
+
+@pytest.mark.unit
+def test_shuffle_leaves_a_subject_with_one_session_alone():
+    """A session that failed preprocessing leaves its subject unpaired in the real table."""
+    table = study.synthetic_table({"A": 6}, {"python": 0.3}, seed=1)
+    table = [r for r in table if not (r["subject"] == "sub-A002" and r["session"] == "ses-02")]
+
+    shuffled = study.shuffle_labels(table, seed=4)
+
+    counts = Counter((r["subject"], r["session"]) for r in shuffled)
+    assert set(counts.values()) == {1}  # no (subject, session) appears twice
+    lone = [r for r in shuffled if r["subject"] == "sub-A002"]
+    assert lone == [r for r in table if r["subject"] == "sub-A002"]
+    results = study.analyse(shuffled, margin=1.1, confidence=0.95, interval="pitman", n_boot=50, seed=1)
+    assert results["metrics"][0]["n"] == 5
 
 
 # --------------------------------------------------------------------------- exclusions
