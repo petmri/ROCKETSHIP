@@ -115,6 +115,22 @@ def test_bootstrap_ci_brackets_the_estimate_and_is_reproducible():
     assert first[0] < rp.within_subject_sd(a, b) < first[1]
 
 
+def test_stratified_bootstrap_keeps_each_stratum_size():
+    strata = ["a"] * 5 + ["b"] * 15
+    marker = np.array([1.0] * 5 + [0.0] * 15)
+    seen = []
+
+    def fraction_from_a(values):
+        seen.append(values.mean())
+        return values.mean()
+
+    rp.bootstrap_ci(fraction_from_a, marker, n_boot=200, seed=1, strata=strata)
+    assert set(seen) == {0.25}
+    seen.clear()
+    rp.bootstrap_ci(fraction_from_a, marker, n_boot=200, seed=1)
+    assert len(set(seen)) > 1
+
+
 def two_pipelines(n, true_ratio, shared, seed):
     """Test-retest differences of two pipelines on the same subjects.
 

@@ -142,20 +142,30 @@ def bootstrap_ci(
     n_boot: int = 2000,
     confidence: float = 0.95,
     seed: int = 0,
+    strata: Optional[Sequence[object]] = None,
 ) -> Tuple[float, float]:
     """Percentile bootstrap interval for ``statistic(*paired_arrays)``, resampling subjects.
 
     Every array is indexed by subject and resampled with the same indices, so pairing --
-    between sessions and between pipelines -- is kept inside each replicate.
+    between sessions and between pipelines -- is kept inside each replicate. With
+    ``strata`` (one label per subject, e.g. the collection) subjects are resampled within
+    their stratum, so every replicate keeps the cohort sizes.
     """
     arrays = [np.asarray(x, dtype=float) for x in paired_arrays]
     n = arrays[0].size
     if any(x.size != n for x in arrays):
         raise ValueError("all arrays must have one entry per subject")
+    if strata is None:
+        groups = [np.arange(n)]
+    else:
+        labels = np.asarray([str(label) for label in strata])
+        if labels.size != n:
+            raise ValueError("strata must have one label per subject")
+        groups = [np.flatnonzero(labels == label) for label in sorted(set(labels.tolist()))]
     rng = np.random.default_rng(seed)
     replicates = np.full(n_boot, np.nan)
     for i in range(n_boot):
-        index = rng.integers(0, n, n)
+        index = np.concatenate([rng.choice(group, group.size) for group in groups])
         try:
             replicates[i] = statistic(*(x[index] for x in arrays))
         except (ValueError, ZeroDivisionError):
@@ -230,6 +240,7 @@ def wsd_ratio_noninferiority(
     confidence: float,
     n_boot: int = 5000,
     seed: int = 0,
+    strata: Optional[Sequence[object]] = None,
 ) -> NonInferiorityResult:
     """Is the new pipeline's wSD no worse than the reference's by more than ``margin``?
 
@@ -246,7 +257,8 @@ def wsd_ratio_noninferiority(
         raise ValueError("a non-inferiority margin on the wSD ratio must exceed 1")
     ratio = wsd_ratio(new_a, new_b, ref_a, ref_b)
     low, high = bootstrap_ci(
-        wsd_ratio, new_a, new_b, ref_a, ref_b, n_boot=n_boot, confidence=confidence, seed=seed
+        wsd_ratio, new_a, new_b, ref_a, ref_b,
+        n_boot=n_boot, confidence=confidence, seed=seed, strata=strata,
     )
     pitman = pitman_sd_ratio_ci(new_b - new_a, ref_b - ref_a, confidence=confidence)
     return NonInferiorityResult(

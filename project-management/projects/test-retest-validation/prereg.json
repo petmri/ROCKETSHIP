@@ -1,0 +1,35 @@
+{
+  "_doc": [
+    "Pre-registration for the test-retest validation. run_testretest_analysis.py reads it.",
+    "Every null is a decision that has not been made. The real (unblinded) analysis refuses",
+    "to run until none is left and 'signed_off' names who fixed them and when. Use the",
+    "string 'not_applied' to switch a rule off on purpose. Decide here, commit, then unblind:",
+    "the commit is the record that the rules came before the results.",
+    "",
+    "Working assumptions from the plan, NOT decisions: endpoint Patlak Ktrans in normal-",
+    "appearing WM/GM; margin 1.1 on the upper 95% limit of wSD(python)/wSD(matlab); cohorts",
+    "analysed separately with pooled results secondary; development fraction about 1/3.",
+    "",
+    "primary_endpoint.rater: whose AIF masks carry the primary claim (AC or WN).",
+    "pooling: 'separate' or 'pooled'. Both are always computed; this names the primary.",
+    "noninferiority.interval: 'bootstrap_percentile' or 'pitman' (see the plan's proposals).",
+    "noninferiority.confidence: two-sided level whose upper limit is compared with the margin.",
+    "exclusions: a session fails when max displacement (mm) exceeds the first, the AIF fit's",
+    "adjusted R2 is below the second, or the QoF-reliable fraction of the region is below the",
+    "third. Failed or missed injections go in exclusions_manual.tsv (subject, session, rater,",
+    "reason), judged without looking at the outcome.",
+    "report_wcv_for: region/parameter pairs well above zero, where wCV is meaningful."
+  ],
+  "signed_off": {"by": null, "date": null},
+  "primary_endpoint": {"model": null, "region": null, "parameter": null, "rater": null},
+  "pooling": null,
+  "noninferiority": {"margin": null, "confidence": null, "interval": null},
+  "exclusions": {
+    "max_displacement_mm": null,
+    "min_aif_fit_r2_adj": null,
+    "min_qof_reliable_fraction": null
+  },
+  "split": {"development_fraction": null, "seed": null},
+  "report_wcv_for": [],
+  "bootstrap": {"n_boot": 5000, "seed": 20261116}
+}
