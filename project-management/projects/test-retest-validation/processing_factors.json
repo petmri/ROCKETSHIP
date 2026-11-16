@@ -1,0 +1,52 @@
+{
+  "_doc": [
+    "Factors and levels for run_testretest_processing_variance.py (comparison 2 of the plan).",
+    "Every level is one refit that differs from the session's base config in this factor only.",
+    "",
+    "Level keys: 'name'; 'top' (top-level config keys, e.g. backend, aif_mode); 'set'",
+    "(stage_overrides); 'aif_mask' ('dilate' or 'erode', one voxel in-plane); 'aif_from'",
+    "(a rater named by --rater-run: use that rater's AIF mask on this session's data);",
+    "'baseline' ('as_drawn' keeps the AIF file's own sidecar, 'auto' drops it so the baseline",
+    "end is auto-detected, {'from': RATER} uses that rater's sidecar).",
+    "",
+    "steady_state_auto_method levels set baseline 'auto', since a sidecar baseline end would",
+    "outrank the detector. The rater factor crosses mask with baseline method, because rater",
+    "and baseline method are confounded in a plain AC-vs-WN comparison (plan, comparison 2).",
+    "",
+    "Not covered: the plan lists cpufit as a backend level, but 'backend' accepts only",
+    "auto/cpu/gpufit and cpufit is chosen by 'auto' when CUDA is absent. See the plan's",
+    "proposals."
+  ],
+  "factors": {
+    "backend": [
+      {"name": "gpufit", "top": {"backend": "gpufit"}},
+      {"name": "cpu", "top": {"backend": "cpu"}}
+    ],
+    "steady_state_auto_method": [
+      {"name": "tv", "baseline": "auto", "set": {"steady_state_auto_method": "tv"}},
+      {"name": "piecewise_constant", "baseline": "auto", "set": {"steady_state_auto_method": "piecewise_constant"}},
+      {"name": "glr", "baseline": "auto", "set": {"steady_state_auto_method": "glr"}},
+      {"name": "biexp_fit", "baseline": "auto", "set": {"steady_state_auto_method": "biexp_fit"}},
+      {"name": "legacy_sobel", "baseline": "auto", "set": {"steady_state_auto_method": "legacy_sobel"}}
+    ],
+    "start_t": [
+      {"name": "1", "set": {"start_t": 1}},
+      {"name": "2", "set": {"start_t": 2}}
+    ],
+    "aif_mask": [
+      {"name": "as_drawn"},
+      {"name": "dilated", "aif_mask": "dilate"},
+      {"name": "eroded", "aif_mask": "erode"}
+    ],
+    "aif_rater_and_baseline": [
+      {"name": "AC_mask_AC_baseline", "aif_from": "AC", "baseline": "as_drawn"},
+      {"name": "WN_mask_WN_baseline", "aif_from": "WN", "baseline": "as_drawn"},
+      {"name": "AC_mask_WN_baseline", "aif_from": "AC", "baseline": {"from": "WN"}},
+      {"name": "WN_mask_auto_baseline", "aif_from": "WN", "baseline": "auto"}
+    ],
+    "aif_curve": [
+      {"name": "raw", "top": {"aif_mode": "raw"}},
+      {"name": "fitted", "top": {"aif_mode": "fitted"}}
+    ]
+  }
+}
