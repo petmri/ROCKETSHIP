@@ -37,7 +37,7 @@ def save(path: Path, data: np.ndarray) -> None:
     nib.save(nib.Nifti1Image(np.asarray(data, dtype=np.float32), np.eye(4)), path)
 
 
-def make_fitted_session(root: Path, subject="sub-QINGBMTR01", session="ses-01", ktrans_wm=0.002, ktrans_gm=0.004):
+def make_fitted_session(root: Path, subject="sub-QINGBMTR900", session="ses-01", ktrans_wm=0.002, ktrans_gm=0.004):
     """A DCEPrep session and a fit folder on a 10x10x4 grid: WM in x<5, GM in x>=5."""
     prefix = f"{subject}_{session}"
     dceprep = root / "dceprep" / subject / session
@@ -122,7 +122,7 @@ def test_collect_session_takes_the_median_inside_region_and_fit_roi(tmp_path):
     assert by_key[("patlak", "GM", "Ktrans")]["value"] == pytest.approx(0.004)
     assert by_key[("ex_tofts", "GM", "ve")]["value"] == pytest.approx(0.2)
     assert {wm["subject"], wm["session"], wm["cohort"], wm["pipeline"], wm["rater"]} == {
-        "sub-QINGBMTR01", "ses-01", "QIN-GBM", "python", "AC"}
+        "sub-QINGBMTR900", "ses-01", "QIN-GBM", "python", "AC"}
     assert qc["max_displacement_mm"] == pytest.approx(0.75)
     assert np.isnan(qc["aif_fit_r2_adj"])  # a raw-AIF run has no AIF fit
 
@@ -144,12 +144,12 @@ def test_collect_session_reports_missing_maps_and_grid_mismatches(tmp_path):
 def test_collect_arm_walks_the_fit_root(tmp_path):
     make_fitted_session(tmp_path, session="ses-01")
     make_fitted_session(tmp_path, session="ses-02")
-    (tmp_path / "fits/sub-QINGBMTR09/ses-01").mkdir(parents=True)  # fitted folder without a DCEPrep session
+    (tmp_path / "fits/sub-QINGBMTR901/ses-01").mkdir(parents=True)  # fitted folder without a DCEPrep session
 
     rows, qc_rows, problems = study.collect_arm(tmp_path / "fits", tmp_path / "dceprep", pipeline="python", rater="AC")
 
     assert len(qc_rows) == 2 and len(rows) == 20
-    assert any("sub-QINGBMTR09" in p for p in problems)
+    assert any("sub-QINGBMTR901" in p for p in problems)
 
 
 # --------------------------------------------------------------------------- metadata audit
