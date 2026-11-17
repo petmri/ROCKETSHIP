@@ -24,7 +24,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(REPO_ROOT / "python"))
@@ -39,12 +39,31 @@ MANIFEST_COLUMNS = ("subject", "session", "status", "detail", "duration_sec", "g
 
 
 def build_session_config(
-    template: Dict[str, Any], session_dir: Path, staged_session: Path, output_dir: Path
+    template: Dict[str, Any], session_dir: Path, staged_session: Path, output_dir: Path,
+    regions_roots: Sequence[Path] = (),
 ) -> Tuple[Optional[Dict[str, Any]], str]:
-    """Resolve the template for one session. Returns (config, "") or (None, reason)."""
+    """Resolve the template for one session. Returns (config, "") or (None, reason).
+
+    `roi_files` may list several patterns: each must match exactly one file, in the session
+    or else under one of `regions_roots` (<root>/sub-*/ses-*), and they are passed in order.
+    The first is the fit ROI; with `fit_voxels` false every ROI's averaged curve is fitted
+    (the `_rois.xls` outputs). The other inputs take one file in all.
+    """
     subject, session = session_dir.parent.name, session_dir.name
     config = {k: v for k, v in template.items() if k not in ("_doc", "cohort_overrides")}
     for key in INPUT_LISTS:
+        if key == "roi_files" and len(template[key]) > 1:
+            resolved: List[str] = []
+            for pattern in template[key]:
+                for folder in (session_dir, *(Path(r) / subject / session for r in regions_roots)):
+                    found = sorted(folder.glob(pattern))
+                    if found:
+                        break
+                if len(found) != 1:
+                    return None, f"{key}: {len(found)} files match {pattern}, need exactly 1"
+                resolved.append(str(found[0]))
+            config[key] = resolved
+            continue
         matches: List[Path] = []
         for pattern in template[key]:
             matches.extend(sorted(session_dir.glob(pattern)))
@@ -104,6 +123,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--session", action="append", default=[], help="Only this session (repeatable).")
     parser.add_argument("--skip-existing", action="store_true", help="Skip sessions the manifest already lists as ok.")
     parser.add_argument("--allow-dirty", action="store_true", help="Run from a checkout with uncommitted changes.")
+    parser.add_argument(
+        "--regions-root", action="append", default=[], type=Path,
+        help="Another run to look for roi_files in (e.g. regions_SG for the tumor ROI); repeatable.",
+    )
     args = parser.parse_args(argv)
 
     dceprep_run = args.dceprep_run.resolve()
@@ -137,7 +160,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         output_dir = output_root / key[0] / key[1]
         started = time.monotonic()
         config, reason = build_session_config(
-            template, session_dir, args.staged_root.resolve() / key[0] / key[1], output_dir
+            template, session_dir, args.staged_root.resolve() / key[0] / key[1], output_dir,
+            [r.resolve() for r in args.regions_root],
         )
         status, detail = ("skipped", reason) if config is None else fit_session(config, output_dir)
         done[key] = {

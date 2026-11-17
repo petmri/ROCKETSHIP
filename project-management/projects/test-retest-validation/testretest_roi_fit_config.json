@@ -1,0 +1,53 @@
+{
+  "_doc": [
+    "ROI-average fits for the three-rater test-retest (in-house_toolbox dce_testretest_3rater.py).",
+    "Same settings as testretest_run_config.json, but fit_voxels is false: the concentration curve is",
+    "averaged over each ROI and that one curve is fitted (average-then-fit), written to *_rois.xls.",
+    "roi_files: the brain mask (first; defines the converted voxels), the tumor ROI (from",
+    "--regions-root regions_SG) and the WM mask. No parameter maps are written."
+  ],
+  "backend": "gpufit",
+  "write_xls": true,
+  "aif_mode": "raw",
+  "dynamic_files": [
+    "dce/*_desc-bfcz_DCE.nii*"
+  ],
+  "aif_files": [
+    "dce/*_label-AIF_T1map.nii*"
+  ],
+  "roi_files": [
+    "anat/*_space-DCEref_label-brain_mask.nii*",
+    "anat/*_space-DCEref_label-tumor_mask.nii*",
+    "anat/*_space-DCEref_label-WM_mask.nii*"
+  ],
+  "t1map_files": [
+    "anat/*_space-DCEref_T1map.nii*"
+  ],
+  "noise_files": [],
+  "drift_files": [],
+  "model_flags": {
+    "tofts": 0,
+    "ex_tofts": 1,
+    "patlak": 1,
+    "tissue_uptake": 0,
+    "two_cxm": 0,
+    "fxr": 0,
+    "auc": 0,
+    "nested": 0,
+    "FXL_rr": 0
+  },
+  "stage_overrides": {
+    "stage_b_mode": "real",
+    "stage_d_mode": "real",
+    "write_qof_maps": true,
+    "fit_voxels": false
+  },
+  "cohort_overrides": {
+    "sub-RIDERNeuroMRI": {
+      "blood_t1_ms": 1441
+    },
+    "sub-QINGBMTR": {
+      "blood_t1_ms": 1664
+    }
+  }
+}

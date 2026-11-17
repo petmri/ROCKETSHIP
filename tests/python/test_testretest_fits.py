@@ -70,6 +70,25 @@ def test_config_names_one_file_per_input_and_keeps_inputs_and_outputs_apart(tmp_
 
 
 @pytest.mark.unit
+def test_several_roi_patterns_resolve_in_order_and_from_a_regions_root(tmp_path):
+    session_dir, staged = make_session(tmp_path, "sub-AB01")
+    regions = tmp_path / "regions"
+    tumor = regions / "sub-AB01/ses-01/anat/sub-AB01_ses-01_space-DCEref_label-tumor_mask.nii.gz"
+    tumor.parent.mkdir(parents=True)
+    tumor.touch()
+    template = {**TEMPLATE, "roi_files": [
+        "anat/*_space-DCEref_label-brain_mask.nii*", "anat/*_space-DCEref_label-tumor_mask.nii*"]}
+
+    config, reason = fits.build_session_config(template, session_dir, staged, tmp_path / "out", [regions])
+    assert reason == ""
+    assert config["roi_files"] == [
+        str(session_dir / "anat/sub-AB01_ses-01_space-DCEref_label-brain_mask.nii.gz"), str(tumor)]
+
+    config, reason = fits.build_session_config(template, session_dir, staged, tmp_path / "out")
+    assert config is None and "label-tumor_mask" in reason
+
+
+@pytest.mark.unit
 def test_shorter_prefix_applies_when_the_longer_one_does_not_match(tmp_path):
     session_dir, staged = make_session(tmp_path, "sub-A7")
     config, _ = fits.build_session_config(TEMPLATE, session_dir, staged, tmp_path / "out")
