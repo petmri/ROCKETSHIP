@@ -91,7 +91,8 @@ def _blood_t1_ms(config: Dict[str, Any], subject: str) -> Optional[float]:
 
 
 def derive_session(
-    rater: str, rater_dir: Path, base_session: Path, out_session: Path, blood_t1_ms: Optional[float]
+    rater: str, rater_dir: Path, base_session: Path, out_session: Path, blood_t1_ms: Optional[float],
+    baseline_offset: int = 0,
 ) -> Dict[str, Any]:
     """Derive one session. Returns its manifest row; writes nothing unless status is 'ok'."""
     import nibabel as nib
@@ -148,10 +149,14 @@ def derive_session(
     if sidecar.exists():
         end = json.loads(sidecar.read_text(encoding="utf-8")).get("SteadyStateEndTimeIndex")
         if end is not None:
-            baseline_end = int(end)
-            # copied unchanged, as the staging of the other rater runs does
+            # AIFArtist stores the clicked frame 0-based; ROCKETSHIP reads the index 1-based,
+            # so --baseline-offset 1 makes the baseline end on the frame the rater clicked.
+            baseline_end = int(end) + baseline_offset
+            record = {"SteadyStateEndTimeIndex": baseline_end, "Source": sidecar.name}
+            if baseline_offset:
+                record.update(SourceSteadyStateEndTimeIndex=int(end), BaselineOffset=baseline_offset)
             (out_session / f"dce/{prefix}_label-AIF_T1map.json").write_text(
-                json.dumps({"SteadyStateEndTimeIndex": baseline_end, "Source": sidecar.name}, indent=2) + "\n", encoding="utf-8"
+                json.dumps(record, indent=2) + "\n", encoding="utf-8"
             )
 
     tumor_voxels, reason = write_tumor(rater, rater_dir, dynamic, out_session, prefix)
@@ -215,6 +220,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--out", type=Path, help="Derived run folder; must be outside --base-run.")
     parser.add_argument("--regions-out", type=Path, help="Also write the rater's tumour ROIs for every session that has one, into this folder.")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG, help="Run config (cohort blood T1).")
+    parser.add_argument(
+        "--baseline-offset", type=int, default=0,
+        help="Added to the rater's SteadyStateEndTimeIndex. 1 converts AIFArtist's 0-based frame to "
+        "ROCKETSHIP's 1-based index; the default 0 copies it unchanged.",
+    )
     args = parser.parse_args(argv)
     base_run = args.base_run.resolve()
     if args.out is None and args.regions_out is None:
@@ -239,7 +249,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         if not base_session.is_dir():
             rows.append({"subject": subject, "session": session, "status": "skipped", "detail": "session is not in the base run"})
         else:
-            rows.append(derive_session(args.rater, rater_dir, base_session, out / subject / session, _blood_t1_ms(config, subject)))
+            rows.append(derive_session(
+                args.rater, rater_dir, base_session, out / subject / session, _blood_t1_ms(config, subject),
+                args.baseline_offset,
+            ))
         print(f"{subject} {session}: {rows[-1]['status']} {rows[-1]['detail']}", flush=True)
     out.mkdir(parents=True, exist_ok=True)
     with open(out / "derive_manifest.tsv", "w", newline="", encoding="utf-8") as handle:
@@ -250,6 +263,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         f"# Derived rater run: {args.rater}\n\n"
         f"Not a DCEPrep run. Preprocessing is linked from `{base_run}`; only the AIF mask, the AIF T1 map,\n"
         f"its baseline sidecar and the tumour ROI come from rater {args.rater} (`{args.aifartist.resolve()}`).\n"
+        f"Baseline end = rater's SteadyStateEndTimeIndex + {args.baseline_offset}.\n"
         "Written by ROCKETSHIP run_testretest_derive_rater.py; per-session status in derive_manifest.tsv.\n",
         encoding="utf-8",
     )

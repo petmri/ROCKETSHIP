@@ -105,6 +105,19 @@ def test_derived_session_links_the_preprocessing_and_adds_the_raters_aif(tmp_pat
 
 
 @pytest.mark.unit
+def test_baseline_offset_converts_aifartists_zero_based_frame(tmp_path):
+    base, rater = make_inputs(tmp_path, aif_voxels=[(3, 3, 3)])
+    out = tmp_path / "derived" / SUBJECT / SESSION
+
+    row = derive.derive_session("SG", rater, base, out, blood_t1_ms=None, baseline_offset=1)
+
+    assert row["baseline_end"] == 29
+    sidecar = json.loads((out / f"dce/{PREFIX}_label-AIF_T1map.json").read_text())
+    assert sidecar["SteadyStateEndTimeIndex"] == 29
+    assert sidecar["SourceSteadyStateEndTimeIndex"] == 28 and sidecar["BaselineOffset"] == 1
+
+
+@pytest.mark.unit
 def test_an_aif_outside_the_base_runs_mask_needs_dceprep_and_writes_nothing(tmp_path):
     """The base run zeroed the series outside brain-or-AIF of its own rater."""
     base, rater = make_inputs(tmp_path, aif_voxels=[(3, 3, 3), (0, 0, 3)])
