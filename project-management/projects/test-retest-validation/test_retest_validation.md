@@ -5,6 +5,18 @@ Use scan-rescan data to show that the Python pipeline (2.0) measures DCE paramet
 patients **at least as repeatably as MATLAB 1.x**. It should also show that processing
 contributes only a small share of the scan-rescan variance.
 
+## Where the work lives
+- **This folder (git, branch `test-retest-validation`)**: the plan, proposals, open
+  questions and status (this file), `prereg.json`, run settings, the MATLAB driver and
+  `matlab_arm.md`, `power_simulation.py`. Open work is listed once, in
+  `project-management/TODO.md`.
+- **DCEPrep branch `fix/vfa-norm-failure-diagnostics`**: the DCEPrep fixes.
+- **`DCE_BIDS/derivatives/rocketship-testretest/` on the data share**: fits, tables,
+  reports, QC, logs, the ad hoc check scripts, and everything that names a subject.
+  Its `README.md` indexes the folder and `PROVENANCE.md` maps outputs to commits.
+
+Nothing else holds results. Subject IDs go on the share only, never in git.
+
 ## What this can and cannot show
 In vivo data has no ground truth, so test-retest measures **precision, not accuracy**.
 Accuracy stays with the OSIPI DROs (`tests/data/osipi/`) and the phantom ground truth
@@ -227,7 +239,8 @@ error; it is a secondary, descriptive analysis only.
 ## Dependencies and risks
 - **Data distribution**: real test-retest data cannot go in git. CI coverage, if any, waits
   on `projects/large-data-distribution/`. Until then this runs locally against the data
-  root, and only derived tables/reports are committed (no PHI).
+  root; derived tables, reports and anything that names a subject stay on the share
+  (`rocketship-testretest/`). Commits carry code, settings and counts only.
 - **Known Python/MATLAB divergences** will show up here and need to be explained, not
   tuned away:
   - backend drift on real data
@@ -279,7 +292,7 @@ Nothing below changes a pre-set decision; each is for the open questions that fo
    | 43 (pooled) | 0.80 / 0.95 / 0.99 | 0.18 / 0.48 / 0.98 | 0.64 / 0.99 / 1.00 |
 
    A 1.1 margin can only be met if the two pipelines' test-retest differences nearly
-   coincide. Analysing the cohorts separately roughly halves the power of the pooled
+   coincide. Reproduce with `power_simulation.py` in this folder. Analysing the cohorts separately roughly halves the power of the pooled
    analysis, which bears on the pooling question.
 7. **AIF-fit exclusion rule.** With the raw AIF curve there is no AIF fit, so
    `fit_rsquared_cp_adj` does not exist for these runs. Use the fitted AIF for the primary
