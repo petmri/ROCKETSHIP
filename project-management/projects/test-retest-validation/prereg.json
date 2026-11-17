@@ -10,7 +10,7 @@
     "appearing WM/GM; margin 1.1 on the upper 95% limit of wSD(python)/wSD(matlab); cohorts",
     "analysed separately with pooled results secondary; development fraction about 1/3.",
     "",
-    "primary_endpoint.rater: whose AIF masks carry the primary claim (AC or WN).",
+    "primary_endpoint.rater: whose AIF masks carry the primary claim (AC, WN or SG).",
     "pooling: 'separate' or 'pooled'. Both are always computed; this names the primary.",
     "noninferiority.interval: 'bootstrap_percentile' or 'pitman' (see the plan's proposals).",
     "noninferiority.confidence: two-sided level whose upper limit is compared with the margin.",

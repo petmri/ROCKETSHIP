@@ -46,6 +46,11 @@ sessions, DCE in both. Every subject's `*_sessions.tsv` gives `days_from_first` 
 - **AIF masks**: `derivatives/AIFArtist`, two raters per session. AC used an automatic
   baseline end; WN set the baseline-end frame by hand. Rater and baseline method are
   therefore **confounded** in an AC-vs-WN comparison (see comparison 2).
+- **Third rater, SG** (in `derivatives/AIFArtist` by 2026-11-16): AIF masks for 49 sessions,
+  45 with a hand-marked baseline end, and **tumour ROIs for 35 sessions**. Complete pairs:
+  22 for the AIF (18 RIDER, 4 QIN-GBM), 15 for the tumour ROI (all RIDER). SG also left a
+  flags file: 50 sessions flagged, 49 of them QIN-GBM (45 "Poor AIF", 3 "Bad data",
+  1 "Missing baseline") and 1 RIDER ("Poor AIF"). See proposals 11 and 12.
 - **Prior runs** (25 QIN-GBM subjects, 50 sessions):
   - `dceprep-testretest` (July): **MATLAB 1.x** outputs (`A_dceR1info.mat`,
     `dce_patlak_fit.mat`).
@@ -70,8 +75,10 @@ sessions, DCE in both. Every subject's `*_sessions.tsv` gives `days_from_first` 
 - **In-house repeatability summary** `dceprep-testretest_analysis` (2026-10-29): Python-only
   scan-rescan and inter-rater tables from the rater runs. It contains no MATLAB results, but
   it means Python-only repeatability has been looked at. Not opened for this work.
-- **Validation fits** `rocketship-testretest/python_AC` / `python_WN` (2026-11-16): the
-  Python arm refitted from the rater runs by `run_testretest_fits.py`, see "Status".
+- **Validation fits** `rocketship-testretest/python_AC`, `python_WN`, `python_SG`
+  (2026-11-16): the Python arm fitted by `run_testretest_fits.py`, see "Status". AC and WN
+  are fitted from the rater runs. There is no DCEPrep run for SG; its inputs are derived
+  from the AC run (`rocketship-testretest/dceprep-derived_SG`, see "Rater SG" below).
 
 ## DCEPrep failures: root causes (2026-11-16)
 The 11 failures of the 2026-10-27 run, from the logs and the data. Session-level detail
@@ -102,6 +109,33 @@ subject IDs stay out of this repository.
   limit 15 of 86 sessions are flagged, mostly through the lowest flip angle. Proposal 1.
 - DCEPrep cannot be re-run on the analysis workstation as it stands (no HD-BET, empty
   DCEPrep venv), so no session was re-preprocessed for this work.
+
+## Rater SG without a DCEPrep run (2026-11-16)
+DCEPrep cannot run on the analysis workstation, and its preprocessing depends on the rater
+in one place only: the dynamic series is masked by brain-or-AIF, so an AIF voxel outside
+the brain mask survives only in the run of the rater who drew it.
+`run_testretest_derive_rater.py` uses that. For each session SG drew, it links the AC
+run's preprocessed files, moves SG's mask onto the AC run's grid, and writes the AIF T1
+map, the baseline sidecar and the tumour ROI. A session is derived only if every AIF
+voxel has signal in the AC run's series.
+
+- The regridding reproduces the AC run's own AIF masks exactly on all 86 sessions.
+- **36 of SG's 49 sessions are derived (14 complete pairs: 12 RIDER, 2 QIN-GBM).** 12 need
+  a real DCEPrep run, because SG's AIF lies partly or wholly outside what the AC run kept,
+  and 1 is the session that fails preprocessing. A DCEPrep run for SG would bring the
+  complete pairs to 21 or 22.
+- SG's tumour ROIs do not depend on the AIF and are written for all 35 sessions
+  (`rocketship-testretest/regions_SG`). With `collect --regions-root` and
+  `regions_tumor.json` they apply to every rater's fits: regions `tumor`, `WM_nontumor`
+  and `GM_nontumor` next to `WM` and `GM`.
+- Check of the method: rater WN's inputs derived from the AC run the same way, fitted,
+  and compared with the fits from WN's own DCEPrep run (73 sessions). The AIF masks are
+  identical in all 73. WM-median Patlak Ktrans agrees within 0.1% in 53 sessions and
+  within 1% in 67; the largest difference is 4.8%. The fits are not identical because the
+  two DCEPrep runs are not: their T1 maps differ (WM median by up to 2.7%, median 0.02%)
+  although nothing about the T1 map depends on the rater, and the Ktrans difference
+  follows the T1 difference (Spearman 0.42). So a derived run stands in for a real one
+  to within DCEPrep's own run-to-run variation. See proposal 15.
 
 ## Design: three comparisons
 
@@ -177,7 +211,10 @@ error; it is a secondary, descriptive analysis only.
       tables plus Bland–Altman and paired plots per group.
   - ROI medians are taken from the parameter maps inside the DCEPrep WM/GM masks, not from
     the ROI `.xls` (which fits the ROI-mean curve, not the voxels).
-  - [ ] MATLAB side: blocked, MATLAB is not installed. See `matlab_arm.md`.
+  - [ ] MATLAB side: set up to run on another machine, not yet run.
+        `run_testretest_export_matlab_jobs.py` writes a job list from the Python fits and
+        `matlab/run_testretest_matlab.m` runs it (`matlab_arm.md`). The driver is untested.
+  - [x] Other raters without a DCEPrep run: `run_testretest_derive_rater.py`.
 - [x] Processing-variance runner: `run_testretest_processing_variance.py` with
       `processing_factors.json`. Tested on the tiny fixture; not yet run on the cohort.
 - [x] Blinding: `prereg.json` holds every decision as null; the unblinded mode and the
@@ -249,14 +286,47 @@ Nothing below changes a pre-set decision; each is for the open questions that fo
    analysis, replace the rule (for example a minimum AIF enhancement), or set it to
    `not_applied`.
 8. **"Normal-appearing" needs lesion masks.** The DCEPrep WM/GM masks of these glioma
-   patients include tumour and oedema. The collector takes any mask; the endpoint needs to
-   say which (manual tumour ROIs exist for 12 subjects in `AIFArtist`).
+   patients include tumour and oedema. Rater SG's tumour ROIs (35 sessions, 15 RIDER
+   pairs) are now on the fit grid and the collector offers `WM_nontumor` and `GM_nontumor`
+   (`regions_tumor.json`); QIN-GBM has no complete pair with a tumour ROI. The endpoint
+   needs to say which regions carry the claim.
 9. **MATLAB arm.** Decide which code is "1.x" (the `1.2` tag or the MATLAB side of the
-   validation commit) and accept a small driver in place of `run_dce_cli`
+   validation commit). The driver that replaces `run_dce_cli` targets the latter
    (`matlab_arm.md`).
 10. **cpufit as a backend level.** `backend` accepts `auto`, `cpu`, `gpufit`; cpufit is only
     reached through `auto` without CUDA. An explicit value would let the variance runner
     cover it.
+
+11. **SG's flags.** SG flagged 49 QIN-GBM sessions, 45 of them for a poor AIF, and drew an
+    AIF for only 12 of the flagged sessions. That is a rater's judgement on almost the
+    whole QIN-GBM cohort, made without seeing any outcome, and it bears on the pooling
+    question and on the exclusion rules ("Bad data" and "Missing baseline" map onto the
+    plan's failed-or-missed-injection rule). Decide how the flags enter
+    `exclusions_manual.tsv`, if at all.
+12. **A DCEPrep run for SG.** The derived SG run covers 14 complete pairs; a real run would
+    cover 21. Preprocess SG on the DCEPrep machine when convenient, and until then treat SG
+    results as coming from the derived subset.
+13. **Baseline frame convention.** The staging script copies AIFArtist's
+    `SteadyStateEndTimeIndex` unchanged; its own docstring says AIFArtist counts from 0 and
+    ROCKETSHIP from 1, so hand-marked baselines (WN, SG) end one frame early. The derived
+    SG run copies it the same way, to stay consistent with WN. Decide whether to add one
+    everywhere before the fits of record.
+14. **What MATLAB does where Python auto-detected the baseline** (`'python'` or `'auto'`
+    in the MATLAB driver): pass Python's frame, or let MATLAB's detector choose. All of
+    rater AC is auto-detected, so for AC this decides whether the detector is part of the
+    comparison.
+
+15. **DCEPrep is not reproducible run to run, and that leaks into the rater comparison.**
+    The AC and WN runs preprocessed the same data separately and their T1 maps differ by
+    up to 2.7% in the WM median. An AC-versus-WN comparison between those runs therefore
+    mixes the rater with preprocessing noise. Comparing raters on one preprocessing (the
+    derived-run route, or one DCEPrep run with all raters' masks) removes it. For
+    identical repeat runs DCEPrep's README asks for one ITK thread; decide whether the
+    fits of record need that, and add "DCEPrep re-run" as a factor of the variance budget.
+16. **The pure-CPU backend is too slow to be a variance-budget level on whole-brain
+    voxel fits.** One session did not finish in nine minutes (the GPU takes about 15 s).
+    Run the backend factor on a sub-sampled ROI, or on `cpufit` once it can be selected
+    (proposal 10).
 
 ## Open questions
 Answered by the data survey above: cohort size and rescan intervals, scanners and protocol,
@@ -264,7 +334,9 @@ Answered by the data survey above: cohort size and rescan intervals, scanners an
 only; not matched to the current inputs). Still open:
 - [ ] **Primary endpoint**: which model × region × parameter carries the 2.0 claim? GM/WM
       label maps exist; Patlak Ktrans in normal-appearing WM/GM is the working assumption.
-      Are tumor (enhancing-lesion) masks available or planned for RIDER/QIN-GBM?
+      Tumour ROIs now exist from rater SG for 15 RIDER pairs and no QIN-GBM pair, so a
+      tumour endpoint, or WM/GM with the tumour removed, is possible for RIDER only
+      (proposal 8).
 - [ ] **Pooling**: analyse RIDER (1.5 T) and QIN-GBM (3 T) separately, or pooled with
       collection as a factor? Proposed: separately, with pooled results reported as
       secondary.
@@ -281,7 +353,8 @@ only; not matched to the current inputs). Still open:
       them in `prereg.json`; the code refuses the real analysis until it is complete
       (proposals 5–7).
 - [ ] **MATLAB**: where it will run, and which code is "1.x" (proposal 9).
-- [ ] **Which rater** carries the primary claim, AC or WN.
+- [ ] **Which rater** carries the primary claim: AC, WN or SG. SG covers fewer pairs
+      (proposal 12).
 - [ ] **Development/held-out split**: proposed split by subject within each collection,
       stratified, about 1/3 development. Fix the seed and record the split in this folder.
 
@@ -292,16 +365,27 @@ only; not matched to the current inputs). Still open:
       diagnostics, tests and a registration QC check on DCEPrep branch
       `fix/vfa-norm-failure-diagnostics`.
 - [x] Statistics module + synthetic validation (2026-11-16).
-- [x] Rater runs fitted, Python arm (2026-11-16): `rocketship-testretest/python_AC` and
-      `python_WN`, Patlak and extended Tofts with QoF maps. AC: 85 fitted, 1 skipped (no
-      preprocessed DCE). WN was still running when this was written; counts are in each
-      folder's `fit_manifest.tsv` and `provenance.json`. The fits record revision
-      `73d0f3b`, a local commit whose message was later reworded; the same tree is
-      `ecd3ce3` on this branch (`git rev-parse ecd3ce3^{tree}`).
-- [ ] MATLAB run on the same staged inputs: **blocked**, MATLAB is not installed on the
-      analysis workstation (`matlab_arm.md`).
+- [x] Rater runs fitted, Python arm (2026-11-16), all at ROCKETSHIP `318180d`, Patlak and
+      extended Tofts with QoF maps, in `rocketship-testretest/`: `python_AC` 85 sessions,
+      `python_WN` 85, `python_SG` 36 (derived inputs). The one session without a fit is
+      the one that fails preprocessing. Each folder has `fit_manifest.tsv` and
+      `provenance.json`; `PROVENANCE.md` beside them records both repositories' commits.
+  - Repeat fits of AC and WN on the same inputs and code are not bit-identical (GPU), but
+    the difference is confined to at most 40 voxels a session: Patlak Ktrans WM/GM
+    medians are unchanged in all 340 cases, and no ROI median of either model moved by
+    more than 0.2%.
+- [ ] MATLAB run on the same staged inputs: **not run.** MATLAB is not installed on the
+      analysis workstation; the arm is set up for another machine (`matlab_arm.md`): job
+      lists `rocketship-testretest/matlab_jobs_{AC,WN,SG}.json`, driver
+      `matlab/run_testretest_matlab.m` (untested).
+- [x] Rater SG brought in without a DCEPrep run (2026-11-16): 36 of 49 sessions, tumour
+      ROIs for all 35.
 - [x] Analysis code, blinded (2026-11-16): tested on synthetic tables and on the
-      label-shuffled real table. No real repeatability result has been computed or viewed.
+      label-shuffled real table of all three raters (`rocketship-testretest/tables`, 3530
+      ROI medians, regions WM, GM, tumour and WM/GM without tumour). No real repeatability
+      result has been computed or viewed.
 - [ ] Remaining open questions answered and `prereg.json` signed off.
-- [ ] Processing-variance budget (runner ready, not run on the cohort).
+- [ ] Processing-variance budget: runner piloted on four subjects (eight sessions, all
+      factors but the backend, proposal 16); not run on the cohort, and its comparison
+      with the rescan wSD stays locked.
 - [ ] Held-out confirmation and report.
