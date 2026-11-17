@@ -328,6 +328,12 @@ Nothing below changes a pre-set decision; each is for the open questions that fo
     Run the backend factor on a sub-sampled ROI, or on `cpufit` once it can be selected
     (proposal 10).
 
+17. **Perturb the AIF mask differently.** The manual AIFs are a few voxels, so one-voxel
+    in-plane erosion empties them, and dilation reaches voxels DCEPrep zeroed outside the
+    brain-or-AIF mask. Options: drop each voxel in turn (leave-one-out), or perturb within
+    the voxels the run kept; for dilation, preprocess with a dilated mask so the extra
+    voxels keep their signal.
+
 ## Open questions
 Answered by the data survey above: cohort size and rescan intervals, scanners and protocol,
 `VolumeTiming` (absent), layout (BIDS + DCEPrep staging), existing MATLAB results (July run
@@ -385,7 +391,10 @@ only; not matched to the current inputs). Still open:
       ROI medians, regions WM, GM, tumour and WM/GM without tumour). No real repeatability
       result has been computed or viewed.
 - [ ] Remaining open questions answered and `prereg.json` signed off.
-- [ ] Processing-variance budget: runner piloted on four subjects (eight sessions, all
-      factors but the backend, proposal 16); not run on the cohort, and its comparison
-      with the rescan wSD stays locked.
+- [ ] Processing-variance budget: runner piloted on four subjects of rater AC (eight
+      sessions, all factors but the backend, proposal 16), 112 refits, none failed. Not
+      run on the cohort, and its comparison with the rescan wSD stays locked. The pilot
+      showed the AIF-mask factor barely works on hand-drawn AIFs (proposal 17): eroding
+      left no voxel in all 8 sessions, and dilation reached voxels the run had zeroed in 6
+      of 8. Another rater's mask had no signal in the AC run in 1 of 8 sessions.
 - [ ] Held-out confirmation and report.
