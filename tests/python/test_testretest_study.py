@@ -239,10 +239,30 @@ def test_shuffle_hides_both_the_repeatability_and_the_pipeline_difference():
 
 
 @pytest.mark.unit
-def test_shuffle_refuses_a_cohort_it_cannot_scramble():
+def test_shuffle_leaves_out_a_pair_it_cannot_scramble():
+    """One paired subject in a group: passing its pair through would leak a real difference."""
     table = study.synthetic_table({"A": 1}, {"python": 0.3}, seed=1)
-    with pytest.raises(ValueError, match="fewer than two paired subjects"):
-        study.shuffle_labels(table, seed=1)
+    assert study.shuffle_labels(table, seed=1) == []
+
+
+@pytest.mark.unit
+def test_shuffle_keeps_the_pair_count_of_a_sparsely_covered_group():
+    """A rater or region that only some subjects have: its pairs are swapped among themselves."""
+    full = study.synthetic_table({"A": 12}, {"python": 0.3}, seed=1)
+    sparse = study.synthetic_table({"A": 5}, {"python": 0.3}, seed=2, rater="SG", region="tumor")
+    table = full + sparse
+
+    shuffled = study.shuffle_labels(table, seed=7)
+
+    def pairs(rows, rater):
+        counts = Counter(r["subject"] for r in rows if r["rater"] == rater)
+        return sum(1 for n in counts.values() if n == 2)
+
+    assert pairs(shuffled, "SYN") == 12 and pairs(shuffled, "SG") == 5
+    sg_subjects = {r["subject"] for r in sparse}
+    assert {r["subject"] for r in shuffled if r["rater"] == "SG"} == sg_subjects
+    original = {(r["subject"], r["rater"]): r["value"] for r in table if r["session"] == "ses-02"}
+    assert all(original[(r["subject"], r["rater"])] != r["value"] for r in shuffled if r["session"] == "ses-02")
 
 
 @pytest.mark.unit

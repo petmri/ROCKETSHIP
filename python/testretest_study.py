@@ -344,47 +344,56 @@ def metadata_audit(fit_root: Path, staged_root: Optional[Path] = None, rel_tol: 
 # --------------------------------------------------------------------------- blinding
 
 
+SHUFFLE_KEYS = ("cohort", "rater", "model", "region", "parameter")
+
+
 def shuffle_labels(rows: Sequence[Mapping[str, Any]], seed: int) -> List[Dict[str, Any]]:
     """Scramble a real table so no repeatability result survives.
 
-    Within each cohort every subject's second session is swapped for another subject's
-    (no subject keeps its own), which turns within-subject differences into between-subject
-    ones. Then each subject's pipeline labels are swapped with probability one half, which
-    centres any pipeline contrast on no difference. Values and their marginal distributions
-    are untouched, so the analysis code sees realistic numbers.
+    Within each cohort x rater x model x region x parameter, every paired subject's second
+    session is swapped for another paired subject's (no subject keeps its own), which
+    turns within-subject differences into between-subject ones. The swap is the same for
+    every pipeline, so the pipelines still see the same scans. Then each subject's pipeline
+    labels are swapped with probability one half, which centres any pipeline contrast on
+    no difference. Values and their marginal distributions are untouched, and every group
+    keeps its number of pairs, so the analysis code sees a table shaped like the real one.
+
+    A subject with one session in a group has no pair to scramble and is left as it is.
+    Where a group has a single paired subject its pair cannot be scrambled, and that
+    subject's rows are left out of the group rather than passed through.
     """
     rng = np.random.default_rng(seed)
-    sessions: Dict[str, List[str]] = {}
-    cohorts: Dict[str, List[str]] = {}
+    by_key: Dict[Tuple[Any, ...], Dict[str, List[str]]] = {}
     for row in rows:
-        subject = str(row["subject"])
-        if subject not in sessions:
-            cohorts.setdefault(str(row["cohort"]), []).append(subject)
-        names = sessions.setdefault(subject, [])
-        if row["session"] not in names:
-            names.append(str(row["session"]))
-    donor_of: Dict[str, str] = {}
-    for cohort in sorted(cohorts):
-        # a subject with a single session has no pair to scramble and is left as it is
-        subjects = sorted(s for s in cohorts[cohort] if len(sessions[s]) > 1)
-        if len(subjects) < 2:
-            raise ValueError(f"cohort {cohort} has fewer than two paired subjects; its pairing cannot be scrambled")
-        order = [subjects[i] for i in rng.permutation(len(subjects))]
-        for i, subject in enumerate(order):
-            donor_of[order[(i + 1) % len(order)]] = subject  # a cycle: nobody keeps their own
+        sessions = by_key.setdefault(tuple(row[k] for k in SHUFFLE_KEYS), {}).setdefault(str(row["subject"]), [])
+        if row["session"] not in sessions:
+            sessions.append(str(row["session"]))
+
+    recipient_of: Dict[Tuple[Any, ...], Dict[str, str]] = {}
+    unscrambled: Dict[Tuple[Any, ...], str] = {}
+    for key in sorted(by_key, key=str):
+        paired = sorted(subject for subject, sessions in by_key[key].items() if len(sessions) > 1)
+        if len(paired) == 1:
+            unscrambled[key] = paired[0]
+            continue
+        order = [paired[i] for i in rng.permutation(len(paired))]
+        # a cycle: each subject's second session goes to the next, so nobody keeps their own
+        recipient_of[key] = {subject: order[(i + 1) % len(order)] for i, subject in enumerate(order)}
+    subjects = sorted({str(row["subject"]) for row in rows})
     pipelines = sorted({str(row["pipeline"]) for row in rows})
-    swap = {s: bool(rng.integers(0, 2)) for s in sorted(sessions)} if len(pipelines) == 2 else {}
-    recipient_of = {donor: recipient for recipient, donor in donor_of.items()}
+    swap = {subject: bool(rng.integers(0, 2)) for subject in subjects} if len(pipelines) == 2 else {}
 
     shuffled: List[Dict[str, Any]] = []
     for row in rows:
-        new = dict(row)
+        key = tuple(row[k] for k in SHUFFLE_KEYS)
         subject = str(row["subject"])
-        ordered = sorted(sessions[subject])
-        if subject in recipient_of and row["session"] == ordered[-1]:
-            recipient = recipient_of[subject]
+        if unscrambled.get(key) == subject:
+            continue
+        new = dict(row)
+        if subject in recipient_of.get(key, {}) and row["session"] == sorted(by_key[key][subject])[-1]:
+            recipient = recipient_of[key][subject]
             new["subject"] = recipient
-            new["session"] = sorted(sessions[recipient])[-1]
+            new["session"] = sorted(by_key[key][recipient])[-1]
         if swap.get(str(new["subject"])):
             new["pipeline"] = pipelines[1 - pipelines.index(str(row["pipeline"]))]
         shuffled.append(new)
