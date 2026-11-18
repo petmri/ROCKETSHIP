@@ -87,6 +87,11 @@ def test_several_roi_patterns_resolve_in_order_and_from_a_regions_root(tmp_path)
     config, reason = fits.build_session_config(template, session_dir, staged, tmp_path / "out")
     assert config is None and "label-tumor_mask" in reason
 
+    own = session_dir / "anat/sub-AB01_ses-01_space-DCEref_label-tumor_mask.nii.gz"
+    own.touch()
+    config, _ = fits.build_session_config(template, session_dir, staged, tmp_path / "out", [regions])
+    assert config["roi_files"][1] == str(tumor)  # the regions root overrides the session's own mask
+
 
 @pytest.mark.unit
 def test_shorter_prefix_applies_when_the_longer_one_does_not_match(tmp_path):

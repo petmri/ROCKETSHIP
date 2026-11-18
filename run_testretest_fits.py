@@ -44,8 +44,10 @@ def build_session_config(
 ) -> Tuple[Optional[Dict[str, Any]], str]:
     """Resolve the template for one session. Returns (config, "") or (None, reason).
 
-    `roi_files` may list several patterns: each must match exactly one file, in the session
-    or else under one of `regions_roots` (<root>/sub-*/ses-*), and they are passed in order.
+    `roi_files` may list several patterns: each must match exactly one file, under the first
+    of `regions_roots` (<root>/sub-*/ses-*) that has it, or else in the session, and they are
+    passed in order. A regions root therefore overrides a mask of the same name in the session
+    (e.g. a transferred tumor ROI over the rater's own).
     The first is the fit ROI; with `fit_voxels` false every ROI's averaged curve is fitted
     (the `_rois.xls` outputs). The other inputs take one file in all.
     """
@@ -55,7 +57,7 @@ def build_session_config(
         if key == "roi_files" and len(template[key]) > 1:
             resolved: List[str] = []
             for pattern in template[key]:
-                for folder in (session_dir, *(Path(r) / subject / session for r in regions_roots)):
+                for folder in (*(Path(r) / subject / session for r in regions_roots), session_dir):
                     found = sorted(folder.glob(pattern))
                     if found:
                         break
