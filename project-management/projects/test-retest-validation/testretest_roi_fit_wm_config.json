@@ -1,0 +1,50 @@
+{
+  "_doc": [
+    "WM ROI-average fits for the three-rater test-retest: as testretest_roi_fit_config.json",
+    "but roi_files are the brain mask (first; defines the converted voxels) and the DCEPrep WM mask",
+    "only, so every session is fitted whether or not it has a tumor ROI."
+  ],
+  "backend": "gpufit",
+  "write_xls": true,
+  "aif_mode": "raw",
+  "dynamic_files": [
+    "dce/*_desc-bfcz_DCE.nii*"
+  ],
+  "aif_files": [
+    "dce/*_label-AIF_T1map.nii*"
+  ],
+  "roi_files": [
+    "anat/*_space-DCEref_label-brain_mask.nii*",
+    "anat/*_space-DCEref_label-WM_mask.nii*"
+  ],
+  "t1map_files": [
+    "anat/*_space-DCEref_T1map.nii*"
+  ],
+  "noise_files": [],
+  "drift_files": [],
+  "model_flags": {
+    "tofts": 0,
+    "ex_tofts": 1,
+    "patlak": 1,
+    "tissue_uptake": 0,
+    "two_cxm": 0,
+    "fxr": 0,
+    "auc": 0,
+    "nested": 0,
+    "FXL_rr": 0
+  },
+  "stage_overrides": {
+    "stage_b_mode": "real",
+    "stage_d_mode": "real",
+    "write_qof_maps": true,
+    "fit_voxels": false
+  },
+  "cohort_overrides": {
+    "sub-RIDERNeuroMRI": {
+      "blood_t1_ms": 1441
+    },
+    "sub-QINGBMTR": {
+      "blood_t1_ms": 1664
+    }
+  }
+}
